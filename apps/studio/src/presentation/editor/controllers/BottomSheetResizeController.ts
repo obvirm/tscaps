@@ -1,4 +1,4 @@
-import { TouchDragGestureResolver } from '@presentation/editor/services/TouchDragGestureResolver';
+import { TouchDragGestureResolver } from '@presentation/gestures/services/TouchDragGestureResolver';
 
 const ABSOLUTE_MIN_PCT = 0.30;
 const MAX_PCT = 0.90;

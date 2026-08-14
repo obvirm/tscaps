@@ -1,4 +1,4 @@
-import { AppError } from '@core/_shared/domain/AppError';
+import { AppError } from '@core/errors/domain/AppError';
 
 /**
  * Raised when an export run could not produce a finished output

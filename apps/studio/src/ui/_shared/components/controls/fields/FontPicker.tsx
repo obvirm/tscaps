@@ -1,9 +1,11 @@
 import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { Plus, Trash2, Loader2 } from 'lucide-react';
 import type { SelectOption } from '@core/templates/domain/definition/ControlField';
+import type { FontScript } from '@core/fonts/domain/FontCatalog';
 import { FONT_CATALOG } from '@core/fonts/domain/FontCatalog';
 import type { UploadUserFontFailure } from '@core/fonts/actions/UploadUserFontAction';
 import { useUserFonts } from '@ui/_shared/contexts/UserFontsContext';
+import { useRendering } from '@ui/_shared/contexts/modules/RenderingContext';
 import { Autocomplete, type AutocompleteGroup } from '@ui/_shared/components/Autocomplete/Autocomplete';
 
 interface FontPickerProps {
@@ -18,6 +20,17 @@ interface FontPickerProps {
  * incompatible files in the first place.
  */
 const ACCEPTED_FILE_TYPES = '.woff2,.woff,.ttf,.otf';
+
+// A row previews the family by rendering in it, which tells a reader nothing
+// about a face they will only ever use for another script: "Cairo" spelled in
+// Latin shows Cairo's Latin. Non-Latin rows carry a short sample so what the
+// captions will actually look like is on screen.
+const SCRIPT_SECTIONS: ReadonlyArray<{ script: FontScript; label: string; sample: string }> = [
+  { script: 'latin', label: 'Library', sample: '' },
+  { script: 'arabic', label: 'Arabic & Persian', sample: 'أبجد هوز' },
+  { script: 'hebrew', label: 'Hebrew', sample: 'אבגד הוז' },
+  { script: 'urdu', label: 'Urdu', sample: 'ابجد ہوز' },
+];
 
 const UPLOAD_ROW =
   'w-full h-8 px-2.5 flex items-center gap-2 text-sm text-fg-secondary cursor-pointer bg-transparent border-none ' +
@@ -91,6 +104,7 @@ export const FontPicker = memo(function FontPicker({ value, onChange, disabled }
     void userFonts.delete(id);
   }, [userFonts]);
 
+  const { fontStackResolver } = useRendering();
   const groups = useMemo<ReadonlyArray<AutocompleteGroup<SelectOption>>>(() => {
     const myFontsOptions: SelectOption[] = userFonts.fonts.map((f) => ({
       value: f.family,
@@ -128,13 +142,20 @@ export const FontPicker = memo(function FontPicker({ value, onChange, disabled }
         renderOptionAction,
       });
     }
-    result.push({
-      id: 'library',
-      label: 'Library',
-      options: FONT_CATALOG,
-    });
+    for (const section of SCRIPT_SECTIONS) {
+      const options = FONT_CATALOG
+        .filter((font) => font.script === section.script)
+        .map((font) => ({
+          value: font.family,
+          label: font.family.replace(/\s+Variable$/, ''),
+          cssValue: fontStackResolver.resolve(font.family),
+          sample: section.sample,
+        }));
+      if (options.length === 0) continue;
+      result.push({ id: section.script, label: section.label, options });
+    }
     return result;
-  }, [userFonts.fonts, onDeleteClick]);
+  }, [userFonts.fonts, onDeleteClick, fontStackResolver]);
 
   const uploadHeader = (
     <button
@@ -164,7 +185,18 @@ export const FontPicker = memo(function FontPicker({ value, onChange, disabled }
         onChange={onChange}
         disabled={disabled}
         renderOption={(opt) => (
-          <span style={{ fontFamily: opt.cssValue ?? opt.value }}>{opt.label}</span>
+          <span className="flex-1 min-w-0 flex items-baseline justify-between gap-3">
+            <span className="truncate" style={{ fontFamily: opt.cssValue ?? opt.value }}>{opt.label}</span>
+            {'sample' in opt && typeof opt.sample === 'string' && opt.sample !== '' && (
+              <span
+                dir="auto"
+                className="shrink-0 text-fg-muted"
+                style={{ fontFamily: opt.cssValue ?? opt.value }}
+              >
+                {opt.sample}
+              </span>
+            )}
+          </span>
         )}
       />
       <input

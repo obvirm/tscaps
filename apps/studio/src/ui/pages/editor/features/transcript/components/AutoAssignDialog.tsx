@@ -6,6 +6,11 @@ import type {
   SpeakerSheetMatcher,
   SpeakerSheetMatcherParams,
 } from '@core/sheet-matchers/services/SpeakerSheetMatcher';
+import type {
+  TagSheetMatcher,
+  TagSheetMatcherParams,
+} from '@core/sheet-matchers/services/TagSheetMatcher';
+import { TAG_METADATA, type UserFacingTagName } from '@core/tagging/domain/TagName';
 import { useSheets } from '@ui/_shared/contexts/modules/SheetsContext';
 import { AppDialog, AppDialogActions } from '@ui/_shared/components/Dialog/AppDialog';
 import { BTN_PRIMARY_SM, BTN_SECONDARY_SM } from '@ui/_shared/styles/buttons';
@@ -27,6 +32,7 @@ const SELECT =
   'hover:border-edge-strong ' +
   'focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30';
 const LEGEND_UNAVAILABLE = 'mt-2 text-xs text-fg-secondary leading-snug';
+const MATCHER_HINT = 'mt-2 text-xs text-fg-secondary leading-snug';
 
 const NO_SPEAKER_VALUE = '__no_speaker__';
 
@@ -49,6 +55,10 @@ const UNAVAILABLE_LEGENDS: Record<string, Record<string, string>> = {
       'Grouping by speaker needs at least two speakers detected in the recording. This one has only one.',
     'mixed-speaker-segments':
       'Some scenes mix multiple speakers. Enable "Split scenes by speaker" in the Layout tab so each scene carries a single voice, then come back.',
+  },
+  tag: {
+    'no-tags':
+      'Grouping by tag needs at least one tagged word in the transcript. This one has none yet. Tag a word from the transcript, then come back.',
   },
 };
 
@@ -167,6 +177,16 @@ export function AutoAssignDialog({
               onChange={(params) => setSelection({ matcher: selection.matcher, params })}
             />
           )}
+
+          {selection?.matcher.type === 'tag'
+            && selectedAvailability?.available === true && (
+            <TagMatcherControls
+              document={document}
+              matcher={selection.matcher as TagSheetMatcher}
+              params={selection.params as TagSheetMatcherParams}
+              onChange={(params) => setSelection({ matcher: selection.matcher, params })}
+            />
+          )}
         </div>
       )}
 
@@ -214,6 +234,36 @@ function SpeakerMatcherControls({ document, matcher, params, onChange }: Speaker
           </option>
         ))}
       </select>
+    </div>
+  );
+}
+
+interface TagMatcherControlsProps {
+  document: Document;
+  matcher: TagSheetMatcher;
+  params: TagSheetMatcherParams;
+  onChange: (params: TagSheetMatcherParams) => void;
+}
+
+function TagMatcherControls({ document, matcher, params, onChange }: TagMatcherControlsProps) {
+  const names = useMemo(() => matcher.collectTagNames(document), [document, matcher]);
+
+  return (
+    <div>
+      <label className={SECTION_LABEL} htmlFor="auto-assign-tag">Tag</label>
+      <select
+        id="auto-assign-tag"
+        className={SELECT}
+        value={params.tagName ?? ''}
+        onChange={(e) => onChange({ tagName: e.target.value as UserFacingTagName })}
+      >
+        {names.map((name) => (
+          <option key={name} value={name}>{TAG_METADATA[name].label}</option>
+        ))}
+      </select>
+      <p className={MATCHER_HINT}>
+        Only the tagged words move. They get their own scenes on the target sheet; the rest of each scene stays where it is.
+      </p>
     </div>
   );
 }

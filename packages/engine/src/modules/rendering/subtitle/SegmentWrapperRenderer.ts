@@ -1,6 +1,7 @@
 import type { Segment } from '@modules/document/Segment';
-import { CssVariable } from '@modules/document/CssVariable';
 import type { AlignmentConfig } from '@modules/rendering/types/AlignmentConfig';
+import type { TextDirection } from '@modules/bidi/TextDirection';
+import type { HorizontalPlacementResolver } from '@modules/rendering/HorizontalPlacementResolver';
 import type { InlineStyleMap } from '@modules/rendering/types/InlineStyleMap';
 import type { SegmentSubtreeHtmlBuilder, SegmentSubtreeStyleInput } from '@modules/rendering/subtitle/SegmentSubtreeHtmlBuilder';
 import type { VideoFrameVarsBuilder } from '@modules/rendering/subtitle/VideoFrameVarsBuilder';
@@ -11,6 +12,7 @@ import type {
   PositionedSubtreeWord,
   SegmentSubtreeDecomposer,
 } from '@modules/rendering/subtitle/SegmentSubtreeDecomposer';
+import { profiler } from '@modules/profiling/Profiler';
 
 export interface WrapperRender {
   html: string;
@@ -43,6 +45,7 @@ export class SegmentWrapperRenderer {
     private readonly subtreeDecomposer: SegmentSubtreeDecomposer,
     private readonly filterMaterializer: SvgFilterMaterializer,
     private readonly videoFrameVarsBuilder: VideoFrameVarsBuilder,
+    private readonly horizontalPlacementResolver: HorizontalPlacementResolver,
     private readonly width: number,
     private readonly height: number,
   ) {}
@@ -61,6 +64,7 @@ export class SegmentWrapperRenderer {
     const baseInlineStyles: InlineStyleMap = segmentInlineStylesOverride
       ? { ...style.inlineStyles, ...segmentInlineStylesOverride }
       : style.inlineStyles;
+    const segmentClasses = segmentOverride?.classes ?? [];
 
     const decomposition = this.subtreeDecomposer.decompose(seg, style.wordOverrides);
 
@@ -72,17 +76,16 @@ export class SegmentWrapperRenderer {
     let defs = '';
     if (!decomposition.everyWordIsPositioned) {
       const main = await this.buildSegmentSubtreeHtml(
-        style, seg, t, indexInSection, segmentAlignment, baseInlineStyles, decomposition.excludedWordIds, nextUid,
+        style, seg, t, indexInSection, segmentAlignment, baseInlineStyles, segmentClasses, decomposition.excludedWordIds, nextUid,
       );
       html = main.html;
       defs = main.defs;
     }
-    const positionedInlineStyles = this.withoutBehindActorState(baseInlineStyles);
     for (const positioned of decomposition.positionedWords) {
       const wordAlignmentOverride = style.wordOverrides.get(positioned.word.id)?.alignment;
       const wordAlignment: AlignmentConfig = { ...segmentAlignment, ...wordAlignmentOverride };
       const built = await this.buildPositionedWordSubtreeHtml(
-        style, seg, positioned, t, indexInSection, wordAlignment, positionedInlineStyles, nextUid,
+        style, seg, positioned, t, indexInSection, wordAlignment, baseInlineStyles, nextUid,
       );
       html += built.html;
       defs += built.defs;
@@ -91,30 +94,12 @@ export class SegmentWrapperRenderer {
       const decorationAlignmentOverride = style.wordOverrides.get(positioned.decoration.id)?.alignment;
       const decorationAlignment: AlignmentConfig = { ...segmentAlignment, ...decorationAlignmentOverride };
       const built = await this.buildPositionedDecorationSubtreeHtml(
-        style, seg, positioned, t, indexInSection, decorationAlignment, positionedInlineStyles, nextUid,
+        style, seg, positioned, t, indexInSection, decorationAlignment, baseInlineStyles, nextUid,
       );
       html += built.html;
       defs += built.defs;
     }
     return { html, defs };
-  }
-
-  /**
-   * The positioned siblings pin an element at its own explicit anchor,
-   * so the text-behind-actor state variables stay off their wrapper —
-   * a style rule reacting to the state (e.g. a lift) would displace
-   * the element from the exact spot it was pinned to.
-   */
-  private withoutBehindActorState(styles: InlineStyleMap): InlineStyleMap {
-    if (!(CssVariable.BEHIND_ACTOR_SCENE_VALID in styles) && !(CssVariable.BEHIND_ACTOR_FORCED in styles)) {
-      return styles;
-    }
-    const rest: Record<string, string> = {};
-    for (const [key, value] of Object.entries(styles)) {
-      if (key === CssVariable.BEHIND_ACTOR_SCENE_VALID || key === CssVariable.BEHIND_ACTOR_FORCED) continue;
-      rest[key] = value;
-    }
-    return rest;
   }
 
   private async buildSegmentSubtreeHtml(
@@ -124,15 +109,20 @@ export class SegmentWrapperRenderer {
     indexInSection: number,
     alignment: AlignmentConfig,
     baseInlineStyles: InlineStyleMap,
+    segmentClasses: ReadonlyArray<string>,
     excludedWordIds: ReadonlySet<string>,
     nextUid: () => number,
   ): Promise<WrapperRender> {
-    const resolved = this.resolveAlignment(alignment);
+    const resolved = this.resolveAlignment(alignment, style.rendering.textDirection);
     const engineVars = await this.videoFrameVarsBuilder.build(style, seg, resolved, t);
-    const { defs, bindings } = this.filterMaterializer.materialize(style, t, engineVars, nextUid);
+    const { defs, bindings } = profiler.time('SegmentWrapperRenderer.filterDefs', () =>
+      this.filterMaterializer.materialize(style, t, engineVars, nextUid),
+    );
 
-    const styleInput = this.composeStyleInput(style, this.mergeExtras(engineVars, bindings, baseInlineStyles));
-    const subtreeHtml = this.subtreeBuilder.buildSegmentSubtree(styleInput, seg, t, excludedWordIds, indexInSection);
+    const styleInput = this.composeStyleInput(style, this.mergeExtras(engineVars, bindings, baseInlineStyles), segmentClasses);
+    const subtreeHtml = profiler.time('SegmentWrapperRenderer.subtreeHtml', () =>
+      this.subtreeBuilder.buildSegmentSubtree(styleInput, seg, t, excludedWordIds, indexInSection),
+    );
     const anchorStyle = this.composeAnchorStyle(resolved);
 
     return { html: `<div style="${anchorStyle}">${subtreeHtml}</div>`, defs };
@@ -148,13 +138,17 @@ export class SegmentWrapperRenderer {
     baseInlineStyles: InlineStyleMap,
     nextUid: () => number,
   ): Promise<WrapperRender> {
-    const resolved = this.resolveAlignment(alignment);
+    const resolved = this.resolveAlignment(alignment, style.rendering.textDirection);
     const engineVars = await this.videoFrameVarsBuilder.build(style, seg, resolved, t);
-    const { defs, bindings } = this.filterMaterializer.materialize(style, t, engineVars, nextUid);
+    const { defs, bindings } = profiler.time('SegmentWrapperRenderer.filterDefs', () =>
+      this.filterMaterializer.materialize(style, t, engineVars, nextUid),
+    );
 
     const styleInput = this.composeStyleInput(style, this.mergeExtras(engineVars, bindings, baseInlineStyles));
-    const subtreeHtml = this.subtreeBuilder.buildSingleWordSubtree(
-      styleInput, seg, positioned.line, positioned.word, t, indexInSection, positioned.indexInLine,
+    const subtreeHtml = profiler.time('SegmentWrapperRenderer.subtreeHtml', () =>
+      this.subtreeBuilder.buildSingleWordSubtree(
+        styleInput, seg, positioned.line, positioned.word, t, indexInSection, positioned.indexInLine,
+      ),
     );
     const anchorStyle = this.composeAnchorStyle(resolved);
 
@@ -171,13 +165,17 @@ export class SegmentWrapperRenderer {
     baseInlineStyles: InlineStyleMap,
     nextUid: () => number,
   ): Promise<WrapperRender> {
-    const resolved = this.resolveAlignment(alignment);
+    const resolved = this.resolveAlignment(alignment, style.rendering.textDirection);
     const engineVars = await this.videoFrameVarsBuilder.build(style, seg, resolved, t);
-    const { defs, bindings } = this.filterMaterializer.materialize(style, t, engineVars, nextUid);
+    const { defs, bindings } = profiler.time('SegmentWrapperRenderer.filterDefs', () =>
+      this.filterMaterializer.materialize(style, t, engineVars, nextUid),
+    );
 
     const styleInput = this.composeStyleInput(style, this.mergeExtras(engineVars, bindings, baseInlineStyles));
-    const subtreeHtml = this.subtreeBuilder.buildSingleDecorationSubtree(
-      styleInput, seg, positioned.line, positioned.word, t, indexInSection,
+    const subtreeHtml = profiler.time('SegmentWrapperRenderer.subtreeHtml', () =>
+      this.subtreeBuilder.buildSingleDecorationSubtree(
+        styleInput, seg, positioned.line, positioned.word, t, indexInSection,
+      ),
     );
     const anchorStyle = this.composeAnchorStyle(resolved);
 
@@ -192,15 +190,25 @@ export class SegmentWrapperRenderer {
     return `position: absolute; top: ${resolved.yPx}px; left: ${resolved.xPx}px; width: 0; height: 0; display: grid; grid-template: 0 / 0; align-items: ${resolved.vGridAlign}; justify-items: ${resolved.hGridAlign};`;
   }
 
-  private composeStyleInput(style: PreparedStyle, extraWrapperStyles: InlineStyleMap): SegmentSubtreeStyleInput {
+  // Positioned sibling subtrees never receive segment classes: they pin
+  // an element at its own explicit anchor, and a style rule reacting to
+  // segment state (e.g. a lift) would displace it from that spot.
+  private composeStyleInput(
+    style: PreparedStyle,
+    extraWrapperStyles: InlineStyleMap,
+    extraSegmentClasses: ReadonlyArray<string> = [],
+  ): SegmentSubtreeStyleInput {
     return {
       scopeClass: style.scopeClass,
       baseInlineStyles: style.inlineStyles,
       wordOverrides: style.wordOverrides,
       splitWordsIntoLetters: style.rendering.splitWordsIntoLetters,
       includeVideoFrameLayer: style.rendering.videoFrame.required,
+      textDirection: style.rendering.textDirection,
       extraWrapperStyles,
+      extraSegmentClasses,
       decorationPlacements: style.decorationPlacements,
+      addressableElementIds: style.addressableElementIds,
       inlineStyleEmitter: style.inlineStyleEmitter,
     };
   }
@@ -213,14 +221,19 @@ export class SegmentWrapperRenderer {
     return { ...baseInlineStyles, ...engineVars, ...Object.fromEntries(bindings) };
   }
 
-  private resolveAlignment(alignment: AlignmentConfig): ResolvedAlignment {
+  private resolveAlignment(alignment: AlignmentConfig, textDirection: TextDirection): ResolvedAlignment {
+    const horizontal = this.horizontalPlacementResolver.resolve(
+      alignment.horizontalAlign,
+      alignment.horizontalOffset,
+      textDirection,
+    );
     return {
       yPx: Math.round(alignment.verticalOffset * this.height),
-      xPx: Math.round(alignment.horizontalOffset * this.width),
+      xPx: Math.round(horizontal.offsetFromLeft * this.width),
       vAnchorPct: alignment.verticalAlign === 'top' ? 0 : alignment.verticalAlign === 'center' ? 50 : 100,
-      hAnchorPct: alignment.horizontalAlign === 'left' ? 0 : alignment.horizontalAlign === 'center' ? 50 : 100,
+      hAnchorPct: horizontal.side === 'left' ? 0 : horizontal.side === 'center' ? 50 : 100,
       vGridAlign: alignment.verticalAlign === 'top' ? 'start' : alignment.verticalAlign === 'center' ? 'center' : 'end',
-      hGridAlign: alignment.horizontalAlign === 'left' ? 'start' : alignment.horizontalAlign === 'center' ? 'center' : 'end',
+      hGridAlign: horizontal.side === 'left' ? 'start' : horizontal.side === 'center' ? 'center' : 'end',
     };
   }
 }

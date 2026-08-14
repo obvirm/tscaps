@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Plus, X } from 'lucide-react';
+import { Link, Link2, Plus, X } from 'lucide-react';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 import { MAIN_SHEET_ID } from '@core/sheets/domain/Sheet';
 import { ConfirmDialog } from '@ui/_shared/components/Dialog/ConfirmDialog';
 import { Tooltip } from '@ui/_shared/components/Tooltip/Tooltip';
 import { EditSheetDialog, type EditSheetDialogResult } from '@ui/pages/editor/components/sidebar/EditSheetDialog';
 import { SheetSettingsPopover } from '@ui/pages/editor/components/sidebar/SheetSettingsPopover';
+import { SheetLinkPopover } from '@ui/pages/editor/components/sidebar/SheetLinkPopover';
 
 interface SheetSelectorProps {
   sheets: Sheet[];
@@ -15,6 +16,8 @@ interface SheetSelectorProps {
   onRename: (sheetId: string, name: string) => void;
   onDelete: (sheetId: string) => void;
   onCopyStylesFromSheet: (targetSheetId: string, sourceSheetId: string) => void;
+  onLinkSheet: (targetSheetId: string, sourceSheetId: string) => void;
+  onUnlinkSheet: (sheetId: string) => void;
 }
 
 const CHIP_BASE =
@@ -36,8 +39,15 @@ const CHIP_ICON_BASE =
   'transition-colors duration-quick ease-standard ' +
   'focus-visible:outline-none';
 const CHIP_DELETE = `${CHIP_ICON_BASE} text-fg-faint hover:bg-danger/15 hover:text-danger focus-visible:bg-danger/15 focus-visible:text-danger`;
+const CHIP_LINK_UNLINKED = `${CHIP_ICON_BASE} text-fg-faint hover:bg-surface-3 hover:text-fg-secondary focus-visible:bg-surface-3 focus-visible:text-fg-secondary`;
+const CHIP_LINK_LINKED = `${CHIP_ICON_BASE} text-accent hover:bg-surface-3 focus-visible:bg-surface-3`;
 
 interface MenuState {
+  sheet: Sheet;
+  point: { x: number; y: number };
+}
+
+interface LinkMenuState {
   sheet: Sheet;
   point: { x: number; y: number };
 }
@@ -50,12 +60,17 @@ export function SheetSelector({
   onRename,
   onDelete,
   onCopyStylesFromSheet,
+  onLinkSheet,
+  onUnlinkSheet,
 }: SheetSelectorProps) {
   const [createOpen, setCreateOpen] = useState(false);
   // Settings popover state. Both left-click on the active chip and
   // right-click on any chip open this popover anchored under the chip;
   // right-click is just an alternative entry point for discoverability.
   const [menu, setMenu] = useState<MenuState | null>(null);
+  // Link popover state. Separate popover so the chain icon can be its own
+  // affordance regardless of which chip is active.
+  const [linkMenu, setLinkMenu] = useState<LinkMenuState | null>(null);
   // Sheet currently being renamed (drives EditSheetDialog). Decoupled
   // from the popover so the popover can close cleanly before the dialog
   // animates in.
@@ -72,6 +87,11 @@ export function SheetSelector({
   const openMenuUnder = (sheet: Sheet, element: Element) => {
     const rect = element.getBoundingClientRect();
     setMenu({ sheet, point: { x: rect.left, y: rect.bottom + 4 } });
+  };
+
+  const openLinkMenuUnder = (sheet: Sheet, element: Element) => {
+    const rect = element.getBoundingClientRect();
+    setLinkMenu({ sheet, point: { x: rect.left, y: rect.bottom + 4 } });
   };
 
   const handleSelectClick = (sheet: Sheet, e: React.MouseEvent<HTMLButtonElement>) => {
@@ -129,6 +149,11 @@ export function SheetSelector({
                   </span>
                 </button>
               </Tooltip>
+              <ChipLinkButton
+                sheet={sheet}
+                sheets={sheets}
+                onOpen={(el) => openLinkMenuUnder(sheet, el)}
+              />
               {!isMain && (
                 <Tooltip text={`Delete sheet "${sheet.name}"`} position="top">
                   <button
@@ -144,11 +169,11 @@ export function SheetSelector({
             </div>
           );
         })}
-        <Tooltip text="Add a style sheet. Style sheets let you define different looks and assign them to scenes in the Captions tab." position="bottom">
+        <Tooltip text="Add a new sheet. Sheets let you define different looks and assign them to scenes." position="bottom">
           <button
             className="inline-flex items-center justify-center w-8 h-8 rounded-sm border border-dashed border-edge-medium bg-transparent text-fg-faint cursor-pointer transition-colors duration-quick ease-standard hover:bg-surface-2 hover:border-edge-strong hover:text-fg-secondary focus-visible:outline-none focus-visible:border-accent focus-visible:text-fg-secondary"
             onClick={() => setCreateOpen(true)}
-            aria-label="New sheet"
+            aria-label="Add sheet"
           >
             <Plus size={14} />
           </button>
@@ -164,6 +189,20 @@ export function SheetSelector({
           sheets={sheets}
           onRequestRename={() => { setMenu(null); setRenaming(menu.sheet); }}
           onCopyStylesFromSheet={(sourceId) => onCopyStylesFromSheet(menu.sheet.id, sourceId)}
+          onLinkTo={(sourceId) => { setMenu(null); onLinkSheet(menu.sheet.id, sourceId); }}
+          onUnlink={() => { setMenu(null); onUnlinkSheet(menu.sheet.id); }}
+        />
+      )}
+
+      {linkMenu && (
+        <SheetLinkPopover
+          open
+          onOpenChange={(o) => { if (!o) setLinkMenu(null); }}
+          point={linkMenu.point}
+          sheet={linkMenu.sheet}
+          sheets={sheets}
+          onLinkTo={(sourceId) => { setLinkMenu(null); onLinkSheet(linkMenu.sheet.id, sourceId); }}
+          onUnlink={() => { setLinkMenu(null); onUnlinkSheet(linkMenu.sheet.id); }}
         />
       )}
 
@@ -190,5 +229,36 @@ export function SheetSelector({
         onCancel={() => setPendingDelete(null)}
       />
     </>
+  );
+}
+
+interface ChipLinkButtonProps {
+  sheet: Sheet;
+  sheets: ReadonlyArray<Sheet>;
+  onOpen: (element: Element) => void;
+}
+
+function ChipLinkButton({ sheet, sheets, onOpen }: ChipLinkButtonProps) {
+  const isLinked = sheet.linkGroupId !== null;
+  const groupSize = isLinked
+    ? sheets.filter((s) => s.linkGroupId === sheet.linkGroupId).length
+    : 0;
+  const tooltip = isLinked
+    ? `Linked with ${groupSize - 1} other sheet${groupSize - 1 === 1 ? '' : 's'}`
+    : 'Link to another sheet';
+  const ariaLabel = isLinked ? `Unlink sheet ${sheet.name}` : `Link sheet ${sheet.name}`;
+  const Icon = isLinked ? Link : Link2;
+  return (
+    <Tooltip text={tooltip} position="top">
+      <button
+        type="button"
+        className={isLinked ? CHIP_LINK_LINKED : CHIP_LINK_UNLINKED}
+        onClick={(e) => onOpen(e.currentTarget)}
+        aria-label={ariaLabel}
+        aria-pressed={isLinked}
+      >
+        <Icon size={12} />
+      </button>
+    </Tooltip>
   );
 }

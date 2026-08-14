@@ -3,7 +3,6 @@ import tseslint from 'typescript-eslint';
 import reactHooks from 'eslint-plugin-react-hooks';
 import globals from 'globals';
 import { importDisciplineRules } from './eslint.import-discipline.mjs';
-
 export default [
   js.configs.recommended,
   ...tseslint.configs.recommended,

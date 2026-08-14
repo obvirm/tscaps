@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useHref, useNavigate } from 'react-router-dom';
-import type { AppError } from '@core/_shared/domain/AppError';
+import type { AppError } from '@core/errors/domain/AppError';
 import type { ProjectMetadata } from '@core/projects/domain/ProjectMetadata';
 import { ProjectListLoadFailedError } from '@core/projects/domain/errors/ProjectListLoadFailedError';
 import { ProjectDeleteFailedError } from '@core/projects/domain/errors/ProjectDeleteFailedError';

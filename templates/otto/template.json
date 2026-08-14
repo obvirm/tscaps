@@ -16,21 +16,24 @@
       "label": "Text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "highlight-color",
       "label": "Highlight",
       "type": "color",
       "default": "#ffd700",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "bg-color",
       "label": "Background",
       "type": "color",
       "default": "#000000",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "pill-mode",
@@ -49,7 +52,8 @@
           "cssValue": "1"
         }
       ],
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "bg-radius",
@@ -60,7 +64,8 @@
       "max": 1.15,
       "step": 0.01,
       "unit": "em",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "bg-padding-x",
@@ -71,8 +76,8 @@
       "max": 3.85,
       "step": 0.01,
       "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "bg-padding-y",
@@ -83,8 +88,8 @@
       "max": 0.92,
       "step": 0.01,
       "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     }
   ],
   "segmentSplitters": [

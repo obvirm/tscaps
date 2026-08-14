@@ -78,13 +78,13 @@ export class SplitSegmentAtCursorAction {
     );
   }
 
-  private _commit(newDoc: Document, freezeIds: string[], segmentId: string): void {
+  private _commit(newDoc: Document, editedSegmentIds: string[], segmentId: string): void {
     const snap = this.store.snapshot();
     const retagged = this.deriver.retag(newDoc);
     const withEffects = this.deriver.reapplyEffects(retagged, snap.sheets, snap.video.duration, snap.decorationOverrides);
-    const segmentOverrides = snap.segmentOverrides.withFreezeMany(freezeIds);
+    const frozenSegments = snap.frozenSegments.withStructurallyEdited(editedSegmentIds);
     this.store.commit('caption-edit:' + segmentId);
-    this.store.patch({ document: withEffects, segmentOverrides });
+    this.store.patch({ document: withEffects, frozenSegments });
   }
 
   private _locate(

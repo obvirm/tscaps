@@ -5,7 +5,7 @@ import type { SegmentSplitterRegistry } from '@core/segment-splitter/services/Se
 import type { LineSplitterRegistry } from '@core/line-splitter/services/LineSplitterRegistry';
 import type { EffectRegistry } from '@core/effect/services/EffectRegistry';
 import type { SheetCssVarsBuilder } from '@core/sheets/services/SheetCssVarsBuilder';
-import type { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
+import type { FrozenSegmentSet } from '@core/captions/domain/FrozenSegmentSet';
 import type { DecorationOverrideRegistry } from '@core/captions/domain/DecorationOverrideRegistry';
 import type { DecorationTimeResolver } from '@core/effect/services/DecorationTimeResolver';
 import type { InlineEmojiPunctuationAbsorber } from '@core/effect/services/InlineEmojiPunctuationAbsorber';
@@ -16,7 +16,7 @@ export interface DerivationGeometry {
 }
 
 export interface DocumentDeriverContext extends DerivationGeometry {
-  segmentOverrides: SegmentOverrides;
+  frozenSegments: FrozenSegmentSet;
   decorationOverrides: DecorationOverrideRegistry;
   videoDurationSeconds: number;
 }
@@ -140,7 +140,7 @@ export class DocumentDeriver {
       runBuffer = [];
     };
     for (const seg of segments) {
-      if (ctx.segmentOverrides.isFrozen(seg.id)) {
+      if (ctx.frozenSegments.has(seg.id)) {
         flushRun();
         out.push(seg);
       } else {

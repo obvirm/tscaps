@@ -21,16 +21,6 @@ export class InlineStyleEmitter {
 
   constructor(private readonly usedCssVars: ReadonlySet<string>) {}
 
-  /**
-   * Serializes `vars` prefixed with the engine's animation timing
-   * primitives (`animation-play-state: paused` and
-   * `animation-fill-mode: both`) so the consuming element renders in
-   * lockstep with the per-frame `currentTime` instead of free-running.
-   */
-  serializeAnimatedVars(vars: Record<string, string>): string {
-    return 'animation-play-state: paused; animation-fill-mode: both; ' + this.serializeStyles(vars);
-  }
-
   /** Serializes `styles` as a CSS attribute body, filtering unused custom properties. */
   serializeStyles(styles: Readonly<InlineStyleMap> | undefined): string {
     if (!styles) return '';

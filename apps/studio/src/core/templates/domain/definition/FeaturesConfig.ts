@@ -1,3 +1,5 @@
+import type { ElementKind } from '@core/elements/domain/ElementKind';
+
 /**
  * Per-feature flags reflecting what a template supports. Every flag
  * defaults to `true` at the loader; a `false` here signals an opt-out
@@ -9,8 +11,29 @@ export interface RotationSupport {
   readonly word: boolean;
 }
 
+/**
+ * Which kinds of element this template's look survives being animated.
+ *
+ * Keyed by the kind an animation lands on rather than by the panel
+ * offering it, because both a sheet answering for every caption and one
+ * caption answering for itself write onto the same element and break
+ * the same way.
+ *
+ * The case it exists for is `mix-blend-mode`. A caption that blends with
+ * the video needs no stacking context between the blending element and
+ * the frame, and every entrance in the library animates `transform` or
+ * `opacity` — either of which puts one there. Measured in both engines:
+ * even `translateY(0)` isolates, and the frozen-frame model keeps the
+ * fill applied, so the blend does not come back when the entrance ends.
+ *
+ * Exhaustive over `ElementKind`: a kind added later cannot compile
+ * without an answer, so nothing is quietly assumed to be animatable.
+ */
+export type AnimationSupport = Readonly<Record<ElementKind, boolean>>;
+
 export interface FeaturesConfig {
   readonly rotation: RotationSupport;
+  readonly animation: AnimationSupport;
   /**
    * Whether the per-segment "Hide behind person" override is exposed
    * on this template. Defaults to `true`; a template only sets this to

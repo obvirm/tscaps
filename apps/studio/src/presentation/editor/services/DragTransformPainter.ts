@@ -1,10 +1,9 @@
 /**
- * Writes the in-flight drag offset onto the affected elements. Keeps
- * the per-pointermove DOM mutation in one place and out of React's
- * render path. The set of targets a single gesture affects depends on
- * the gesture kind (segment drag moves every active wrapper; word
- * drag moves a single word span) — the caller picks which elements;
- * this class only paints.
+ * Writes an in-flight drag offset onto one element. Keeps the
+ * per-pointermove DOM mutation in one place and out of React's render
+ * path. Which elements move, and how far each of them travels, is the
+ * caller's call — a single gesture can move several elements by
+ * different offsets; this class only paints.
  *
  * Uses `position: relative` + `top`/`left` rather than `transform`
  * for two reasons: (1) `transform` creates a new stacking context on
@@ -17,21 +16,15 @@
  * cascade rules that target the same element class.
  */
 export class DragTransformPainter {
-  applyTranslate(targets: Iterable<HTMLElement>, deltaX: number, deltaY: number): void {
-    const top = `${deltaY}px`;
-    const left = `${deltaX}px`;
-    for (const target of targets) {
-      target.style.setProperty('position', 'relative', 'important');
-      target.style.setProperty('top', top, 'important');
-      target.style.setProperty('left', left, 'important');
-    }
+  applyTranslate(target: HTMLElement, deltaX: number, deltaY: number): void {
+    target.style.setProperty('position', 'relative', 'important');
+    target.style.setProperty('top', `${deltaY}px`, 'important');
+    target.style.setProperty('left', `${deltaX}px`, 'important');
   }
 
-  clear(targets: Iterable<HTMLElement>): void {
-    for (const target of targets) {
-      target.style.removeProperty('position');
-      target.style.removeProperty('top');
-      target.style.removeProperty('left');
-    }
+  clear(target: HTMLElement): void {
+    target.style.removeProperty('position');
+    target.style.removeProperty('top');
+    target.style.removeProperty('left');
   }
 }

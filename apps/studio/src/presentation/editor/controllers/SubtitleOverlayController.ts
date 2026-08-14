@@ -1,5 +1,5 @@
 import type { Segment, Line, Word, Decoration } from '@tscaps/engine';
-import { SvgFilterBundle, SvgFilterScoper, SvgFilterLengthResolver } from '@tscaps/engine';
+import { SvgFilterBundle, SvgFilterScoper, SvgFilterLengthResolver, SvgFilterDefsRenderer } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 import { SheetSvgFilterScopeProvider } from '@core/sheets/services/SheetSvgFilterScopeProvider';
 import type { SheetSvgFilterDefinitionsResolver } from '@core/sheets/services/SheetSvgFilterDefinitionsResolver';
@@ -19,6 +19,8 @@ interface LineBinding {
 interface SegmentBinding {
   segment: Segment;
   indexInSection: number;
+  /** Time-independent classes appended after the segment's time-driven class list on every write. */
+  extraClasses: ReadonlyArray<string>;
 }
 
 interface DecorationBinding {
@@ -64,8 +66,7 @@ export class SubtitleOverlayController {
   private readonly segmentBindings = new Map<HTMLElement, SegmentBinding>();
   private readonly decorationBindings = new Map<HTMLElement, DecorationBinding>();
   private readonly sheetFilterDefsBindings = new Map<SVGGElement, SheetFilterDefsBinding>();
-  private readonly lengthResolver = new SvgFilterLengthResolver();
-  private readonly filterScoper = new SvgFilterScoper();
+  private readonly filterDefsRenderer = new SvgFilterDefsRenderer(new SvgFilterScoper(), new SvgFilterLengthResolver());
   private running = false;
   private renderHeightPx = 0;
 
@@ -105,8 +106,13 @@ export class SubtitleOverlayController {
     return () => { this.lineBindings.delete(element); };
   }
 
-  bindSegment(element: HTMLElement, segment: Segment, indexInSection: number): () => void {
-    const binding: SegmentBinding = { segment, indexInSection };
+  bindSegment(
+    element: HTMLElement,
+    segment: Segment,
+    indexInSection: number,
+    extraClasses: ReadonlyArray<string> = [],
+  ): () => void {
+    const binding: SegmentBinding = { segment, indexInSection, extraClasses };
     this.segmentBindings.set(element, binding);
     this.applySegment(element, binding, this.currentTime());
     return () => { this.segmentBindings.delete(element); };
@@ -164,15 +170,12 @@ export class SubtitleOverlayController {
     const definitions = this.svgFilterDefinitionsResolver.resolve(sheet);
     const bundle = new SvgFilterBundle(definitions, new SheetSvgFilterScopeProvider(sheet));
     const context = { currentTime, renderHeightPx: this.renderHeightPx };
-    const scope = bundle.scopeProvider.scopeAt(context);
-    const lengthFactors = bundle.scopeProvider.lengthFactorsAt(context);
-    const { idByLocal } = this.filterScoper.scopeIds(bundle.definitions.ids, sheet.id);
-    return bundle.definitions.filters
-      .map((filter) => {
-        const body = this.lengthResolver.resolve(filter.materialize(scope), lengthFactors);
-        return `<filter id="${idByLocal.get(filter.id)}">${body}</filter>`;
-      })
-      .join('');
+    return this.filterDefsRenderer.render(
+      bundle.definitions,
+      bundle.scopeProvider.scopeAt(context),
+      bundle.scopeProvider.lengthFactorsAt(context),
+      sheet.id,
+    ).defs;
   }
 
   private applyWord(element: HTMLElement, binding: WordBinding, currentTime: number): void {
@@ -191,7 +194,7 @@ export class SubtitleOverlayController {
   }
 
   private applySegment(element: HTMLElement, binding: SegmentBinding, currentTime: number): void {
-    element.className = binding.segment.getCssClasses(currentTime).join(' ');
+    element.className = [...binding.segment.getCssClasses(currentTime), ...binding.extraClasses].join(' ');
     this.writeVars(element, binding.segment.getCssVariables(currentTime, {
       indexInSection: binding.indexInSection,
     }));

@@ -1,6 +1,5 @@
 import { Line, type Document, type Section, type Segment, type Word } from '@tscaps/engine';
 import type { TaggerDescriptor } from '@core/tagging/domain/TaggerDescriptor';
-import type { TagName } from '@core/tagging/domain/TagName';
 import { SemanticTagAggregator } from '@core/tagging/services/SemanticTagAggregator';
 
 /**
@@ -26,23 +25,6 @@ export class TaggerRegistry {
 
   list(): readonly TaggerDescriptor[] {
     return this.descriptors;
-  }
-
-  /**
-   * Unique tag names produced by the currently registered taggers,
-   * in registration order. Returned set is what the platform can
-   * actually attach to a word right now — surfaces that expose tag
-   * editing render from this, not from the canonical vocabulary.
-   */
-  listActiveTagNames(): readonly TagName[] {
-    const seen = new Set<TagName>();
-    const ordered: TagName[] = [];
-    for (const descriptor of this.descriptors) {
-      if (seen.has(descriptor.tagName)) continue;
-      seen.add(descriptor.tagName);
-      ordered.push(descriptor.tagName);
-    }
-    return ordered;
   }
 
   private rebuildWithUnionedSemanticTags(base: Document, variants: readonly Document[]): Document {

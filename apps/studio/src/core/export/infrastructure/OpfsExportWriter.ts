@@ -4,6 +4,7 @@ import type {
   OpfsWriterInbound,
   OpfsWriterOutbound,
 } from '@core/_shared/opfs/OpfsWriterWorkerHost';
+import { WorkerBoundaryError } from '@core/_shared/workers/WorkerBoundaryError';
 
 const OPFS_PREFIX = 'export-';
 
@@ -138,7 +139,7 @@ export class OpfsExportWriter implements ExportWriter {
     if (data.type === 'ok') {
       job.resolve(data);
     } else {
-      job.reject(new Error(data.message));
+      job.reject(new WorkerBoundaryError(data));
     }
   };
 

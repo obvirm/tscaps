@@ -208,9 +208,11 @@ export class MediaBunnyTranscodeCoordinator {
   // One decoded video frame is alive at any time: holding more would
   // back-pressure the WebCodecs frame pool into a stall.
   private async runEncodeLoop(params: EncodeLoopParams): Promise<void> {
+    let decodedCount = 0;
     let frameCount = 0;
 
     for await (const frame of params.decoder.samples()) {
+      decodedCount++;
       try {
         if (frame.timestamp < 0) continue;
         if (params.timeMap.isSkipped(frame.timestamp)) continue;
@@ -226,6 +228,13 @@ export class MediaBunnyTranscodeCoordinator {
       } finally {
         frame.close();
       }
+    }
+
+    // Some decoders drop undecodable samples silently instead of erroring.
+    // Finalizing with zero decoded frames would emit an output whose video
+    // track is empty — readers of that file see no video track at all.
+    if (decodedCount === 0) {
+      throw new Error('The video decoder produced no frames for this input.');
     }
   }
 

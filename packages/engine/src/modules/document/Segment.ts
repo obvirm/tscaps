@@ -1,20 +1,18 @@
 import { TimeFragment } from '@modules/document/TimeFragment';
-import { Tag } from '@modules/document/Tag';
+import { Tag } from '@modules/tags/Tag';
 import { CssVariable } from '@modules/document/CssVariable';
 import { Line } from '@modules/document/Line';
 import { Word } from '@modules/document/Word';
+import { DocumentNodeId } from '@modules/document/DocumentNodeId';
 
 export interface SegmentProps<M = unknown> {
   readonly lines: ReadonlyArray<Line>;
   readonly structureTags?: ReadonlySet<Tag> | undefined;
   readonly id?: string | undefined;
-  /**
-   * Optional explicit time. When present, `time` returns this verbatim;
-   * otherwise `time` is derived from the segment's words. Lets a caller
-   * decouple the segment's time window from its word boundaries (e.g.
-   * to hold a segment on screen past its narration end).
-   */
+  /** Window a caller named, decoupling the segment from its word boundaries. */
   readonly customTime?: TimeFragment | null | undefined;
+  /** Window an Effect computed. Effects overwrite it wholesale and never read it back. */
+  readonly effectTime?: TimeFragment | null | undefined;
   readonly metadata?: M | undefined;
 }
 
@@ -33,18 +31,31 @@ export class Segment<M = unknown> {
   readonly structureTags: ReadonlySet<Tag>;
   readonly id: string;
   readonly customTime: TimeFragment | null;
+  readonly effectTime: TimeFragment | null;
   readonly metadata: M | undefined;
 
   constructor(props: SegmentProps<M>) {
     this.lines = props.lines;
     this.structureTags = props.structureTags ?? new Set();
-    this.id = props.id ?? crypto.randomUUID();
+    this.id = props.id ?? DocumentNodeId.generate();
     this.customTime = props.customTime ?? null;
+    this.effectTime = props.effectTime ?? null;
     this.metadata = props.metadata;
   }
 
+  /**
+   * The window the segment is on screen for: an explicit one if a
+   * caller named it, otherwise an Effect's if one shaped it, otherwise
+   * the span of its own words.
+   */
   get time(): TimeFragment {
     if (this.customTime) return this.customTime;
+    if (this.effectTime) return this.effectTime;
+    return this.wordTime;
+  }
+
+  /** The span of the segment's own words, ignoring any imposed window. */
+  get wordTime(): TimeFragment {
     const first = this.lines[0];
     const last = this.lines[this.lines.length - 1];
     if (!first || !last) throw new Error('Segment has no lines');
@@ -85,6 +96,15 @@ export class Segment<M = unknown> {
     return this.lines.flatMap((line) => [...line.words]);
   }
 
+  /** Union of the segment's own structure tags and every one of its words' tags. */
+  getAllTags(): ReadonlySet<Tag> {
+    const tags = new Set<Tag>(this.structureTags);
+    for (const word of this.getWords()) {
+      for (const tag of word.getAllTags()) tags.add(tag);
+    }
+    return tags;
+  }
+
   getText(): string {
     return this.lines.map((line) => line.getText()).join(' ');
   }
@@ -95,6 +115,7 @@ export class Segment<M = unknown> {
       structureTags: this.structureTags,
       id: this.id,
       customTime: this.customTime,
+      effectTime: this.effectTime,
       metadata: this.metadata,
       ...changes,
     });
@@ -106,6 +127,7 @@ export class Segment<M = unknown> {
       structureTags: this.structureTags,
       id: this.id,
       customTime: this.customTime,
+      effectTime: this.effectTime,
       metadata,
     });
   }

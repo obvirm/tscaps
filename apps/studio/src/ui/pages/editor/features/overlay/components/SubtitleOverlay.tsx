@@ -1,5 +1,5 @@
 import '@ui/pages/editor/features/overlay/components/SubtitleOverlay.css';
-import { memo, useLayoutEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { memo, useLayoutEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import type { Document } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 import type { SubtitleOverlayController } from '@presentation/editor/controllers/SubtitleOverlayController';
@@ -12,20 +12,22 @@ import { SnapGuides } from '@ui/pages/editor/features/overlay/components/SnapGui
 import { SegmentScopeChip } from '@ui/pages/editor/features/overlay/components/segments/SegmentScopeChip';
 import { SegmentSelectionChrome } from '@ui/pages/editor/features/overlay/components/segments/SegmentSelectionChrome';
 import { SegmentDropTargetChrome } from '@ui/pages/editor/features/overlay/components/segments/SegmentDropTargetChrome';
+import { SegmentHitzone } from '@ui/pages/editor/features/overlay/components/segments/SegmentHitzone';
 import { WordSelectionRing } from '@ui/pages/editor/features/overlay/components/words/WordSelectionRing';
 import { WordResizeHandles } from '@ui/pages/editor/features/overlay/components/words/WordResizeHandles';
 import { WordRotateHandle } from '@ui/pages/editor/features/overlay/components/words/WordRotateHandle';
-import { useBehindActorSegmentVars } from '@ui/pages/editor/features/overlay/hooks/useBehindActorSegmentVars';
+import { useBehindActorActiveSegmentIds } from '@ui/pages/editor/features/overlay/hooks/useBehindActorActiveSegmentIds';
 import { useSegmentSelection } from '@ui/pages/editor/features/overlay/hooks/useSegmentSelection';
 import { useSheetArtifacts } from '@ui/pages/editor/features/overlay/hooks/useSheetArtifacts';
 import { OverlayControllerProvider } from '@ui/pages/editor/features/overlay/contexts/OverlayControllerContext';
+import { OverlayGeometryProvider } from '@ui/pages/editor/features/overlay/contexts/OverlayGeometryContext';
 import { OverlayManipulationProvider } from '@ui/pages/editor/features/overlay/contexts/OverlayManipulationContext';
 import { useBoundSheetFilterDefs } from '@ui/pages/editor/features/overlay/hooks/useOverlayBinding';
 import { useEngine } from '@ui/_shared/contexts/modules/EngineContext';
 import { useActiveSegments } from '@ui/_shared/contexts/EditorStoreContext';
 import { useIsMobileViewport } from '@ui/_shared/hooks/useIsMobileViewport';
-import type { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
-import type { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
+import type { BehindActorSegmentOverrideRegistry } from '@core/person-segmentation/domain/BehindActorSegmentOverrideRegistry';
+import type { ElementStyles } from '@core/elements/domain/ElementStyles';
 import type { DecorationOverrideRegistry } from '@core/captions/domain/DecorationOverrideRegistry';
 
 interface SubtitleOverlayProps {
@@ -34,8 +36,8 @@ interface SubtitleOverlayProps {
   selectionController: OverlaySelectionController;
   document: Document;
   sheets: Sheet[];
-  wordStyleOverrides: WordStyleOverrideRegistry;
-  segmentOverrides: SegmentOverrides;
+  behindActorOverrides: BehindActorSegmentOverrideRegistry;
+  elementStyles: ElementStyles;
   decorationOverrides: DecorationOverrideRegistry;
   videoDuration: number;
   /** Extra content rendered inside the video coordinate space, above subtitles. */
@@ -57,7 +59,6 @@ interface SubtitleOverlayProps {
 // intrinsic pixel dimensions.
 const SCALER_STYLE: CSSProperties = { width: '100%', height: '100%' };
 const HIDDEN_SVG_STYLE: CSSProperties = { position: 'absolute' };
-const NO_BEHIND_ACTOR_VARS: Readonly<Record<string, string>> = {};
 
 export const SubtitleOverlay = memo(function SubtitleOverlay({
   overlayController,
@@ -65,8 +66,8 @@ export const SubtitleOverlay = memo(function SubtitleOverlay({
   selectionController,
   document: doc,
   sheets,
-  wordStyleOverrides,
-  segmentOverrides,
+  behindActorOverrides,
+  elementStyles,
   decorationOverrides,
   videoDuration,
   videoOverlay,
@@ -77,23 +78,27 @@ export const SubtitleOverlay = memo(function SubtitleOverlay({
   const isMobile = useIsMobileViewport();
   const activeSegments = useActiveSegments(doc);
   const { cssBySheet, wrapperVarsBySheet, segmentPositions, sheetBySegmentId, activeSegmentIds } =
-    useSheetArtifacts(doc, sheets, activeSegments);
-  const { selection, popover, setSelection, dismiss, onClick, onContextMenu } =
+    useSheetArtifacts(doc, sheets, activeSegments, elementStyles);
+  const { paintedSelection, popover, setSelection, closePopover, onClick, onContextMenu } =
     useSegmentSelection(activeSegmentIds, selectionController);
-  const behindActorVarsBySegment = useBehindActorSegmentVars(doc, segmentOverrides);
+  const behindActorActiveSegmentIds = useBehindActorActiveSegmentIds(doc, sheets, behindActorOverrides);
 
-  const selectedSegmentId = selection?.segmentId ?? null;
+  const selectedSegmentId = paintedSelection?.segmentId ?? null;
   const selectedSheet = selectedSegmentId !== null ? sheetBySegmentId.get(selectedSegmentId) : undefined;
 
   // The scaler box IS the `cqh`/`em` resolution target (see CSS), so its
   // px height is the factor the controller needs to resolve SVG filter
   // lengths. Push it on mount and on every resize. The same element is
   // the frame against which drag gestures measure cursor fractions.
-  const scalerRef = useRef<HTMLDivElement>(null);
+  //
+  // Held in state rather than only in a ref: chrome mounted in the same
+  // commit measures against it, and React attaches a parent's ref after
+  // its children's layout effects have already run.
+  const [scaler, setScaler] = useState<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
-    const scaler = scalerRef.current;
     if (!scaler) return;
     manipulationController.setScaler(scaler);
+    selectionController.setScaler(scaler);
     const pushHeight = () => overlayController.setRenderHeight(scaler.clientHeight);
     pushHeight();
     const observer = new ResizeObserver(pushHeight);
@@ -101,25 +106,30 @@ export const SubtitleOverlay = memo(function SubtitleOverlay({
     return () => {
       observer.disconnect();
       manipulationController.setScaler(null);
+      selectionController.setScaler(null);
     };
-  }, [overlayController, manipulationController]);
+  }, [scaler, overlayController, manipulationController, selectionController]);
 
   return (
     <OverlayControllerProvider value={overlayController}>
       <OverlayManipulationProvider value={manipulationController}>
+      <OverlayGeometryProvider
+        document={doc}
+        sheets={sheets}
+        elementStyles={elementStyles}
+        behindActorActiveSegmentIds={behindActorActiveSegmentIds}
+      >
       <div className="subtitle-overlay-container">
         <div
-          ref={scalerRef}
+          ref={setScaler}
           className="subtitle-overlay-scaler"
           style={SCALER_STYLE}
           onClick={isMobile ? undefined : onClick}
           onContextMenu={isMobile ? undefined : onContextMenu}
         >
           <PersistentVideoFrameProvider>
-          {/* Same baseline the engine's BASELINE_CSS prepends in export. */}
-          <style>{constants.VIDEO_FRAME_LAYER_BASELINE_CSS}</style>
-          <style>{constants.DECORATION_CONTAINER_BASELINE_CSS}</style>
-          <style>{constants.BEHIND_ACTOR_BASELINE_CSS}</style>
+          {/* Same baseline the export prepends, composed by the same class. */}
+          <style>{constants.CAPTION_BASELINE_CSS}</style>
           {sheets.map((sheet) => {
             const css = cssBySheet[sheet.id];
             return css ? <style key={sheet.id}>{css}</style> : null;
@@ -134,6 +144,11 @@ export const SubtitleOverlay = memo(function SubtitleOverlay({
               ))}
             </defs>
           </svg>
+          {!isMobile && activeSegments.map((segment) => (
+            sheetBySegmentId.has(segment.id)
+              ? <SegmentHitzone key={segment.id} segmentId={segment.id} scaler={scaler} />
+              : null
+          ))}
           {activeSegments.map((segment) => {
             const sheet = sheetBySegmentId.get(segment.id);
             if (!sheet) return null;
@@ -146,44 +161,41 @@ export const SubtitleOverlay = memo(function SubtitleOverlay({
                 segment={segment}
                 sheet={sheet}
                 segIdx={segIdx}
-                wordStyleOverrides={wordStyleOverrides}
-                segmentOverrides={segmentOverrides}
+                elementStyles={elementStyles}
                 decorationOverrides={decorationOverrides}
                 wrapperVars={wrapperVars}
-                behindActorVars={behindActorVarsBySegment.get(segment.id) ?? NO_BEHIND_ACTOR_VARS}
+                behindActorActive={behindActorActiveSegmentIds.has(segment.id)}
               />
             );
           })}
           {videoOverlay}
           {occlusionOverlay}
           {!isMobile && <SnapGuides />}
-          {!isMobile && <SegmentScopeChip selection={selection} />}
+          {!isMobile && <SegmentScopeChip selection={paintedSelection} />}
           {!isMobile && selectedSegmentId && selectedSheet && (
             <SegmentSelectionChrome
               segmentId={selectedSegmentId}
               sheet={selectedSheet}
-              segmentOverrides={segmentOverrides}
-              behindActorVars={behindActorVarsBySegment.get(selectedSegmentId) ?? NO_BEHIND_ACTOR_VARS}
-              containerRef={scalerRef}
+              elementStyles={elementStyles}
+              scaler={scaler}
               variant="selected"
             />
           )}
           {!isMobile && (
             <SegmentDropTargetChrome
               sheetBySegmentId={sheetBySegmentId}
-              segmentOverrides={segmentOverrides}
-              behindActorVarsBySegment={behindActorVarsBySegment}
-              containerRef={scalerRef}
+              elementStyles={elementStyles}
+              scaler={scaler}
             />
           )}
-          {!isMobile && selection?.wordId && (
-            <WordSelectionRing wordId={selection.wordId} containerRef={scalerRef} />
+          {!isMobile && paintedSelection?.wordId && (
+            <WordSelectionRing wordId={paintedSelection.wordId} scaler={scaler} />
           )}
-          {!isMobile && selection?.wordId && (
-            <WordResizeHandles wordId={selection.wordId} containerRef={scalerRef} />
+          {!isMobile && paintedSelection?.wordId && (
+            <WordResizeHandles wordId={paintedSelection.wordId} scaler={scaler} />
           )}
-          {!isMobile && selection?.wordId && sheetBySegmentId.get(selection.segmentId)?.template.features.rotation.word && (
-            <WordRotateHandle wordId={selection.wordId} containerRef={scalerRef} />
+          {!isMobile && paintedSelection?.wordId && sheetBySegmentId.get(paintedSelection.segmentId)?.template.features.rotation.word && (
+            <WordRotateHandle wordId={paintedSelection.wordId} scaler={scaler} />
           )}
           </PersistentVideoFrameProvider>
         </div>
@@ -191,16 +203,16 @@ export const SubtitleOverlay = memo(function SubtitleOverlay({
           doc={doc}
           sheets={sheets}
           sheetBySegmentId={sheetBySegmentId}
-          selection={selection}
+          selection={paintedSelection}
           popover={popover}
           setSelection={setSelection}
-          dismiss={dismiss}
-          wordStyleOverrides={wordStyleOverrides}
-          segmentOverrides={segmentOverrides}
+          closePopover={closePopover}
+          behindActorOverrides={behindActorOverrides}
           decorationOverrides={decorationOverrides}
           videoDuration={videoDuration}
         />
       </div>
+      </OverlayGeometryProvider>
       </OverlayManipulationProvider>
     </OverlayControllerProvider>
   );

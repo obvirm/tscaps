@@ -1,4 +1,14 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { ChevronDown } from 'lucide-react';
+
+export type AutocompleteSize = 'sm' | 'md';
+
+/**
+ * Deciding whether an option survives the current query. Runs once per
+ * option per keystroke; the query is already trimmed and lower-cased.
+ */
+export type AutocompleteFilter<T> = (option: T, query: string) => boolean;
 
 export interface AutocompleteOption {
   readonly value: string;
@@ -27,6 +37,11 @@ interface AutocompletePropsBase<T extends AutocompleteOption> {
   disabled?: boolean | undefined;
   renderOption?: (option: T) => ReactNode;
   /**
+   * DOM id for the trigger input. Lets a `<label htmlFor="…">` bind to
+   * the picker and lets callers focus it imperatively for validation.
+   */
+  id?: string | undefined;
+  /**
    * Optional CTA region rendered ABOVE the scrollable rows in the dropdown.
    * Stays visible regardless of scroll/filter — meant for entry points like
    * "Upload custom font" that should always be reachable. The region's
@@ -34,12 +49,57 @@ interface AutocompletePropsBase<T extends AutocompleteOption> {
    * match option height).
    */
   header?: ReactNode;
+  /**
+   * Text shown inside the input when nothing is selected yet. Useful for
+   * pickers whose empty state is legal (e.g. a required field that starts
+   * unset). When a value is selected, the option's label always wins.
+   */
+  placeholder?: string | undefined;
+  /**
+   * Visual size of the trigger input. `sm` (default) matches the compact
+   * sidebar rows; `md` matches the dialog form controls.
+   */
+  size?: AutocompleteSize | undefined;
+  /**
+   * Custom filter run against every option on every keystroke. Default
+   * matches on `label` only; override to search additional fields such as
+   * a native name or a code alias. The query is already trimmed and
+   * lower-cased.
+   */
+  filter?: AutocompleteFilter<T> | undefined;
 }
 
 type AutocompleteProps<T extends AutocompleteOption> = AutocompletePropsBase<T> & (
   | { options: readonly T[]; groups?: undefined }
   | { groups: ReadonlyArray<AutocompleteGroup<T>>; options?: undefined }
 );
+
+const defaultLabelFilter: AutocompleteFilter<AutocompleteOption> = (option, query) =>
+  option.label.toLowerCase().includes(query);
+
+interface PanelPosition {
+  readonly top: number;
+  readonly left: number;
+  readonly width: number;
+}
+
+const PANEL_GAP_PX = 4;
+
+const INPUT_BASE =
+  'w-full box-border border border-edge-medium rounded-xs transition-colors duration-quick ease-standard ' +
+  'hover:border-edge-strong ' +
+  'focus-visible:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30 ' +
+  'disabled:opacity-40 disabled:cursor-not-allowed placeholder:text-fg-faint';
+
+const INPUT_BY_SIZE: Record<AutocompleteSize, string> = {
+  sm: 'h-[26px] pl-2 pr-7 text-xs text-fg-secondary bg-surface-2',
+  md: 'py-2 pl-3 pr-9 text-sm text-fg-primary bg-surface-1',
+};
+
+const CHEVRON_BY_SIZE: Record<AutocompleteSize, { size: number; className: string }> = {
+  sm: { size: 12, className: 'right-2' },
+  md: { size: 14, className: 'right-3' },
+};
 
 const ITEM_BASE =
   'pr-2.5 py-1.5 text-sm text-fg-secondary cursor-pointer truncate relative flex items-center gap-2 group/option ' +
@@ -59,9 +119,19 @@ const ROW_HEIGHT_PX = 32;
 const VIEWPORT_HEIGHT_PX = 240;
 const OVERSCAN = 3;
 
-function itemClass(active: boolean, current: boolean, indented: boolean): string {
+const ACTIVE_ROW_BG_BY_SIZE: Record<AutocompleteSize, string> = {
+  sm: 'bg-surface-3',
+  md: 'bg-accent/10',
+};
+
+const PANEL_BG_BY_SIZE: Record<AutocompleteSize, string> = {
+  sm: 'bg-surface-2',
+  md: 'bg-surface-3',
+};
+
+function itemClass(active: boolean, current: boolean, indented: boolean, size: AutocompleteSize): string {
   const parts = [ITEM_BASE, indented ? 'pl-5' : 'pl-2.5'];
-  if (active) parts.push('bg-surface-3');
+  if (active) parts.push(ACTIVE_ROW_BG_BY_SIZE[size]);
   if (current) parts.push(ITEM_CURRENT_INDICATOR);
   return parts.join(' ');
 }
@@ -93,7 +163,12 @@ export const Autocomplete = memo(function Autocomplete<T extends AutocompleteOpt
   options,
   groups,
   header,
+  placeholder,
+  size = 'sm',
+  filter,
+  id,
 }: AutocompleteProps<T>) {
+  const matchesQuery: AutocompleteFilter<T> = filter ?? defaultLabelFilter;
   const effectiveGroups = useMemo<ReadonlyArray<AutocompleteGroup<T>>>(
     () => groups ?? [{ id: '__default__', label: '', options: options ?? [] }],
     [groups, options],
@@ -113,6 +188,8 @@ export const Autocomplete = memo(function Autocomplete<T extends AutocompleteOpt
   const [scrollTop, setScrollTop] = useState(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [panelPosition, setPanelPosition] = useState<PanelPosition | null>(null);
 
   // Build the flat row list and a parallel option-only index for keyboard
   // navigation. Header rows aren't selectable so `activeIndex` skips over
@@ -126,7 +203,7 @@ export const Autocomplete = memo(function Autocomplete<T extends AutocompleteOpt
     for (const group of effectiveGroups) {
       const filtered = q.length === 0
         ? group.options
-        : group.options.filter((o) => o.label.toLowerCase().includes(q));
+        : group.options.filter((o) => matchesQuery(o, q));
       if (filtered.length === 0) continue;
       const hasHeader = group.label !== '';
       if (hasHeader) rows.push({ kind: 'header', group });
@@ -136,7 +213,7 @@ export const Autocomplete = memo(function Autocomplete<T extends AutocompleteOpt
       }
     }
     return { rows, optionLocations };
-  }, [effectiveGroups, query]);
+  }, [effectiveGroups, query, matchesQuery]);
 
   const visibleCount = Math.ceil(VIEWPORT_HEIGHT_PX / ROW_HEIGHT_PX);
   const startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT_PX) - OVERSCAN);
@@ -147,13 +224,45 @@ export const Autocomplete = memo(function Autocomplete<T extends AutocompleteOpt
   useEffect(() => {
     if (!open) return;
     const onDocClick = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const target = e.target as Node;
+      const insideRoot = rootRef.current?.contains(target) === true;
+      const insidePanel = panelRef.current?.contains(target) === true;
+      if (!insideRoot && !insidePanel) setOpen(false);
     };
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [open]);
+
+  // The panel is portaled to `document.body` so the dialog it lives in
+  // does not clip or double-scroll it. Position is recomputed on any
+  // scroll or resize so a scrolling dialog keeps the panel anchored to
+  // the input; capture-phase `scroll` catches ancestor scrollers too.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useLayoutEffect(() => {
+    if (!open) {
+      setPanelPosition(null);
+      setScrollTop(0);
+      return;
+    }
+    const update = () => {
+      const root = rootRef.current;
+      if (!root) return;
+      const rect = root.getBoundingClientRect();
+      setPanelPosition({
+        top: rect.bottom + PANEL_GAP_PX,
+        left: rect.left,
+        width: rect.width,
+      });
+    };
+    update();
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [open]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Reset scroll when the filter changes — yesterday's scrollTop has no
   // meaning against today's filtered rows, and would otherwise leave the
@@ -197,9 +306,21 @@ export const Autocomplete = memo(function Autocomplete<T extends AutocompleteOpt
   const handleKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown') {
       e.preventDefault();
+      if (!open) {
+        setOpen(true);
+        setQuery('');
+        setActiveIndex(findActiveIndexFor(value));
+        return;
+      }
       setActiveIndex((i) => Math.min(i + 1, optionLocations.length - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
+      if (!open) {
+        setOpen(true);
+        setQuery('');
+        setActiveIndex(findActiveIndexFor(value));
+        return;
+      }
       setActiveIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === 'Enter') {
       e.preventDefault();
@@ -214,23 +335,24 @@ export const Autocomplete = memo(function Autocomplete<T extends AutocompleteOpt
   const visibleRows = rows.slice(startIdx, endIdx);
   const hasContent = header !== undefined || rows.length > 0;
 
+  const chevron = CHEVRON_BY_SIZE[size];
+  const inputClass = `${INPUT_BASE} ${INPUT_BY_SIZE[size]}`;
+
   return (
     <div className="flex-1 relative" ref={rootRef}>
       <input
         type="text"
-        className="w-full h-[26px] px-2 text-xs text-fg-secondary bg-surface-2 border border-edge-medium rounded-xs transition-colors duration-quick ease-standard hover:border-edge-strong focus-visible:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30 disabled:opacity-40 disabled:cursor-not-allowed"
+        id={id}
+        className={inputClass}
         value={open ? query : display}
-        placeholder={display}
+        placeholder={display === '' ? (placeholder ?? '') : display}
         disabled={disabled}
-        onFocus={() => {
-          setOpen(true);
-          setQuery('');
-          setActiveIndex(findActiveIndexFor(value));
-        }}
         onClick={() => {
-          // Reopen after a commit (which closes while keeping focus): a second
-          // click on an already-focused input fires no `focus` event, so we
-          // need a click handler too. Idempotent when already open.
+          // Focus on its own does NOT open the panel — a modal that
+          // auto-focuses this input (e.g. Radix Dialog focus scope) would
+          // otherwise open the dropdown as soon as the dialog appears.
+          // Explicit user intent is required: click, keyboard open, or
+          // typing.
           if (!open) {
             setOpen(true);
             setQuery('');
@@ -238,13 +360,40 @@ export const Autocomplete = memo(function Autocomplete<T extends AutocompleteOpt
           }
         }}
         onChange={(e) => {
+          if (!open) setOpen(true);
           setQuery(e.target.value);
           setActiveIndex(0);
         }}
         onKeyDown={handleKey}
       />
-      {open && hasContent && (
-        <div className="absolute top-[calc(100%+4px)] left-0 right-0 bg-surface-2 border border-edge-subtle rounded-xs z-20 shadow-md overflow-hidden animate-fade-in">
+      <ChevronDown
+        size={chevron.size}
+        aria-hidden="true"
+        className={`absolute ${chevron.className} top-1/2 -translate-y-1/2 text-fg-muted pointer-events-none transition-transform duration-quick ease-standard ${open ? 'rotate-180' : ''}`}
+      />
+      {open && hasContent && panelPosition !== null && createPortal(
+        <div
+          ref={panelRef}
+          style={{
+            position: 'fixed',
+            top: panelPosition.top,
+            left: panelPosition.left,
+            width: panelPosition.width,
+            zIndex: 1200,
+            pointerEvents: 'auto',
+          }}
+          className={`${PANEL_BG_BY_SIZE[size]} border border-edge-subtle rounded-xs shadow-md overflow-hidden animate-fade-in`}
+          // Portal siblings of a Radix Dialog inherit `pointer-events: none`
+          // from the body scroll-lock and lose to Radix's document-level
+          // dismissable-layer listeners. Explicit `pointerEvents: auto` on
+          // the style, plus stopping propagation on the panel's pointer /
+          // mouse / wheel / touch events, keeps the picker interactive
+          // inside a dialog without asking the parent for cooperation.
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onWheel={(e) => e.stopPropagation()}
+          onTouchMove={(e) => e.stopPropagation()}
+        >
           {header !== undefined && (
             <div className="border-b border-edge-subtle">{header}</div>
           )}
@@ -280,7 +429,7 @@ export const Autocomplete = memo(function Autocomplete<T extends AutocompleteOpt
                     role="option"
                     aria-selected={isActive}
                     style={{ height: ROW_HEIGHT_PX }}
-                    className={itemClass(isActive, isCurrent, row.indented)}
+                    className={itemClass(isActive, isCurrent, row.indented, size)}
                     onMouseEnter={() => { if (optionIdx >= 0) setActiveIndex(optionIdx); }}
                     onMouseDown={(e) => {
                       e.preventDefault();
@@ -301,7 +450,8 @@ export const Autocomplete = memo(function Autocomplete<T extends AutocompleteOpt
               {bottomPad > 0 && <li aria-hidden style={{ height: bottomPad }} />}
             </ul>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

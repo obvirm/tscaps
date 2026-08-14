@@ -1,9 +1,11 @@
 import type { BoxEdges, Document, Segment } from '@tscaps/engine';
-import { CssMinifier, CssScoper, SegmentPaddingCssRuleBuilder, SvgFilterBundle, SvgFilterScoper } from '@tscaps/engine';
+import { CssLayer, CssMinifier, CssScoper, FROZEN_FRAME_CSS, SegmentPaddingCssRuleBuilder, SvgFilterBundle, SvgFilterScoper } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 import { SheetSvgFilterScopeProvider } from '@core/sheets/services/SheetSvgFilterScopeProvider';
 import type { SheetSvgFilterDefinitionsResolver } from '@core/sheets/services/SheetSvgFilterDefinitionsResolver';
 import type { SheetCssVarsBuilder } from '@core/sheets/services/SheetCssVarsBuilder';
+import type { LayeredCaptionCssBuilder } from '@core/captions/services/LayeredCaptionCssBuilder';
+import type { ElementStyles } from '@core/elements/domain/ElementStyles';
 import { SegmentPositionsBySheet } from '@presentation/editor/services/SegmentPositionsBySheet';
 
 /**
@@ -24,6 +26,7 @@ export class SheetOverlayArtifactsBuilder {
     private readonly sheetCssVarsBuilder: SheetCssVarsBuilder,
     private readonly svgFilterDefinitionsResolver: SheetSvgFilterDefinitionsResolver,
     private readonly segmentPaddingCssRuleBuilder: SegmentPaddingCssRuleBuilder,
+    private readonly layeredCaptionCssBuilder: LayeredCaptionCssBuilder,
   ) {}
 
   /**
@@ -37,16 +40,26 @@ export class SheetOverlayArtifactsBuilder {
 
   /**
    * Sheet's stylesheet body for the overlay, scoped under the wrapper's
-   * class. Prepends the engine's `.segment` padding rule when the
-   * template declared `rendering.padding` so preview matches export's
-   * paint geometry, then minifies and rewrites `url(#id)` filter refs
-   * through the `var(--svg-filter-id)` indirection the runtime binds.
+   * class. Prepends the engine's frozen-frame rule so the preview holds
+   * the same paused-and-filled contract the export baseline carries,
+   * and its `.segment` padding rule when the template declared
+   * `rendering.padding` so preview matches export's paint geometry,
+   * then minifies and rewrites `url(#id)` filter refs through the
+   * `var(--svg-filter-id)` indirection the runtime binds.
    */
-  buildScopedCss(sheet: Sheet): string {
+  buildScopedCss(sheet: Sheet, fragments: ElementStyles): string {
+    const scopeSelector = `.${this.scopeClassFor(sheet.id)}`;
     const withPadding = this.prependSegmentPaddingRule(sheet.resolveCss(), sheet.template.rendering.padding);
     const minified = this.cssMinifier.minify(withPadding);
     const { css: withIndirectFilters } = this.svgFilterScoper.rewriteCss(minified);
-    return this.cssScoper.scope(withIndirectFilters, `.${this.scopeClassFor(sheet.id)}`);
+    const layered = this.layeredCaptionCssBuilder.build(withIndirectFilters, sheet.animations, fragments);
+    const scoped = this.cssScoper.scope(layered, scopeSelector);
+    // The frozen-frame rule is emitted first so its layer is the
+    // earliest one: cascade order puts unlayered `!important` below
+    // layered `!important`, so leaving it outside would let any
+    // `!important` in a template or a fragment outrank it.
+    const framework = `@layer ${CssLayer.FRAMEWORK} {\n${this.cssScoper.scope(FROZEN_FRAME_CSS, scopeSelector)}\n}`;
+    return `${framework}\n${scoped}`;
   }
 
   private prependSegmentPaddingRule(css: string, padding: BoxEdges | null): string {

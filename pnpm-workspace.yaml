@@ -2,6 +2,7 @@ packages:
   - 'packages/*'
   - 'apps/*'
 allowBuilds:
+  '@parcel/watcher': true
   core-js: true
   esbuild: true
   onnxruntime-node: false

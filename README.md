@@ -20,7 +20,7 @@ Captions are HTML elements styled with CSS. In the editor, that DOM is layered l
 |---|---|
 | [`packages/engine`](packages/engine) | The framework-agnostic TypeScript engine that does the rendering. Published to npm as [`@tscaps/engine`](https://www.npmjs.com/package/@tscaps/engine). |
 | [`apps/studio`](apps/studio) | The web app that wraps the engine in a UI — drop a video, edit captions, export. |
-| [`templates`](templates) | The visual-style gallery the editor consumes. Each template is a folder of JSON + CSS. |
+| [`templates`](templates) | The visual-style gallery the editor consumes. Each template is a folder of JSON + CSS. See [templates/AUTHORING.md](templates/AUTHORING.md) to write one. |
 
 ## tscaps as a hosted product
 
@@ -94,9 +94,9 @@ The full pipeline API, every styling knob, every transcriber, every splitter, th
 
 ## Templates
 
-A template is a self-contained visual style for burned-in subtitles — a folder containing a `template.json` (metadata, controls, alignment), a `style.css` (the actual visual rules), and any assets the CSS references. The editor and the engine both pick up every folder under `templates/`; adding a new look is "drop the folder in."
+A template is a self-contained visual style for burned-in subtitles — a folder containing a `template.json` (metadata, controls, alignment) and a `style.scss` (the actual visual rules), plus an optional `filters.svg`. The stylesheet is Sass so a template can call the shared primitives under `templates/_lib/`; a build step compiles it to a flat, standard `style.build.css`, and that is what the runtime reads. Nothing resolves at runtime, so the artifact stays editable by anyone who knows only CSS.
 
-The author guide — folder layout, the universal CSS variable contract that lets editor controls drive the visual, animation patterns under paused playback, SVG filters, the live-vs-export differences and traps, and an author's checklist — is in **[templates/README.md](templates/README.md)**.
+The author guide is **[templates/AUTHORING.md](templates/AUTHORING.md)**, which builds a template from nothing a step at a time. The deep reference behind each step — the full `template.json` schema, the CSS variable contract that lets editor controls drive the visual, animation patterns under paused playback, the primitive library, SVG filters, the live-vs-export differences, and an author's checklist — is in **[templates/_docs/](templates/_docs)**.
 
 If you've never written one and want to learn by reading: the existing templates under `templates/` are the canonical examples, ordered roughly by complexity.
 

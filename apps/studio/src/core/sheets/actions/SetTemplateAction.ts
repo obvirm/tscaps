@@ -4,16 +4,16 @@ import type { Template } from '@core/templates/domain/Template';
 import type { RecordTemplateUseAction } from '@core/templates/actions/RecordTemplateUseAction';
 import type { RefreshDocumentAction } from '@core/editor/actions/RefreshDocumentAction';
 import type { Telemetry } from '@core/telemetry/domain/Telemetry';
-
-interface SheetContentIds {
-  readonly segmentIds: string[];
-  readonly wordIds: string[];
-}
+import type { LinkedSheetsSync } from '@core/sheets/services/LinkedSheetsSync';
 
 /**
  * Applies a Template to the currently active Sheet — resetting style
  * values, splitter configs, alignment, and effects — and records the
- * pick as recently used.
+ * pick as recently used. When the sheet belongs to a link group, every
+ * linked sibling switches to the same template while each keeps its own
+ * `variantIndex` (modulo the new template's variant count), so a
+ * multi-speaker group rebases together and each speaker lands on its
+ * matching preset in the new look.
  */
 export class SetTemplateAction {
   constructor(
@@ -21,6 +21,7 @@ export class SetTemplateAction {
     private readonly refresh: RefreshDocumentAction,
     private readonly recordTemplateUse: RecordTemplateUseAction,
     private readonly telemetry: Telemetry,
+    private readonly linkedSheetsSync: LinkedSheetsSync,
   ) {}
 
   execute(template: Template): void {
@@ -30,37 +31,32 @@ export class SetTemplateAction {
     const fromTemplateId = activeSheet.template.metadata.id;
     const updated = activeSheet.withTemplate(template);
 
-    const contentIds = this.collectSheetContentIds(snap.document, activeSheet.id);
-    const nextSegmentOverrides = snap.segmentOverrides
-      .resetSegments(contentIds.segmentIds)
-      .clearBehindActorFor(contentIds.segmentIds);
-    const nextWordOverrides = snap.wordStyleOverrides.resetWords(contentIds.wordIds);
+    const segmentIds = this.collectSheetSegmentIds(snap.document, activeSheet.id);
 
     this.store.commit();
     this.store.patch({
-      sheets: this.store.replaceSheet(updated),
-      segmentOverrides: nextSegmentOverrides,
-      wordStyleOverrides: nextWordOverrides,
+      sheets: this.linkedSheetsSync.applyTemplateEdit(updated, this.store.snapshot().sheets),
+      elementStyles: snap.elementStyles.without(segmentIds),
+      behindActorOverrides: snap.behindActorOverrides.without(segmentIds),
     });
     this.refresh.execute();
     this.recordTemplateUse.execute(template.metadata.id);
     this.captureTemplateSelected(template, fromTemplateId);
   }
 
-  private collectSheetContentIds(document: Document | null, sheetId: string): SheetContentIds {
+  /**
+   * The sheet's segments, whose ids the new template's splitter is free
+   * to dissolve. What is keyed to a word survives the switch, because a
+   * word keeps its id through every re-derivation.
+   */
+  private collectSheetSegmentIds(document: Document | null, sheetId: string): string[] {
     const segmentIds: string[] = [];
-    const wordIds: string[] = [];
-    if (!document) return { segmentIds, wordIds };
+    if (!document) return segmentIds;
     for (const section of document.sections) {
       if (section.kind !== sheetId) continue;
-      for (const seg of section.segments) {
-        segmentIds.push(seg.id);
-        for (const line of seg.lines) {
-          for (const word of line.words) wordIds.push(word.id);
-        }
-      }
+      for (const seg of section.segments) segmentIds.push(seg.id);
     }
-    return { segmentIds, wordIds };
+    return segmentIds;
   }
 
   private captureTemplateSelected(template: Template, fromTemplateId: string): void {

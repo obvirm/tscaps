@@ -9,13 +9,29 @@
  * name in the `capture` call.
  */
 export type TelemetryEventName =
-  | 'landing_viewed'
-  | 'video_dropped'
+  | 'page_viewed'
   | 'preprocessing_started'
   | 'preprocessing_completed'
   | 'preprocessing_failed'
+  | 'transcription_gaps_detected'
+  | 'transcription_model_cache_failed'
+  | 'video_rejected_over_cap'
   | 'template_selected'
+  | 'hook_scenes_set'
   | 'export_started'
   | 'export_completed'
+  | 'export_cancelled'
   | 'export_failed'
-  | 'template_used_at_export';
+  | 'subtitles_exported'
+  | 'template_used_at_export'
+  | 'app_notice_published'
+  | 'preview_proxy_fallback'
+  | 'project_save_failed'
+  | 'auth_started'
+  | 'auth_succeeded'
+  | 'auth_failed'
+  | 'email_verification_sent'
+  | 'pricing_viewed'
+  | 'pricing_plan_clicked'
+  | 'checkout_started'
+  | 'billing_portal_opened';

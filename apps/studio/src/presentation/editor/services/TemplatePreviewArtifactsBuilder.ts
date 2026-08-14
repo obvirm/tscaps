@@ -1,4 +1,4 @@
-import { CssMinifier, CssScoper, SvgFilterScoper, SvgFilterLengthResolver } from '@tscaps/engine';
+import { CssMinifier, CssScoper, FROZEN_FRAME_CSS, SvgFilterScoper, SvgFilterLengthResolver, SvgFilterDefsRenderer } from '@tscaps/engine';
 import type { Template } from '@core/templates/domain/Template';
 import { StyleValues } from '@core/sheets/domain/StyleValues';
 import { Sheet } from '@core/sheets/domain/Sheet';
@@ -25,7 +25,7 @@ export class TemplatePreviewArtifactsBuilder {
   private readonly cssMinifier = new CssMinifier();
   private readonly cssScoper = new CssScoper();
   private readonly svgFilterScoper = new SvgFilterScoper();
-  private readonly svgFilterLengthResolver = new SvgFilterLengthResolver();
+  private readonly svgFilterDefsRenderer = new SvgFilterDefsRenderer(this.svgFilterScoper, new SvgFilterLengthResolver());
 
   constructor(
     private readonly typographyCssVarBuilder: TypographyCssVarBuilder,
@@ -35,20 +35,17 @@ export class TemplatePreviewArtifactsBuilder {
 
   /**
    * Template CSS minified, with filter refs rewritten to the runtime
-   * indirection, scoped under `scopeClass`, and prefixed with a
-   * pseudo-element pause rule. The pseudo-pause is here because
-   * pseudos can't receive inline styles and don't inherit
-   * animation-play-state, and the template's `animation:` shorthand
-   * resets play-state to `running` — so the pause must be `!important`
-   * to honour the paused-frame contract for anything templates
-   * animate on ::before / ::after.
+   * indirection, scoped under `scopeClass`, and prefixed with the
+   * engine's frozen-frame rule scoped the same way — a card paints one
+   * seeked frame, so a template's `animation: … infinite` would
+   * otherwise keep ticking on every visible card.
    */
   buildScopedCss(template: Template, scopeClass: string): string {
+    const scopeSelector = `.${scopeClass}`;
     const minified = this.cssMinifier.minify(template.getCss());
     const { css: withIndirectFilters } = this.svgFilterScoper.rewriteCss(minified);
-    const scopedCss = this.cssScoper.scope(withIndirectFilters, `.${scopeClass}`);
-    const pseudoPause = `.${scopeClass} *::before, .${scopeClass} *::after { animation-play-state: paused !important; animation-fill-mode: both; }`;
-    return `${pseudoPause}\n${scopedCss}`;
+    const scopedCss = this.cssScoper.scope(withIndirectFilters, scopeSelector);
+    return `${this.cssScoper.scope(FROZEN_FRAME_CSS, scopeSelector)}\n${scopedCss}`;
   }
 
   /**
@@ -61,7 +58,7 @@ export class TemplatePreviewArtifactsBuilder {
    */
   buildWrapperVars(template: Template): Record<string, string> {
     return {
-      ...this.typographyCssVarBuilder.build(template.typography),
+      ...this.typographyCssVarBuilder.build(template.typography, 'ltr', null),
       ...this.rotationCssVarBuilder.build(template.rotation),
       ...this.styleValuesCssVarsBuilder.build(StyleValues.fromTemplate(template.styleControls)),
     };
@@ -85,16 +82,12 @@ export class TemplatePreviewArtifactsBuilder {
     const sheet = Sheet.fromTemplate(template.metadata.id, template.metadata.name, null, template);
     const provider = new SheetSvgFilterScopeProvider(sheet);
     const context = { currentTime: 0, renderHeightPx: virtualVideoHeightPx };
-    const scope = provider.scopeAt(context);
-    const lengthFactors = provider.lengthFactorsAt(context);
-    const { idByLocal, bindings } = this.svgFilterScoper.scopeIds(definitions.ids, scopeClass);
-
-    const filterDefsHtml = definitions.filters
-      .map((filter) => {
-        const body = this.svgFilterLengthResolver.resolve(filter.materialize(scope), lengthFactors);
-        return `<filter id="${idByLocal.get(filter.id)}">${body}</filter>`;
-      })
-      .join('');
-    return { filterDefsHtml, filterUrlVars: Object.fromEntries(bindings) };
+    const { defs, bindings } = this.svgFilterDefsRenderer.render(
+      definitions,
+      provider.scopeAt(context),
+      provider.lengthFactorsAt(context),
+      scopeClass,
+    );
+    return { filterDefsHtml: defs, filterUrlVars: Object.fromEntries(bindings) };
   }
 }

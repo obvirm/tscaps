@@ -12,8 +12,12 @@ import { TemplateLibraryStore } from '@core/templates/store/TemplateLibraryStore
 import { ToggleTemplateFavoriteAction } from '@core/templates/actions/ToggleTemplateFavoriteAction';
 import { RecordTemplateUseAction, RECENT_VISIBLE_COUNT } from '@core/templates/actions/RecordTemplateUseAction';
 import { TemplateFavoritesHydrator } from '@core/templates/services/TemplateFavoritesHydrator';
+import { TagConditionParser } from '@tscaps/engine';
 import { BoxEdgesShorthandParser } from '@core/templates/services/BoxEdgesShorthandParser';
 import { CssAssetReferenceResolver } from '@core/templates/services/CssAssetReferenceResolver';
+import { SimilarNameFinder } from '@core/_shared/services/SimilarNameFinder';
+import { StyleControlCatalog } from '@core/templates/domain/definition/StyleControlCatalog';
+import { StyleControlResolver } from '@core/templates/services/controls/StyleControlResolver';
 import type { EngineModule } from '@bootstrap/wiring/engine';
 
 export interface TemplatesDependencies {
@@ -61,6 +65,7 @@ async function loadBuiltinTemplates(
   engine: EngineModule,
   cssAssetReferenceResolver: CssAssetReferenceResolver,
 ): Promise<BuiltinTemplateRepository> {
+  const styleControlResolver = new StyleControlResolver(new StyleControlCatalog(new SimilarNameFinder()));
   const templateLoader = new LocalFileTemplateLoader(
     BUILTIN_TEMPLATE_ASSETS,
     cssAssetReferenceResolver,
@@ -69,6 +74,8 @@ async function loadBuiltinTemplates(
     engine.effects,
     engine.svgFilterDefinitionsParser,
     new BoxEdgesShorthandParser(),
+    new TagConditionParser(),
+    styleControlResolver,
   );
   const templates = await Promise.all(builtinTemplateNames().map((name) => templateLoader.load(name)));
   return new BuiltinTemplateRepository(templates);

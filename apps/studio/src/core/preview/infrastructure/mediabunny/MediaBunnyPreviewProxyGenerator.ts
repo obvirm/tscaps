@@ -26,7 +26,10 @@ interface ProxyDimensions {
  *
  * Any underlying mediabunny / WebCodecs failure is wrapped in
  * `PreviewProxyGenerationFailedError` so callers can tell proxy
- * failures apart from generic errors.
+ * failures apart from generic errors. The original error is kept in
+ * `cause`, which is what lets a reader downstream recognise a
+ * condition the proxy pipeline has no opinion about, such as a
+ * browser that refused to store the encoded bytes.
  */
 export class MediaBunnyPreviewProxyGenerator implements PreviewProxyGenerator {
 

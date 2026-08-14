@@ -1,6 +1,6 @@
-import type { UserAgentInspector } from '@core/_shared/infrastructure/UserAgentInspector';
+import { NoopTelemetry } from '@shared/telemetry';
+import type { UserAgentInspector } from '@shared/browser';
 import type { Telemetry } from '@core/telemetry/domain/Telemetry';
-import { NoopTelemetry } from '@core/telemetry/infrastructure/NoopTelemetry';
 
 export interface TelemetryDependencies {
   readonly userAgentInspector: UserAgentInspector;

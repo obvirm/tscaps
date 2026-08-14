@@ -4,6 +4,7 @@ import type {
   WorkerToClientMessage,
 } from '@core/preview/infrastructure/mediabunny/worker/DecodeWorkerProtocol';
 import { DecodeWorkerFrameChannel } from '@core/preview/infrastructure/mediabunny/worker/DecodeWorkerFrameChannel';
+import type { WorkerErrorMonitor } from '@core/_shared/workers/WorkerErrorMonitor';
 
 export interface DecodeWorkerOpenResult {
   readonly widthPx: number;
@@ -45,11 +46,12 @@ export class DecodeWorkerClient {
   private readonly frameAtPending = new Map<number, PendingFrameAt>();
   private disposed = false;
 
-  constructor() {
+  constructor(workerErrorMonitor: WorkerErrorMonitor) {
     this.worker = new Worker(
       new URL('./decodeWorker.ts', import.meta.url),
       { type: 'module' },
     );
+    workerErrorMonitor.monitor(this.worker, 'decode-worker');
     this.worker.onmessage = (event: MessageEvent<WorkerToClientMessage>): void => {
       this.handleWorkerMessage(event.data);
     };

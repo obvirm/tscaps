@@ -23,7 +23,19 @@
      danger / warning / info  semantic
    ───────────────────────────────────────────────────────────────── */
 
-@tailwind base;
+/* The reset goes in a cascade layer, and the layer is declared here so it
+   is the first one in the document. A reset is the weakest thing on the
+   page by intent, but an unlayered rule beats every layered one no matter
+   how specific — so left outside, `*{margin:0}` would win over any
+   stylesheet that does use layers. The caption stylesheets do (their
+   own layers are established later, when the overlay mounts), and a
+   template's `.word { margin: 0 .16em }` would silently lose to this.
+
+   Only the reset moves. Components and utilities stay unlayered, so
+   nothing about how app CSS resolves against itself changes. */
+@layer tscaps-app {
+  @tailwind base;
+}
 @tailwind components;
 @tailwind utilities;
 
@@ -50,6 +62,24 @@
   --color-danger: 248 113 113;
   --color-warning: 234 179 8;
   --color-info: 117 145 238;
+
+  /* Audio amplitude. Near-neutral so a selection reads over it: a
+     selection paints an accent tint on whatever it covers, and the more
+     saturated the bar, the more it fights that tint. Pitched at the
+     faintest text in the palette — the words are the subject here, not
+     the audio. */
+  --color-waveform: 118 133 147;
+
+  /* Scene tones for the cuts timeline, cycled through so a scene is
+     told from the one beside it. One cool band, separated by hue and
+     not by brightness: the timeline lifts a scene's tint on hover, and
+     one hue at two brightnesses would walk a lit scene onto the colour
+     of its neighbour at rest. Chroma stays well under the accent's —
+     a hue per scene made the panel read as a rainbow of second
+     accents. */
+  --color-scene-1: 120 180 186;
+  --color-scene-2: 120 148 186;
+  --color-scene-3: 126 120 186;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.45);
@@ -100,6 +130,18 @@
   --color-danger: 185 28 28;
   --color-warning: 161 98 7;
   --color-info: 47 77 199;
+
+  /* Same near-neutral cool grey and the same volume as the dark
+     theme's, which on an eggshell background means darker rather than
+     paler. */
+  --color-waveform: 103 117 131;
+
+  /* The same three hues, darkened against eggshell so each keeps the
+     presence its dark-theme twin has. Reusing the dark values here
+     costs the first tone about half its contrast. */
+  --color-scene-1: 43 81 84;
+  --color-scene-2: 66 92 128;
+  --color-scene-3: 114 108 178;
 
   --shadow-sm: 0 1px 2px rgba(80, 70, 50, 0.06);
   --shadow-md: 0 4px 12px rgba(80, 70, 50, 0.10);

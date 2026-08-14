@@ -1,10 +1,6 @@
 import { OpfsWriterWorkerHost } from '@core/_shared/opfs/OpfsWriterWorkerHost';
+import { WorkerUncaughtErrorForwarder } from '@core/_shared/workers/WorkerUncaughtErrorForwarder';
 
-self.addEventListener('error', (e: ErrorEvent) => {
-  console.error('[opfs writer worker] uncaught error', e.message, e.filename + ':' + e.lineno, e.error);
-});
-self.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
-  console.error('[opfs writer worker] unhandled rejection', e.reason);
-});
+new WorkerUncaughtErrorForwarder('opfs-writer-worker').install();
 
 new OpfsWriterWorkerHost().start();

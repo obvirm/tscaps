@@ -1,5 +1,6 @@
 import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { RefreshDocumentAction } from '@core/editor/actions/RefreshDocumentAction';
+import type { LinkedSheetsSync } from '@core/sheets/services/LinkedSheetsSync';
 
 const REDERIVE_DEBOUNCE_MS = 100;
 
@@ -8,7 +9,8 @@ const REDERIVE_DEBOUNCE_MS = 100;
  * clears the override so the sheet renders with the template's pristine
  * CSS again. Re-derivation is debounced because rules touching font
  * weight, padding, or letter spacing change the pixel widths the line
- * splitter measures against.
+ * splitter measures against. When the sheet belongs to a link group, the
+ * same CSS override rides across to every linked sibling.
  */
 export class UpdateSheetCssOverrideAction {
   private _debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -16,6 +18,7 @@ export class UpdateSheetCssOverrideAction {
   constructor(
     private readonly store: EditorStore,
     private readonly refresh: RefreshDocumentAction,
+    private readonly linkedSheetsSync: LinkedSheetsSync,
   ) {}
 
   execute(cssOverride: string | null): void {
@@ -23,7 +26,7 @@ export class UpdateSheetCssOverrideAction {
     if (!active) return;
     const updated = active.with({ cssOverride });
     this.store.commit(`cssOverride:${active.id}`);
-    this.store.patch({ sheets: this.store.replaceSheet(updated) });
+    this.store.patch({ sheets: this.linkedSheetsSync.applyStyleEdit(updated, this.store.snapshot().sheets) });
 
     if (this._debounceTimer !== null) clearTimeout(this._debounceTimer);
     this._debounceTimer = setTimeout(() => {

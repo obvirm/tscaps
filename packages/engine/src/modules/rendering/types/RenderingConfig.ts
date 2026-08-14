@@ -1,5 +1,5 @@
 import type { BoxEdges } from '@modules/rendering/types/BoxEdges';
-import type { BehindActorRequirement } from '@modules/rendering/types/BehindActorRequirement';
+import type { TextDirection } from '@modules/bidi/TextDirection';
 
 /**
  * Whether a style consumes the underlying video frame as part of
@@ -21,5 +21,10 @@ export interface RenderingConfig {
   readonly videoFrame: VideoFrameRequirement;
   /** Extra space around the segment box, per side. `null` when not declared. */
   readonly padding: BoxEdges | null;
-  readonly behindActor: BehindActorRequirement;
+  /**
+   * Paragraph direction the bidirectional algorithm resolves each line
+   * against. It decides where every word lands, so it must describe the
+   * language of the text rather than a visual preference.
+   */
+  readonly textDirection: TextDirection;
 }

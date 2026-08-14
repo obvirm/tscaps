@@ -1,4 +1,4 @@
-import type { Document, Segment } from '@tscaps/engine';
+import type { Document, Segment, Word } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 
 /**
@@ -23,14 +23,24 @@ export type SheetMatcherAvailability =
   | { readonly available: false; readonly code: string };
 
 /**
+ * What a matcher run moved. `movedCount` counts segments for a
+ * segment-granularity matcher and words for a word-granularity one, so
+ * the UI can phrase the outcome in the right unit.
+ */
+export interface SheetMatcherRunResult {
+  readonly granularity: 'segment' | 'word';
+  readonly movedCount: number;
+}
+
+/**
  * One auto-assign strategy. Lives as a singleton in the registry; its
- * `matches` method is parameterised so the dialog can build a fresh
- * call without instantiating a new matcher per user gesture. The `type`
+ * match method is parameterised so the dialog can build a fresh call
+ * without instantiating a new matcher per user gesture. The `type`
  * discriminator is what the UI switches on to render strategy-specific
  * subcontrols, and what the action records so the call is fully
  * identified (matcher + params).
  */
-export interface SheetMatcher<TParams> {
+interface SheetMatcherBase<TParams> {
   readonly type: string;
   readonly label: string;
   /**
@@ -53,5 +63,25 @@ export interface SheetMatcher<TParams> {
    * to the first detected speaker.
    */
   defaultParams(ctx: SheetMatcherContext): TParams;
-  matches(segment: Segment, params: TParams): boolean;
 }
+
+/**
+ * A matcher that assigns whole segments: every segment it says yes to
+ * moves to the target sheet as-is.
+ */
+export interface SegmentSheetMatcher<TParams> extends SheetMatcherBase<TParams> {
+  readonly granularity: 'segment';
+  matchesSegment(segment: Segment, params: TParams): boolean;
+}
+
+/**
+ * A matcher that extracts words: contiguous runs of matching words are
+ * carved out of their segments and moved to the target sheet, while the
+ * surrounding words stay behind under their original sheet.
+ */
+export interface WordSheetMatcher<TParams> extends SheetMatcherBase<TParams> {
+  readonly granularity: 'word';
+  matchesWord(word: Word, params: TParams): boolean;
+}
+
+export type SheetMatcher<TParams> = SegmentSheetMatcher<TParams> | WordSheetMatcher<TParams>;

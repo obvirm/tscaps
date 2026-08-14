@@ -47,12 +47,12 @@ export class ApplySmartSegmentEditAction {
     const withEffects = this.deriver.reapplyEffects(retagged, sheets, snap.video.duration, snap.decorationOverrides);
 
     const structurallyChanged = !this._sameWordIds(located.segment, newSegment);
-    const segmentOverrides = structurallyChanged
-      ? snap.segmentOverrides.withFreeze(newSegment.id)
-      : snap.segmentOverrides;
+    const frozenSegments = structurallyChanged
+      ? snap.frozenSegments.withStructurallyEdited([newSegment.id])
+      : snap.frozenSegments;
 
     this.store.commit('caption-edit:' + args.segmentId);
-    this.store.patch({ document: withEffects, segmentOverrides });
+    this.store.patch({ document: withEffects, frozenSegments });
   }
 
   private _sameWordIds(prev: Segment, next: Segment): boolean {

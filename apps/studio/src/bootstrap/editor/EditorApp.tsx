@@ -2,6 +2,10 @@ import { useEffect, useMemo, type ReactNode } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeController } from '@presentation/theme/controllers/ThemeController';
 import { KeyboardShortcutsController } from '@presentation/editor/controllers/KeyboardShortcutsController';
+import { EditorWorkspaceStore } from '@presentation/editor/stores/EditorWorkspaceStore';
+import { CaptionsTabStore } from '@presentation/editor/stores/CaptionsTabStore';
+import { EditorWorkspaceStoreProvider } from '@ui/pages/editor/contexts/EditorWorkspaceContext';
+import { CaptionsTabStoreProvider } from '@ui/pages/editor/contexts/CaptionsTabContext';
 import { ProjectsHost } from '@ui/pages/editor/features/projects/ProjectsHost';
 import { NewProjectRoute } from '@ui/pages/editor/NewProjectRoute';
 import { ProjectRoute } from '@ui/pages/editor/ProjectRoute';
@@ -39,6 +43,9 @@ export function EditorApp({
     return () => keyboard.stop();
   }, [keyboard]);
 
+  const workspaceStore = useMemo(() => new EditorWorkspaceStore(), []);
+  const captionsTabStore = useMemo(() => new CaptionsTabStore(), []);
+
 
   const routes = modules.routing.routes;
   const projectsHost = <ProjectsHost />;
@@ -48,6 +55,8 @@ export function EditorApp({
       <StartFlowSlotProvider value={startFlow}>
       <PostExportPromptSlotProvider value={postExportPrompt}>
       <ThemeProvider value={theme}>
+      <EditorWorkspaceStoreProvider value={workspaceStore}>
+      <CaptionsTabStoreProvider value={captionsTabStore}>
             <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '')}>
               <Routes>
                 <Route path={routes.projectsList()} element={projectsHost} />
@@ -57,6 +66,8 @@ export function EditorApp({
                 <Route path="*" element={<Navigate to={routes.projectsList()} replace />} />
               </Routes>
             </BrowserRouter>
+      </CaptionsTabStoreProvider>
+      </EditorWorkspaceStoreProvider>
       </ThemeProvider>
       </PostExportPromptSlotProvider>
       </StartFlowSlotProvider>

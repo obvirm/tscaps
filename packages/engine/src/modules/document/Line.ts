@@ -1,8 +1,9 @@
 import { TimeFragment } from '@modules/document/TimeFragment';
-import { Tag } from '@modules/document/Tag';
+import { Tag } from '@modules/tags/Tag';
 import { LineState } from '@modules/document/LineState';
 import { CssVariable } from '@modules/document/CssVariable';
 import { Word } from '@modules/document/Word';
+import { DocumentNodeId } from '@modules/document/DocumentNodeId';
 
 export interface LineProps<M = unknown> {
   readonly words: ReadonlyArray<Word>;
@@ -30,7 +31,7 @@ export class Line<M = unknown> {
   constructor(props: LineProps<M>) {
     this.words = props.words;
     this.structureTags = props.structureTags ?? new Set();
-    this.id = props.id ?? crypto.randomUUID();
+    this.id = props.id ?? DocumentNodeId.generate();
     this.metadata = props.metadata;
   }
 

@@ -33,23 +33,14 @@ export function TemplatePreviewStatic({ template, letterSplitter }: TemplatePrev
   const wordVars = word.getCssVariables(t, { segTime, indexInLine: 0 }) as Record<string, string>;
   const wordClass = word.getCssClasses(t).join(' ');
 
-  // Inline play-state pause overrides the template's `animation:` shorthand,
-  // which CSS specs reset to `running`. Without this, templates with
-  // `animation: ... infinite` (e.g. wave/bob, glow pulses) keep ticking on
-  // every visible card, even though the preview is a single frozen frame.
-  const segStyle = { animationPlayState: 'paused', animationFillMode: 'both', ...segVars } as React.CSSProperties;
-  const lineStyle = { animationPlayState: 'paused', animationFillMode: 'both', ...lineVars } as React.CSSProperties;
-
   if (letterSplitter) {
     const letters = letterSplitter.split(template.metadata.name);
     return (
-      <div className={segment.getCssClasses(t).join(' ')} style={segStyle}>
-        <div className={line.getCssClasses(t).join(' ')} style={lineStyle}>
+      <div className={segment.getCssClasses(t).join(' ')} style={segVars}>
+        <div className={line.getCssClasses(t).join(' ')} style={lineVars}>
           <span
             className={wordClass}
             style={{
-              animationPlayState: 'paused',
-              animationFillMode: 'both',
               ...wordVars,
               ...letterAnimationStyleBuilder.buildWordContainerVars(letters.length),
             }}
@@ -58,11 +49,7 @@ export function TemplatePreviewStatic({ template, letterSplitter }: TemplatePrev
               <span
                 key={i}
                 className="letter"
-                style={{
-                  animationPlayState: 'paused',
-                  animationFillMode: 'both',
-                  ...letterAnimationStyleBuilder.buildLetterVars(i),
-                }}
+                style={letterAnimationStyleBuilder.buildLetterVars(i)}
               >
                 {letter}
               </span>
@@ -74,15 +61,11 @@ export function TemplatePreviewStatic({ template, letterSplitter }: TemplatePrev
   }
 
   return (
-    <div className={previewMock.segment.getCssClasses(t).join(' ')} style={segStyle}>
-      <div className={previewMock.line.getCssClasses(t).join(' ')} style={lineStyle}>
+    <div className={previewMock.segment.getCssClasses(t).join(' ')} style={segVars}>
+      <div className={previewMock.line.getCssClasses(t).join(' ')} style={lineVars}>
         <span
           className={wordClass}
-          style={{
-            animationPlayState: 'paused',
-            animationFillMode: 'both',
-            ...wordVars,
-          } as React.CSSProperties}
+          style={wordVars as React.CSSProperties}
         >
           {template.metadata.name}
         </span>

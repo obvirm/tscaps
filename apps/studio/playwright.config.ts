@@ -6,6 +6,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   testDir: './tests/e2e',
+  // Specs suffixed `.close` are excluded from the public build; the
+  // default match pattern would skip those files here too.
+  testMatch: /.*\.spec(\.close)?\.ts$/,
+  outputDir: './.playwright-out',
   fullyParallel: false,
   workers: 1,
   timeout: 120_000,

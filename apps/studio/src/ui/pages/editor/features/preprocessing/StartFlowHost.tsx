@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
-import type { EditorState } from '@core/editor/domain/EditorState';
-import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { PreprocessingFlowStore } from '@core/preprocessing/store/PreprocessingFlowStore';
+import type { VideoValidationStatus } from '@core/preprocessing/domain/VideoValidationStatus';
+import type { VideoValidator } from '@core/preprocessing/services/VideoValidator';
 import { useEditor } from '@ui/_shared/contexts/modules/EditorContext';
 import { useTranscription } from '@ui/_shared/contexts/modules/TranscriptionContext';
 import { usePreprocessing } from '@ui/_shared/contexts/modules/PreprocessingContext';
 import { useUtils } from '@ui/_shared/contexts/modules/UtilsContext';
 import { StartDialog } from '@ui/pages/editor/features/preprocessing/StartDialog';
+import { UnreadableVideoNotice } from '@ui/pages/editor/features/preprocessing/components/UnreadableVideoNotice';
+import { NoAudioTrackNotice } from '@ui/pages/editor/features/preprocessing/components/NoAudioTrackNotice';
+import { useEditorState } from '@ui/_shared/hooks/useEditorState';
 
 interface StartFlowHostProps {
   onBack: () => void;
@@ -24,15 +27,15 @@ function useDialogOpen(flow: PreprocessingFlowStore): boolean {
   return open;
 }
 
-function useEditorSnapshot(store: EditorStore): EditorState {
-  const [state, setState] = useState(() => store.snapshot());
+function useVideoValidationStatus(validator: VideoValidator): VideoValidationStatus {
+  const [status, setStatus] = useState<VideoValidationStatus>(() => validator.status());
   useEffect(() => {
-    const update = () => setState(store.snapshot());
-    store.addEventListener('change', update);
+    const update = () => setStatus(validator.status());
+    validator.addEventListener('change', update);
     update();
-    return () => store.removeEventListener('change', update);
-  }, [store]);
-  return state;
+    return () => validator.removeEventListener('change', update);
+  }, [validator]);
+  return status;
 }
 
 /**
@@ -47,7 +50,8 @@ export function StartFlowHost({ onBack }: StartFlowHostProps) {
   const preprocessing = usePreprocessing();
   const { userAgentInspector } = useUtils();
   const open = useDialogOpen(preprocessing.flow);
-  const state = useEditorSnapshot(editor.store);
+  const state = useEditorState();
+  const validation = useVideoValidationStatus(preprocessing.videoValidator);
 
   if (!open) return null;
 
@@ -55,6 +59,20 @@ export function StartFlowHost({ onBack }: StartFlowHostProps) {
     editor.actions.video.clear.execute();
     onBack();
   };
+
+  const isUnreadable = validation.state === 'rejected' && validation.details.type === 'unreadable';
+  const isAnalyzing = validation.state === 'analyzing';
+  const startDisabled = validation.state !== 'accepted';
+
+  const validationNotices = (
+    <>
+      {isAnalyzing && (
+        <p className="text-xs text-fg-muted">Analyzing video…</p>
+      )}
+      {isUnreadable && <UnreadableVideoNotice />}
+      {state.video.hasAudioTrack === false && <NoAudioTrackNotice />}
+    </>
+  );
 
 
   return (
@@ -66,6 +84,8 @@ export function StartFlowHost({ onBack }: StartFlowHostProps) {
       preprocessVideo={preprocessing.actions.preprocessVideo}
       updatePreference={transcription.actions.updatePreference}
       onCancel={handleCancel}
+      startDisabled={startDisabled}
+      extraNotices={validationNotices}
     />
   );
 }

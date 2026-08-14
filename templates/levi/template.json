@@ -1,6 +1,5 @@
 {
   "name": "Levi",
-  "description": "Narrow left-anchored stack. Lines reveal one by one as they are narrated.",
   "categories": [
     "hook"
   ],
@@ -19,50 +18,8 @@
       "label": "Text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
-    },
-    {
-      "id": "shadow-color",
-      "label": "Shadow",
-      "type": "color",
-      "default": "#000000",
-      "advanced": true,
-      "group": "colors"
-    },
-    {
-      "id": "reveal-distance",
-      "label": "Reveal distance",
-      "type": "float",
-      "default": 0,
-      "min": 0,
-      "max": 1.0,
-      "step": 0.01,
-      "unit": "em",
-      "group": "appearance"
-    },
-    {
-      "id": "shadow-distance",
-      "label": "Shadow distance",
-      "type": "float",
-      "default": 0.03,
-      "min": 0,
-      "max": 0.5,
-      "step": 0.01,
-      "unit": "em",
-      "advanced": true,
-      "group": "appearance"
-    },
-    {
-      "id": "shadow-blur",
-      "label": "Shadow blur",
-      "type": "float",
-      "default": 0.12,
-      "min": 0,
-      "max": 1.0,
-      "step": 0.01,
-      "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "colors"
     }
   ],
   "segmentSplitters": [
@@ -83,16 +40,17 @@
   },
   "alignment": {
     "verticalAlign": "center",
-    "verticalOffset": 0.40,
+    "verticalOffset": 0.4,
     "horizontalAlign": "left",
     "horizontalOffset": 0.04
   },
-  "unsupportedUserAgents": ["firefox"],
+  "unsupportedUserAgents": [
+    "firefox"
+  ],
   "effects": [
     {
       "type": "gap_free",
       "enabled": true
     }
-  ],
-  "taggerRules": []
+  ]
 }

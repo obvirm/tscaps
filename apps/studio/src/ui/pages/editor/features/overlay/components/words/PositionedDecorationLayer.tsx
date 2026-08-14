@@ -1,15 +1,16 @@
-import { memo, useMemo, type CSSProperties } from 'react';
+import { memo, useMemo, useRef, type CSSProperties } from 'react';
 import type { AlignmentConfig, Line, Segment, Word } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
-import type { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
 import { WordDecorationSpan } from '@ui/pages/editor/features/overlay/components/words/WordDecorationSpan';
 import { VideoFrameLayer } from '@ui/pages/editor/features/overlay/components/video-frame/VideoFrameLayer';
 import { useBoundLine, useBoundSegment } from '@ui/pages/editor/features/overlay/hooks/useOverlayBinding';
 import { useWordDragPreview } from '@ui/pages/editor/features/overlay/hooks/useWordDragPreview';
 import { AlignmentCssBuilder } from '@presentation/editor/services/AlignmentCssBuilder';
+import { useEditorState } from '@ui/_shared/hooks/useEditorState';
 import { useSheetOverlayArtifactsBuilder } from '@ui/pages/editor/contexts/SheetOverlayArtifactsContext';
+import { useRendering } from '@ui/_shared/contexts/modules/RenderingContext';
+import { CAPTION_ELEMENT_ID_ATTRIBUTE } from '@presentation/editor/services/CaptionElementAttribute';
 
-const alignmentCssBuilder = new AlignmentCssBuilder();
 
 interface PositionedDecorationLayerProps {
   sheet: Sheet;
@@ -20,12 +21,10 @@ interface PositionedDecorationLayerProps {
   /** Word that owns the decoration glyph. */
   word: Word;
   segmentAlignment: AlignmentConfig;
-  wordStyleOverrides: WordStyleOverrideRegistry;
   /** Sheet- and segment-level inline styles the wrapper inherits — minus its alignment-dependent vars. */
   wrapperBaseStyles: CSSProperties;
 }
 
-const PAUSED_ANIMATION_STYLE: CSSProperties = { animationPlayState: 'paused', animationFillMode: 'both' };
 const EMPTY_VARS: Readonly<Record<string, string>> = {};
 
 /** Sibling anchor for a decoration glyph painted out of flow. */
@@ -36,44 +35,46 @@ export const PositionedDecorationLayer = memo(function PositionedDecorationLayer
   line,
   word,
   segmentAlignment,
-  wordStyleOverrides,
   wrapperBaseStyles,
 }: PositionedDecorationLayerProps) {
-  const segRef = useBoundSegment(segment, indexInSection);
+  const segRef = useRef<HTMLDivElement>(null);
+  useBoundSegment(segRef, segment, indexInSection);
   const lineRef = useBoundLine(line, segment);
   const sheetOverlayArtifactsBuilder = useSheetOverlayArtifactsBuilder();
+  const { elementStyles } = useEditorState();
 
   const decoration = word.decoration!;
 
   const savedAlignment = useMemo<AlignmentConfig>(
     () => ({
       ...segmentAlignment,
-      ...(wordStyleOverrides.buildAlignmentOverride(decoration.id) ?? {}),
+      ...(elementStyles.placementOf(decoration.id) ?? {}),
     }),
-    [segmentAlignment, wordStyleOverrides, decoration.id],
+    [segmentAlignment, elementStyles, decoration.id],
   );
   const dragPreview = useWordDragPreview(decoration.id);
   const effectiveAlignment = dragPreview ?? savedAlignment;
 
+  const { horizontalPlacementResolver } = useRendering();
+  const alignmentCssBuilder = useMemo(
+    () => new AlignmentCssBuilder(horizontalPlacementResolver),
+    [horizontalPlacementResolver],
+  );
+
   const anchorStyle = useMemo<CSSProperties>(
-    () => alignmentCssBuilder.buildAnchorStyle(effectiveAlignment),
-    [effectiveAlignment],
+    () => alignmentCssBuilder.buildAnchorStyle(effectiveAlignment, sheet.textDirection),
+    [alignmentCssBuilder, effectiveAlignment, sheet.textDirection],
   );
 
   const videoFrameRequired = sheet.template.rendering.videoFrame.required;
   const subtitleRegionVars = useMemo<Readonly<Record<string, string>>>(
-    () => videoFrameRequired ? alignmentCssBuilder.buildSubtitleRegionVars(effectiveAlignment) : EMPTY_VARS,
-    [videoFrameRequired, effectiveAlignment],
+    () => videoFrameRequired ? alignmentCssBuilder.buildSubtitleRegionVars(effectiveAlignment, sheet.textDirection) : EMPTY_VARS,
+    [alignmentCssBuilder, videoFrameRequired, effectiveAlignment, sheet.textDirection],
   );
 
   const wrapperStyle = useMemo<CSSProperties>(
     () => ({ ...wrapperBaseStyles, ...subtitleRegionVars }),
     [wrapperBaseStyles, subtitleRegionVars],
-  );
-
-  const decorationInlineStyle = useMemo(
-    () => wordStyleOverrides.buildInlineStyles(decoration.id),
-    [wordStyleOverrides, decoration.id],
   );
 
   const liveVideoFrame = videoFrameRequired && sheet.template.rendering.videoFrame.previewMode === 'live';
@@ -85,14 +86,13 @@ export const PositionedDecorationLayer = memo(function PositionedDecorationLayer
         style={wrapperStyle}
         data-tscaps-segment-id={segment.id}
       >
-        <div ref={segRef} style={PAUSED_ANIMATION_STYLE}>
+        <div ref={segRef} {...{ [CAPTION_ELEMENT_ID_ATTRIBUTE]: segment.id }}>
           {liveVideoFrame && <VideoFrameLayer />}
-          <div ref={lineRef} style={PAUSED_ANIMATION_STYLE}>
+          <div ref={lineRef} {...{ [CAPTION_ELEMENT_ID_ATTRIBUTE]: line.id }}>
             <WordDecorationSpan
               decoration={decoration}
               segment={segment}
               word={word}
-              inlineStyle={decorationInlineStyle}
             />
           </div>
         </div>

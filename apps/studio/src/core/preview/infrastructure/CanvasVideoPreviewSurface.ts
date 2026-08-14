@@ -77,6 +77,7 @@ export class CanvasVideoPreviewSurface extends EventTarget implements VideoPrevi
   private cachedTimeMap: RenderTimeMap;
 
   private currentOutputTimeSec = 0;
+  private scheduledStopOutputSec: number | null = null;
   private currentVolume = 1;
   private currentRate = 1;
   private isPlayingFlag = false;
@@ -204,6 +205,7 @@ export class CanvasVideoPreviewSurface extends EventTarget implements VideoPrevi
     this.isReadyFlag = false;
     this.isPlayingFlag = false;
     this.currentOutputTimeSec = 0;
+    this.scheduledStopOutputSec = null;
     if (this.runtime) {
       this.runtime.clock.seek(0);
       this.runtime.painter.clear();
@@ -234,6 +236,8 @@ export class CanvasVideoPreviewSurface extends EventTarget implements VideoPrevi
 
   pause(): void {
     if (!this.runtime || !this.isPlayingFlag) return;
+    this.cancelScheduledStop();
+    this.cancelScheduledAudioMute();
     this.runtime.clock.pause();
     this.currentOutputTimeSec = this.runtime.clock.currentOutputTimeSec();
     this.loaded?.videoPump.cancel();
@@ -244,6 +248,7 @@ export class CanvasVideoPreviewSurface extends EventTarget implements VideoPrevi
 
   seek(sourceTimeSec: number): void {
     if (!this.runtime || !this.loaded) return;
+    this.cancelScheduledStop();
     const outputSec = this.resolveSeekTarget(sourceTimeSec);
     this.runtime.clock.seek(outputSec);
     this.currentOutputTimeSec = outputSec;
@@ -293,6 +298,19 @@ export class CanvasVideoPreviewSurface extends EventTarget implements VideoPrevi
     const now = this.runtime.audio.context.currentTime;
     gain.cancelScheduledValues(now);
     gain.setValueAtTime(this.currentVolume, now);
+  }
+
+  scheduleStopAt(sourceTimeSec: number): void {
+    if (!this.loaded) return;
+    const outputSec = this.getTimeMap().toOutputTime(sourceTimeSec);
+    this.scheduledStopOutputSec = outputSec;
+    this.loaded.videoPump.paintNoFurtherThan(outputSec);
+  }
+
+  cancelScheduledStop(): void {
+    if (this.scheduledStopOutputSec === null) return;
+    this.scheduledStopOutputSec = null;
+    this.loaded?.videoPump.paintNoFurtherThan(null);
   }
 
   setPlaybackRate(rate: number): void {
@@ -424,6 +442,8 @@ export class CanvasVideoPreviewSurface extends EventTarget implements VideoPrevi
 
   private publishCurrentTimeIfMoved(): void {
     if (!this.runtime || !this.runtime.clock.isRunning()) return;
+    // One tick can cross both bounds; the nearer one is what was asked for.
+    if (this.pauseIfScheduledStopReached()) return;
     if (this.pauseIfEndOfTimelineReached()) return;
     const next = this.runtime.clock.currentOutputTimeSec();
     if (Math.abs(next - this.currentOutputTimeSec) < TIME_DISPATCH_THRESHOLD_SEC) return;
@@ -431,22 +451,32 @@ export class CanvasVideoPreviewSurface extends EventTarget implements VideoPrevi
     this.dispatchTimeChange();
   }
 
+  private pauseIfScheduledStopReached(): boolean {
+    if (!this.runtime || this.scheduledStopOutputSec === null) return false;
+    const stopOutputSec = this.scheduledStopOutputSec;
+    if (this.runtime.clock.currentOutputTimeSec() < stopOutputSec) return false;
+    this.cancelScheduledStop();
+    this.snapPlaybackTo(stopOutputSec);
+    return true;
+  }
+
   private pauseIfEndOfTimelineReached(): boolean {
     if (!this.runtime || !this.loaded) return false;
     const durationOutputSec = this.computeDurationOutputSec();
     if (durationOutputSec <= 0) return false;
     if (this.runtime.clock.currentOutputTimeSec() < durationOutputSec) return false;
-    this.snapPlaybackToEnd(durationOutputSec);
+    this.snapPlaybackTo(durationOutputSec);
     return true;
   }
 
-  private snapPlaybackToEnd(durationOutputSec: number): void {
+  private snapPlaybackTo(outputSec: number): void {
     if (!this.runtime || !this.loaded) return;
     this.runtime.clock.pause();
-    this.runtime.clock.seek(durationOutputSec);
-    this.currentOutputTimeSec = durationOutputSec;
+    this.runtime.clock.seek(outputSec);
+    this.currentOutputTimeSec = outputSec;
     this.loaded.videoPump.cancel();
     this.loaded.audioPump?.cancel();
+    this.cancelScheduledAudioMute();
     this.isPlayingFlag = false;
     this.dispatchTimeChange();
     this.dispatchChange();

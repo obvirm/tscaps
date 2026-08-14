@@ -13,12 +13,12 @@
     "declarationMap": true,
     "sourceMap": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "rootDir": "./src",
+    "rootDir": ".",
     "outDir": "./dist",
     "paths": {
       "@modules/*": ["./src/modules/*"]
     },
     "allowImportingTsExtensions": false
   },
-  "include": ["src"]
+  "include": ["src", "vitest.config.ts"]
 }

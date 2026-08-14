@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import type { ExportVideoOptions } from '@core/export/actions/ExportVideoAction';
+import type { ExportSubtitlesOptions } from '@core/export/actions/ExportSubtitlesAction';
 import type { ExportNotice } from '@core/export/domain/ExportNotice';
 import type { ExportRun, ExportPauseReason } from '@core/export/domain/ExportRun';
-import type { UserAgentInspector } from '@core/_shared/infrastructure/UserAgentInspector';
-import type { AppError } from '@core/_shared/domain/AppError';
+import type { UserAgentInspector } from '@shared/browser';
+import type { AppError } from '@core/errors/domain/AppError';
 import {
   ExportDialog,
   type ExportDialogPhase,
   type FallbackDecoderWarning,
 } from '@ui/pages/editor/features/export/components/ExportDialog';
-import type { ResolutionView } from '@ui/pages/editor/features/export/components/ExportSettingsForm';
+import type { ResolutionView } from '@ui/pages/editor/features/export/components/VideoExportSettings';
 
 interface ExportFlowProps {
   settingsOpen: boolean;
@@ -21,7 +22,8 @@ interface ExportFlowProps {
   fallbackWarning: FallbackDecoderWarning | null;
   resolutionView: ResolutionView | null;
   extraNotice?: ReactNode;
-  onExport: (options: ExportVideoOptions) => Promise<void> | void;
+  onExportVideo: (options: ExportVideoOptions) => Promise<void> | void;
+  onExportSubtitles: (options: ExportSubtitlesOptions) => void;
   onAcceptExportPause: () => void;
   onRejectExportPause: () => void;
   onDismissExportNotice: () => void;
@@ -48,7 +50,8 @@ export function ExportFlow({
   fallbackWarning,
   resolutionView,
   extraNotice,
-  onExport,
+  onExportVideo,
+  onExportSubtitles,
   onAcceptExportPause,
   onRejectExportPause,
   onDismissExportNotice,
@@ -98,7 +101,8 @@ export function ExportFlow({
       videoLayout={videoLayout}
       resolutionView={resolutionView}
       extraNotice={extraNotice}
-      onConfirm={onExport}
+      onExportVideo={onExportVideo}
+      onExportSubtitles={onExportSubtitles}
       onAcceptFallback={onAcceptExportPause}
       onRejectFallback={onRejectExportPause}
       onDismissNotice={handleDismissNotice}

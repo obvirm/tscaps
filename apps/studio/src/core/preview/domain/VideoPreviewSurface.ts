@@ -111,6 +111,20 @@ export interface VideoPreviewSurface extends EventTarget {
   /** Cancel any pending scheduled mute and restore the output level. */
   cancelScheduledAudioMute(): void;
 
+  /**
+   * Stop playback the moment the playhead reaches the given
+   * source-time position, coming to rest exactly on it rather than
+   * wherever the stop was noticed, and restoring the output level.
+   * Replaces any pending stop. The bound belongs to the run that is
+   * playing: consumed on arrival, and dropped by {@link seek} or
+   * {@link pause}. `canvas` paints no frame past it; `native` rests on
+   * it just as exactly but cannot promise the frame.
+   */
+  scheduleStopAt(sourceTimeSec: number): void;
+
+  /** Cancel any pending scheduled stop. Playback then runs on unbounded. */
+  cancelScheduledStop(): void;
+
   snapshot(): VideoPreviewSurfaceSnapshot;
 
   captureStream(): MediaStream | null;

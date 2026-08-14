@@ -1,4 +1,4 @@
-import { Copy, Pencil } from 'lucide-react';
+import { Copy, Link, Pencil, Unlink } from 'lucide-react';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 import { MAIN_SHEET_ID } from '@core/sheets/domain/Sheet';
 import { Popover } from '@ui/_shared/components/Popover/Popover';
@@ -16,6 +16,8 @@ interface SheetSettingsPopoverProps {
   sheets: ReadonlyArray<Sheet>;
   onRequestRename: () => void;
   onCopyStylesFromSheet: (sourceSheetId: string) => void;
+  onLinkTo: (sourceSheetId: string) => void;
+  onUnlink: () => void;
 }
 
 const MENU_SHAPE = 'p-1 flex flex-col gap-0.5 min-w-[220px]';
@@ -35,7 +37,8 @@ const ITEM =
 export function SheetSettingsPopover(props: SheetSettingsPopoverProps) {
   const screens = {
     menu: <SheetMenuScreen {...props} />,
-    sheetPicker: <SheetSourcePickerScreen {...props} />,
+    copyStylesPicker: <CopyStylesSourcePickerScreen {...props} />,
+    linkTargetPicker: <LinkTargetPickerScreen {...props} />,
   };
   return (
     <Popover
@@ -48,9 +51,10 @@ export function SheetSettingsPopover(props: SheetSettingsPopoverProps) {
   );
 }
 
-function SheetMenuScreen({ sheets, onRequestRename }: SheetSettingsPopoverProps) {
+function SheetMenuScreen({ sheet, sheets, onRequestRename, onUnlink }: SheetSettingsPopoverProps) {
   const { navigate, close } = usePopoverNav();
-  const canCopy = sheets.length > 1;
+  const hasOtherSheets = sheets.length > 1;
+  const isLinked = sheet.linkGroupId !== null;
   return (
     <div className={MENU_SHAPE}>
       <button
@@ -63,17 +67,36 @@ function SheetMenuScreen({ sheets, onRequestRename }: SheetSettingsPopoverProps)
       <button
         type="button"
         className={ITEM}
-        onClick={() => navigate('sheetPicker')}
-        disabled={!canCopy}
-        title={canCopy ? undefined : 'Create at least one more sheet to copy styles from.'}
+        onClick={() => navigate('copyStylesPicker')}
+        disabled={!hasOtherSheets}
+        title={hasOtherSheets ? undefined : 'Create at least one more sheet to copy styles from.'}
       >
         <Copy size={13} /> Copy styles from…
       </button>
+      {isLinked ? (
+        <button
+          type="button"
+          className={ITEM}
+          onClick={() => { close(); onUnlink(); }}
+        >
+          <Unlink size={13} /> Unlink from group
+        </button>
+      ) : (
+        <button
+          type="button"
+          className={ITEM}
+          onClick={() => navigate('linkTargetPicker')}
+          disabled={!hasOtherSheets}
+          title={hasOtherSheets ? undefined : 'Create at least one more sheet to link this one.'}
+        >
+          <Link size={13} /> Link to…
+        </button>
+      )}
     </div>
   );
 }
 
-function SheetSourcePickerScreen({ sheets, sheet, onCopyStylesFromSheet }: SheetSettingsPopoverProps) {
+function CopyStylesSourcePickerScreen({ sheets, sheet, onCopyStylesFromSheet }: SheetSettingsPopoverProps) {
   const { close } = usePopoverNav();
   const candidates = sheets.filter((s) => s.id !== sheet.id);
 
@@ -85,27 +108,54 @@ function SheetSourcePickerScreen({ sheets, sheet, onCopyStylesFromSheet }: Sheet
   return (
     <div className={MENU_SHAPE}>
       <PopoverHeader title="Copy styles from" />
-      {candidates.map((s) => {
-        const isMain = s.id === MAIN_SHEET_ID;
-        return (
-          <button
-            key={s.id}
-            type="button"
-            className={ITEM}
-            onClick={() => handlePick(s.id)}
-          >
-            <span
-              className={
-                isMain
-                  ? 'w-2.5 h-2.5 rounded-full bg-transparent border border-edge-strong shrink-0'
-                  : 'w-2.5 h-2.5 rounded-full bg-edge-strong shrink-0'
-              }
-              style={s.color ? { background: s.color } : undefined}
-            />
-            <span className="flex-1 text-left whitespace-nowrap overflow-hidden text-ellipsis">{s.name}</span>
-          </button>
-        );
-      })}
+      {candidates.map((s) => (
+        <SheetPickerRow key={s.id} sheet={s} onPick={() => handlePick(s.id)} />
+      ))}
     </div>
+  );
+}
+
+function LinkTargetPickerScreen({ sheets, sheet, onLinkTo }: SheetSettingsPopoverProps) {
+  const { close } = usePopoverNav();
+  const candidates = sheets.filter((s) => s.id !== sheet.id);
+
+  const handlePick = (sourceId: string) => {
+    onLinkTo(sourceId);
+    close();
+  };
+
+  return (
+    <div className={MENU_SHAPE}>
+      <PopoverHeader title="Link to" />
+      {candidates.map((s) => (
+        <SheetPickerRow key={s.id} sheet={s} onPick={() => handlePick(s.id)} />
+      ))}
+    </div>
+  );
+}
+
+interface SheetPickerRowProps {
+  sheet: Sheet;
+  onPick: () => void;
+}
+
+function SheetPickerRow({ sheet, onPick }: SheetPickerRowProps) {
+  const isMain = sheet.id === MAIN_SHEET_ID;
+  return (
+    <button
+      type="button"
+      className={ITEM}
+      onClick={onPick}
+    >
+      <span
+        className={
+          isMain
+            ? 'w-2.5 h-2.5 rounded-full bg-transparent border border-edge-strong shrink-0'
+            : 'w-2.5 h-2.5 rounded-full bg-edge-strong shrink-0'
+        }
+        style={sheet.color ? { background: sheet.color } : undefined}
+      />
+      <span className="flex-1 text-left whitespace-nowrap overflow-hidden text-ellipsis">{sheet.name}</span>
+    </button>
   );
 }

@@ -1,6 +1,7 @@
 import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { ControlField, ControlValue } from '@core/templates/domain/definition/ControlField';
 import type { RefreshDocumentAction } from '@core/editor/actions/RefreshDocumentAction';
+import type { LinkedSheetsSync } from '@core/sheets/services/LinkedSheetsSync';
 
 const REDERIVE_DEBOUNCE_MS = 100;
 
@@ -8,7 +9,9 @@ const REDERIVE_DEBOUNCE_MS = 100;
  * Updates a single style control value on the active Sheet. CSS vars are
  * derived from the sheet downstream, so the overlay reflects the change
  * immediately. Document re-derivation is debounced so line measurements stay
- * accurate without lagging on every slider tick.
+ * accurate without lagging on every slider tick. When the sheet is part of
+ * a link group, the same edit rides across to every linked sibling via
+ * the sync service.
  */
 export class UpdateStyleControlAction {
   private _debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -16,6 +19,7 @@ export class UpdateStyleControlAction {
   constructor(
     private readonly store: EditorStore,
     private readonly refresh: RefreshDocumentAction,
+    private readonly linkedSheetsSync: LinkedSheetsSync,
   ) {}
 
   execute(field: ControlField, value: ControlValue): void {
@@ -23,7 +27,7 @@ export class UpdateStyleControlAction {
     if (!active) return;
     const updated = active.with({ styleValues: active.styleValues.withValue(field, value) });
     this.store.commit(`style:${active.id}:${field.id}`);
-    this.store.patch({ sheets: this.store.replaceSheet(updated) });
+    this.store.patch({ sheets: this.linkedSheetsSync.applyStyleEdit(updated, this.store.snapshot().sheets) });
 
     if (this._debounceTimer !== null) clearTimeout(this._debounceTimer);
     this._debounceTimer = setTimeout(() => {

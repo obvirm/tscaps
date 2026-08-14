@@ -13,6 +13,7 @@ import { DecodeWorkerClient } from '@core/preview/infrastructure/mediabunny/work
 import { WorkerMediaBunnyOpenedPreviewSource } from '@core/preview/infrastructure/mediabunny/worker/WorkerMediaBunnyOpenedPreviewSource';
 import { WorkerMediaBunnyVideoTrack } from '@core/preview/infrastructure/mediabunny/worker/WorkerMediaBunnyVideoTrack';
 import type { PreviewResolutionCap } from '@core/preview/services/PreviewResolutionCap';
+import type { WorkerErrorMonitor } from '@core/_shared/workers/WorkerErrorMonitor';
 
 interface VideoMetadata {
   readonly widthPx: number;
@@ -30,7 +31,10 @@ interface VideoMetadata {
  */
 export class MediaBunnyPreviewSourceLoader implements PreviewSourceLoader {
 
-  constructor(private readonly resolutionCap: PreviewResolutionCap) {}
+  constructor(
+    private readonly resolutionCap: PreviewResolutionCap,
+    private readonly workerErrorMonitor: WorkerErrorMonitor,
+  ) {}
 
   async open(source: Blob): Promise<OpenedPreviewSource> {
     const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(source) });
@@ -41,7 +45,7 @@ export class MediaBunnyPreviewSourceLoader implements PreviewSourceLoader {
       const audioTrack = await this.tryBuildAudioTrack(input);
       const metadata = await this.readVideoMetadata(videoTrack);
       const target = this.resolutionCap.clamp(metadata.widthPx, metadata.heightPx);
-      workerClient = new DecodeWorkerClient();
+      workerClient = new DecodeWorkerClient(this.workerErrorMonitor);
       await workerClient.open(source, target.widthPx, target.heightPx);
       return new WorkerMediaBunnyOpenedPreviewSource(
         input,

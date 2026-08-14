@@ -5,5 +5,7 @@ export { SvgFilterScope } from '@modules/svg-filter/SvgFilterScope';
 export { SvgFilterBundle } from '@modules/svg-filter/SvgFilterBundle';
 export { SvgFilterScoper } from '@modules/svg-filter/SvgFilterScoper';
 export { SvgFilterLengthResolver } from '@modules/svg-filter/SvgFilterLengthResolver';
+export { SvgFilterDefsRenderer } from '@modules/svg-filter/SvgFilterDefsRenderer';
+export type { SvgFilterDefs } from '@modules/svg-filter/SvgFilterDefsRenderer';
 export type { CssRewriteResult, IdScopeResult } from '@modules/svg-filter/SvgFilterScoper';
 export type { SvgFilterScopeProvider, SvgFilterRenderContext, SvgFilterLengthFactors } from '@modules/svg-filter/SvgFilterScopeProvider';

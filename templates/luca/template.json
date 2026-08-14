@@ -12,7 +12,7 @@
     "wordSpacing": 0.25,
     "lineSpacing": 0.05,
     "textCase": "none",
-    "textAlign": "left"
+    "textAlign": "start"
   },
   "rendering": {
     "videoFrame": {
@@ -27,35 +27,30 @@
       "label": "Text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "blend-color",
       "label": "Big word",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "big-word-font-family",
       "label": "Big word font",
       "type": "font",
       "default": "Anton",
-      "group": "appearance"
-    },
-    {
-      "id": "animation-intensity",
-      "label": "Animation intensity",
-      "type": "float",
-      "default": 1,
-      "min": 0,
-      "max": 1,
-      "step": 0.1,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     }
   ],
   "segmentSplitters": [
-    { "type": "boundary" },
+    {
+      "type": "boundary"
+    },
     {
       "type": "boundary_score_limit_by_chars",
       "minChars": 0,
@@ -73,13 +68,20 @@
     "horizontalOffset": 0.5
   },
   "effects": [
-    { "type": "gap_free", "enabled": true },
-    { "type": "remove_punctuation", "enabled": true }
+    {
+      "type": "gap_free",
+      "enabled": true
+    },
+    {
+      "type": "remove_punctuation",
+      "enabled": true
+    }
   ],
   "features": {
     "rotation": {
       "segment": false,
       "word": false
-    }
+    },
+    "animation": { "segment": false, "line": false }
   }
 }

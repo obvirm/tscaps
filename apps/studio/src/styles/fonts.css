@@ -24,6 +24,10 @@
 @import '@fontsource-variable/oswald';
 @import '@fontsource-variable/eb-garamond';
 @import '@fontsource-variable/fraunces';
+/* Fraunces' true italic is a distinct calligraphic design; without this
+   face, `font-style: italic` synthesizes an oblique that reads cheap on
+   a high-contrast serif. */
+@import '@fontsource-variable/fraunces/opsz-italic.css';
 @import '@fontsource-variable/lora';
 @import '@fontsource-variable/playfair-display';
 @import '@fontsource-variable/caveat';
@@ -49,6 +53,25 @@
 @import '@fontsource/permanent-marker/400.css';
 @import '@fontsource/vt323/400.css';
 @import '@fontsource/press-start-2p/400.css';
+
+/* Arabic, Hebrew and Urdu. Every Latin family names one of these as its
+   stand-in (see `FontCatalog`), so a caption in those scripts lands on a face
+   that carries the template's voice instead of on the device's own. Each
+   `@font-face` carries a `unicode-range`, so none of these download for a
+   reader whose captions never use the script. */
+@import '@fontsource-variable/vazirmatn';
+@import '@fontsource-variable/cairo';
+@import '@fontsource-variable/noto-sans-arabic';
+@import '@fontsource-variable/noto-kufi-arabic';
+@import '@fontsource/tajawal/400.css';
+@import '@fontsource/tajawal/700.css';
+@import '@fontsource/lalezar/400.css';
+@import '@fontsource/amiri/400.css';
+@import '@fontsource/amiri/700.css';
+@import '@fontsource-variable/heebo';
+@import '@fontsource-variable/assistant';
+@import '@fontsource-variable/rubik';
+@import '@fontsource/noto-nastaliq-urdu/400.css';
 
 /* Manual: families not available on Fontsource */
 @font-face {

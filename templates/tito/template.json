@@ -16,22 +16,20 @@
       "label": "Text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "highlight-color",
       "label": "Highlight",
       "type": "color",
       "default": "#00ffb3",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "shadow-color",
-      "label": "Shadow",
-      "type": "color",
-      "default": "#000000",
-      "advanced": true,
-      "group": "colors"
+      "default": "#000000"
     }
   ],
   "segmentSplitters": [

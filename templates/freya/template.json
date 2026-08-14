@@ -20,39 +20,44 @@
   },
   "styleControls": [
     {
-      "id": "text-color",
+      "id": "primary-color",
       "label": "Text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "highlight-color",
       "label": "Active word",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "outline-color",
       "label": "Outline",
       "type": "color",
       "default": "#0a0a0a",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
-      "id": "aberration-color-a",
+      "id": "split-color-a",
       "label": "Aberration A",
       "type": "color",
       "default": "#ff0044",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
-      "id": "aberration-color-b",
+      "id": "split-color-b",
       "label": "Aberration B",
       "type": "color",
       "default": "#00f4ff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "outline-thickness",
@@ -63,17 +68,20 @@
       "max": 0.3,
       "step": 0.01,
       "unit": "em",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
-      "id": "aberration-amount",
+      "id": "split-x",
       "label": "Aberration distance",
       "type": "float",
-      "default": 2.0,
+      "default": 0.05,
       "min": 0,
-      "max": 25,
-      "step": 0.5,
-      "group": "appearance"
+      "max": 0.6,
+      "step": 0.005,
+      "unit": "em",
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "displacement-amount",
@@ -83,7 +91,8 @@
       "min": 0,
       "max": 40,
       "step": 1,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "displacement-frequency",
@@ -93,8 +102,8 @@
       "min": 0.05,
       "max": 1.5,
       "step": 0.05,
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     }
   ],
   "segmentSplitters": [

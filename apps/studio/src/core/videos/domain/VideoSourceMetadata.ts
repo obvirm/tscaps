@@ -12,6 +12,12 @@ export interface VideoSourceMetadata {
   readonly videoCodec: string | null;
   readonly videoWidthPx: number | null;
   readonly videoHeightPx: number | null;
+  /**
+   * `false` means the container was read and holds no audio track —
+   * a positive fact, unlike the `null`-as-unknown convention of the
+   * other fields. `null` still means the probe could not tell.
+   */
+  readonly hasAudioTrack: boolean | null;
   readonly audioCodec: string | null;
   readonly audioSampleRate: number | null;
   readonly audioChannels: number | null;

@@ -2,15 +2,18 @@ import { useState, type ChangeEvent, type ReactElement } from 'react';
 import { ArrowUp, ArrowDown, ChevronsUp, ChevronsDown, CornerDownLeft, Link2, Palette, Plus, Tags, Trash2 } from 'lucide-react';
 import type { Segment, Word } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
-import type { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
-import type { WordStyleOverrides } from '@core/captions/domain/WordStyleOverrides';
+import type { BehindActorSegmentOverrideRegistry } from '@core/person-segmentation/domain/BehindActorSegmentOverrideRegistry';
 import { Popover } from '@ui/_shared/components/Popover/Popover';
 import { usePopoverNav } from '@ui/_shared/components/Popover/usePopoverNav';
 import { Tooltip } from '@ui/_shared/components/Tooltip/Tooltip';
 import { DualRangeSlider } from '@ui/_shared/components/controls/fields/DualRangeSlider';
 import { useRenderTimeMap } from '@ui/_shared/contexts/modules/CutsContext';
-import { WordStyleOverridesPanel } from '@ui/pages/editor/features/transcript/components/words/WordStyleOverridesPanel';
+import { WordStyleScreen } from '@ui/pages/editor/features/transcript/components/element-style/WordStyleScreen';
 import { WordTagsPanel } from '@ui/pages/editor/features/transcript/components/words/WordTagsPanel';
+
+// `warning`, not `danger`: nothing broke and nothing was lost — the edit
+// simply did not fit, and the times it settled on are right there.
+const ADJUSTED_NOTE_CLASS = 'm-0 text-3xs text-warning leading-snug';
 
 const NO_ROOM_TOOLTIP = "No room. Adjust the neighbor word times to free up space.";
 
@@ -18,7 +21,6 @@ interface WordPopoverActions {
   onCommitText: (text: string) => void;
   onCommitTime: (start: number, end: number) => void;
   onCommitTags: (tagNames: ReadonlySet<string>) => void;
-  onCommitStyleOverrides: (overrides: WordStyleOverrides) => void;
   onAddLineBreakAfter: () => void;
   onJoinWithNextLine?: (() => void) | undefined;
   onAddWordAfter: () => void;
@@ -34,8 +36,7 @@ interface WordPopoverData extends WordPopoverActions {
   isLastWordInLine: boolean;
   sheet: Sheet;
   segment: Segment;
-  segmentOverrides: SegmentOverrides;
-  currentOverrides: WordStyleOverrides;
+  behindActorOverrides: BehindActorSegmentOverrideRegistry;
   /** Visual slider stop — previous non-empty word's end (or segment start). */
   prevWordEnd: number;
   /** Visual slider stop — next non-empty word's start (or segment end). */
@@ -84,13 +85,10 @@ export function WordPopover(props: WordPopoverProps) {
   const screens = {
     menu: <WordMenuScreen {...props} />,
     styles: (
-      <WordStyleOverridesPanel
+      <WordStyleScreen
         sheet={props.sheet}
         segment={props.segment}
-        segmentOverrides={props.segmentOverrides}
         word={props.word}
-        currentOverrides={props.currentOverrides}
-        onCommit={props.onCommitStyleOverrides}
       />
     ),
     tags: (
@@ -153,6 +151,8 @@ function WordMenuScreen({
   const [lastText, setLastText] = useState(word.text);
   const [lastStart, setLastStart] = useState(word.time.start);
   const [lastEnd, setLastEnd] = useState(word.time.end);
+  const [asked, setAsked] = useState<{ start: number; end: number } | null>(null);
+  const [adjusted, setAdjusted] = useState(false);
 
   // Re-sync local inputs when the underlying word changes from outside
   // (undo/redo, neighbor merges). Without this the inputs would stay stale
@@ -167,6 +167,19 @@ function WordMenuScreen({
   }
   if (word.time.end !== lastEnd) {
     setLastEnd(word.time.end);
+    setEnd(outputWordEnd.toFixed(3));
+  }
+
+  // A committed edit is not always the edit that was asked for: a word may
+  // not carry its scene over the one beside it on the same sheet, and the
+  // write clamps. Re-seeding only when the stored time *changes* misses the
+  // very case that needs saying — a value clamped back to where it already
+  // was leaves the field showing a number that was never stored. So the
+  // fields are re-seeded after every commit, whether or not anything moved.
+  if (asked !== null) {
+    setAdjusted(asked.start !== word.time.start || asked.end !== word.time.end);
+    setAsked(null);
+    setStart(outputWordStart.toFixed(3));
     setEnd(outputWordEnd.toFixed(3));
   }
 
@@ -194,7 +207,9 @@ function WordMenuScreen({
     }
     const sSource = timeMap.toSourceTime(sOutput);
     const eSource = timeMap.toSourceTime(eOutput);
-    if (sSource !== word.time.start || eSource !== word.time.end) onCommitTime(sSource, eSource);
+    if (sSource === word.time.start && eSource === word.time.end) return;
+    setAsked({ start: sSource, end: eSource });
+    onCommitTime(sSource, eSource);
   };
 
   const handleSliderStart = (outputValue: number) => {
@@ -213,6 +228,7 @@ function WordMenuScreen({
     <div className="p-2 flex flex-col gap-1.5 w-[200px] box-border">
       <input
         className={`${INPUT_BASE} text-sm py-1 px-1.5`}
+        dir="auto"
         value={text}
         onChange={handleTextChange}
         onBlur={commitTextOnBlur}
@@ -229,7 +245,7 @@ function WordMenuScreen({
           <input
             type="text" inputMode="decimal" value={start}
             className={`${INPUT_BASE} text-xs font-mono py-[3px] px-[5px]`}
-            onChange={(e) => setStart(e.target.value)}
+            onChange={(e) => { setAdjusted(false); setStart(e.target.value); }}
             onBlur={commitInputs}
             onKeyDown={(e) => { if (e.key === 'Enter') { commitInputs(); close(); } }}
           />
@@ -239,12 +255,20 @@ function WordMenuScreen({
           <input
             type="text" inputMode="decimal" value={end}
             className={`${INPUT_BASE} text-xs font-mono py-[3px] px-[5px]`}
-            onChange={(e) => setEnd(e.target.value)}
+            onChange={(e) => { setAdjusted(false); setEnd(e.target.value); }}
             onBlur={commitInputs}
             onKeyDown={(e) => { if (e.key === 'Enter') { commitInputs(); close(); } }}
           />
         </label>
       </div>
+      {adjusted && (
+        // States the times that survived rather than naming the wall they
+        // hit: the limit can be a neighbouring word, a neighbouring scene
+        // on the same sheet, or the video's end.
+        <p className={ADJUSTED_NOTE_CLASS}>
+          Those times were not available. Kept {start}–{end}.
+        </p>
+      )}
       {outputPrevEnd >= outputNextStart ? (
         <Tooltip text={NO_ROOM_TOOLTIP} position="bottom">
           <div className="w-full">

@@ -1,3 +1,4 @@
+import type { FileDownloader } from '@core/_shared/domain/FileDownloader';
 import type { ProjectRepository } from '@core/projects/domain/ProjectRepository';
 import type { ProjectSerializer, SerializedProject } from '@core/projects/services/ProjectSerializer';
 
@@ -26,6 +27,7 @@ export class ExportProjectAction {
   constructor(
     private readonly repository: ProjectRepository,
     private readonly serializer: ProjectSerializer,
+    private readonly fileDownloader: FileDownloader,
   ) {}
 
   async execute(projectId: string): Promise<void> {
@@ -39,24 +41,12 @@ export class ExportProjectAction {
     };
 
     const blob = new Blob([JSON.stringify(file, null, 2)], { type: 'application/json' });
-    this.triggerDownload(blob, this.fileNameFor(project.name));
+    this.fileDownloader.download(blob, this.fileNameFor(project.name));
   }
 
   private fileNameFor(projectName: string): string {
     const slug = projectName.trim().replace(/[^a-z0-9-_ ]/gi, '').replace(/\s+/g, '-');
     const safe = slug.length > 0 ? slug : 'project';
     return `${safe}.tscaps`;
-  }
-
-  private triggerDownload(blob: Blob, fileName: string): void {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = fileName;
-    a.style.display = 'none';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
   }
 }

@@ -53,6 +53,7 @@ export class RenameUserTemplateAction {
       original.alignment,
       original.rendering,
       original.features,
+      original.behindActor,
       original.effectConfigs,
       original.segmentSplitterConfigs,
       original.lineSplitter,
@@ -61,6 +62,7 @@ export class RenameUserTemplateAction {
       original.svgFilterDefinitions,
       original.getCss(),
       original.getFiltersSvg(),
+      original.declaredAnimations,
     );
   }
 }

@@ -1,11 +1,12 @@
 import { useCallback, useMemo, useState, type ReactNode, type Ref } from 'react';
-import { Captions, Check, Scissors } from 'lucide-react';
+import { AudioWaveform, Captions, Check } from 'lucide-react';
 import type { Document, Segment } from '@tscaps/engine';
 import type { EditorState } from '@core/editor/domain/EditorState';
 import type { SubtitleOverlayController } from '@presentation/editor/controllers/SubtitleOverlayController';
 import type { OverlayManipulationController } from '@presentation/editor/controllers/OverlayManipulationController';
 import type { OverlaySelectionController } from '@presentation/editor/controllers/OverlaySelectionController';
 import type { PlaybackTimeBinder } from '@presentation/editor/controllers/PlaybackTimeBinder';
+import type { AppNoticeChannel } from '@core/errors/services/AppNoticeChannel';
 import type { TemplateLibraryView } from '@core/templates/store/TemplateLibraryStore';
 import { VideoDropzone } from '@ui/pages/editor/components/video/VideoDropzone';
 import { VideoPlayer } from '@ui/pages/editor/components/video/VideoPlayer';
@@ -16,12 +17,15 @@ import { MaskBackfillProgressPill } from '@ui/pages/editor/features/person-segme
 import { CustomVideoControls } from '@ui/pages/editor/components/playback/CustomVideoControls';
 import { CaptionsPanel } from '@ui/pages/editor/components/sidebar/CaptionsPanel';
 import { EditorWorkspacePane, type EditorModeDescriptor } from '@ui/pages/editor/components/EditorWorkspacePane';
-import { CutsHost } from '@ui/pages/editor/features/cuts/CutsHost';
+import { TimelineHost } from '@ui/pages/editor/features/timeline/TimelineHost';
+import { ElementInspector } from '@ui/pages/editor/features/element/ElementInspector';
+import { ElementSelectionBar } from '@ui/pages/editor/features/element/ElementSelectionBar';
 import { EditorToolbar, type SaveButtonStatus } from '@ui/pages/editor/components/EditorToolbar';
 import { MobileEditorLayout } from '@ui/pages/editor/components/layout/MobileEditorLayout';
 import { DesktopEditorLayout } from '@ui/pages/editor/components/layout/DesktopEditorLayout';
 import { Toast } from '@ui/_shared/components/Toast/Toast';
-import { SaveFailedToast } from '@ui/pages/editor/components/SaveFailedToast';
+import { LinkedSheetsPropagationToast } from '@ui/pages/editor/components/LinkedSheetsPropagationToast';
+import { AppNoticeToast } from '@ui/pages/editor/components/AppNoticeToast';
 import { useEditor } from '@ui/_shared/contexts/modules/EditorContext';
 import { useCuts } from '@ui/_shared/contexts/modules/CutsContext';
 import { useSheets } from '@ui/_shared/contexts/modules/SheetsContext';
@@ -39,6 +43,7 @@ interface EditorPageProps {
   manipulationController: OverlayManipulationController;
   selectionController: OverlaySelectionController;
   playbackTimeBinder: PlaybackTimeBinder;
+  appNoticeChannel: AppNoticeChannel;
   toastOpen: boolean;
   postExportPrompt: ReactNode | null;
   exportDisabled: boolean;
@@ -60,6 +65,7 @@ export function EditorPage({
   manipulationController,
   selectionController,
   playbackTimeBinder,
+  appNoticeChannel,
   toastOpen,
   postExportPrompt,
   exportDisabled,
@@ -143,8 +149,8 @@ export function EditorPage({
           selectionController={selectionController}
           document={visibleDocument}
           sheets={state.sheets}
-          wordStyleOverrides={state.wordStyleOverrides}
-          segmentOverrides={state.segmentOverrides}
+          behindActorOverrides={state.behindActorOverrides}
+          elementStyles={state.elementStyles}
           decorationOverrides={state.decorationOverrides}
           videoDuration={state.video.duration}
           videoOverlay={videoOverlay}
@@ -176,8 +182,9 @@ export function EditorPage({
       library={library}
       document={state.document}
       activeSegmentId={visibleActiveSegmentId}
-      wordStyleOverrides={state.wordStyleOverrides}
-      segmentOverrides={state.segmentOverrides}
+      elementStyles={state.elementStyles}
+      behindActorOverrides={state.behindActorOverrides}
+      frozenSegments={state.frozenSegments}
       decorationOverrides={state.decorationOverrides}
       videoDuration={state.video.duration}
       isPlaying={state.video.isPlaying}
@@ -188,14 +195,17 @@ export function EditorPage({
       onRenameSheet={(id, name) => sheets.actions.sheets.rename.execute(id, name)}
       onDeleteSheet={(id) => sheets.actions.sheets.delete.execute(id)}
       onCopyStylesFromSheet={(targetId, sourceId) => sheets.actions.sheets.copyStylesFromSheet.execute(targetId, sourceId)}
+      onLinkSheet={(targetId, sourceId) => sheets.actions.sheets.link.execute(targetId, sourceId)}
+      onUnlinkSheet={(id) => sheets.actions.sheets.unlink.execute(id)}
     />
   );
 
   const workspaceModes: readonly EditorModeDescriptor[] = [
-    { id: 'captions', label: 'Captions', icon: <Captions size={MODE_ICON_SIZE} />, panel: captionsPanel },
-    { id: 'cuts',     label: 'Cuts',     icon: <Scissors size={MODE_ICON_SIZE} />, panel: (
-      <CutsHost
+    { id: 'captions', label: 'Captions', role: 'content', icon: <Captions size={MODE_ICON_SIZE} />, panel: captionsPanel },
+    { id: 'timeline', label: 'Timeline', role: 'tool', icon: <AudioWaveform size={MODE_ICON_SIZE} />, panel: (
+      <TimelineHost
         document={state.document}
+        sheets={state.sheets}
         videoFile={state.video.file}
         videoDurationSec={state.video.duration}
         cuts={state.cuts}
@@ -215,7 +225,13 @@ export function EditorPage({
     ) },
   ];
 
-  const sidebar = <EditorWorkspacePane modes={workspaceModes} />;
+  const sidebar = (
+    <EditorWorkspacePane
+      modes={workspaceModes}
+      selectionBar={<ElementSelectionBar document={visibleDocument} selectionController={selectionController} />}
+      inspector={<ElementInspector document={visibleDocument} selectionController={selectionController} />}
+    />
+  );
 
   return (
     <main className="flex flex-col items-center justify-center h-dvh overflow-hidden px-3 py-2 lg:px-6 lg:py-4">
@@ -265,7 +281,8 @@ export function EditorPage({
           onDismiss={onDismissToast}
         />
       )}
-      <SaveFailedToast error={state.error} />
+      <LinkedSheetsPropagationToast />
+      <AppNoticeToast channel={appNoticeChannel} />
     </main>
   );
 }

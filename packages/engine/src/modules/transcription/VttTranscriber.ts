@@ -1,5 +1,9 @@
 import type { Document } from '@modules/document/Document';
-import { SrtTranscriber } from '@modules/transcription/SrtTranscriber';
+import { CueDocumentBuilder } from '@modules/transcription/CueDocumentBuilder';
+import { CueTextTokenizer } from '@modules/transcription/CueTextTokenizer';
+import { CueTimecodeReader } from '@modules/transcription/CueTimecodeReader';
+import { TimestampedCueWordReader } from '@modules/transcription/TimestampedCueWordReader';
+import { WordTimingEstimator } from '@modules/transcription/WordTimingEstimator';
 import type {
   Transcriber,
   TranscriberOptions,
@@ -11,35 +15,58 @@ const BOM_RE = /^\uFEFF/;
 /**
  * Builds a Document by parsing a WebVTT (`.vtt`) caption file. Skips
  * the mandatory `WEBVTT` header block and any `NOTE`, `STYLE`, or
- * `REGION` blocks, then hands the remaining cue blocks to
- * `SrtTranscriber` — the underlying timecode grammar, tag stripping,
- * and word-timing distribution are compatible between the two
- * formats.
+ * `REGION` blocks, then reads the cues below them.
+ *
+ * WebVTT can mark inside a cue when each word is spoken, and those
+ * marks are honoured: a file carrying them yields the word timings it
+ * recorded rather than a guess. Where a cue carries no marks, its words
+ * are shared out across it the way a format without marks requires.
  *
  * The audio Blob passed to `transcribe` is ignored. Useful when
  * caption text and timing are already known — burning a hand-authored
  * VTT into a video, replaying captions from a subtitle-authoring
  * tool, etc.
  *
- * Throws when a cue block is malformed; returns an empty Document
- * when the source has no parseable cues.
+ * A block that carries no timecode is skipped and announced through
+ * `onSkippedCueBlock`, so a single broken cue costs its own text and
+ * nothing else. Throws only when the file has blocks and none of them
+ * could be read, or when a timecode itself is malformed.
+ *
+ * Builds its own collaborators rather than receiving them. The
+ * constructor is the surface a consumer of the engine reaches for, and
+ * it asks for a source and nothing else, so this class is where the
+ * parsing side is assembled rather than a participant in someone
+ * else's assembly.
  */
 export class VttTranscriber implements Transcriber {
   onProgress?: (event: TranscriberProgressEvent) => void;
 
+  /**
+   * Fired once per block left out of the document, before
+   * `transcribe` resolves, carrying the block verbatim.
+   */
+  onSkippedCueBlock?: (block: string) => void;
+
+  private readonly timecodeReader = new CueTimecodeReader();
+  private readonly documentBuilder = new CueDocumentBuilder(this.timecodeReader);
+  private readonly wordReader = new TimestampedCueWordReader(
+    new CueTextTokenizer(),
+    this.timecodeReader,
+    new WordTimingEstimator(),
+  );
+
   constructor(private readonly source: string) {}
 
-  async transcribe(audio: Blob, options?: TranscriberOptions): Promise<Document> {
-    const cueOnlySource = this.extractCueBlocks(this.source);
-    const inner = new SrtTranscriber(cueOnlySource);
-    if (this.onProgress) inner.onProgress = this.onProgress;
-    return inner.transcribe(audio, options);
+  async transcribe(_audio: Blob, _options?: TranscriberOptions): Promise<Document> {
+    this.onProgress?.({ stage: 'inferring', progress: 1 });
+    const result = this.documentBuilder.build(this.extractCueBlocks(this.source), this.wordReader);
+    for (const block of result.skippedBlocks) this.onSkippedCueBlock?.(block);
+    return result.document;
   }
 
   private extractCueBlocks(source: string): string {
     const normalized = source.replace(BOM_RE, '').replace(/\r\n?/g, '\n');
-    const withoutHeader = this.stripWebVttHeader(normalized);
-    return withoutHeader
+    return this.stripWebVttHeader(normalized)
       .split(/\n{2,}/)
       .filter((block) => this.isCueBlock(block))
       .join('\n\n');

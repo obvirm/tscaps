@@ -18,28 +18,32 @@
       "label": "Text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "bg-color",
       "label": "Background",
       "type": "color",
       "default": "#1a1a1a",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "highlight-text-color",
       "label": "Highlight text",
       "type": "color",
       "default": "#000000",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "highlight-bg-color",
       "label": "Highlight background",
       "type": "color",
       "default": "#ffd700",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "bg-radius",
@@ -50,8 +54,8 @@
       "max": 0.83,
       "step": 0.01,
       "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "bg-padding-x",
@@ -62,7 +66,8 @@
       "max": 0.83,
       "step": 0.01,
       "unit": "em",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "bg-padding-y",
@@ -73,7 +78,8 @@
       "max": 0.56,
       "step": 0.01,
       "unit": "em",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     }
   ],
   "segmentSplitters": [

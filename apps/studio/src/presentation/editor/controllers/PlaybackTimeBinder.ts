@@ -93,10 +93,27 @@ export class PlaybackTimeBinder {
     const { duration, currentTime } = this.store.snapshot().video;
     const outputDuration = Math.max(0, duration - timeMap.totalSkipDuration());
     if (this.lastAppliedOutputDuration !== outputDuration) {
-      element.max = String(outputDuration || 100);
+      this.applySliderRange(element, outputDuration);
       this.lastAppliedOutputDuration = outputDuration;
     }
     element.value = String(timeMap.toOutputTime(currentTime));
+  }
+
+  /**
+   * Sets the slider's `max` when a real output duration is known, and
+   * disables it otherwise. A zero duration means the source hasn't
+   * been probed yet (or the probe failed) — the slider stays inert
+   * against a truthful, empty range instead of miming a scrubbable
+   * axis backed by an invented length.
+   */
+  private applySliderRange(element: HTMLInputElement, outputDuration: number): void {
+    if (outputDuration > 0) {
+      element.max = String(outputDuration);
+      element.disabled = false;
+      return;
+    }
+    element.removeAttribute('max');
+    element.disabled = true;
   }
 
   private applyTimeDisplay(): void {

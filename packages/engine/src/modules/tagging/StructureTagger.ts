@@ -4,11 +4,11 @@ import { Section } from '@modules/document/Section';
 import { Segment } from '@modules/document/Segment';
 import { Line } from '@modules/document/Line';
 import { Word } from '@modules/document/Word';
-import { Tag, StructureTag } from '@modules/document/Tag';
+import { Tag } from '@modules/tags/Tag';
+import { StructureTag } from '@modules/tags/StructureTag';
 
 /**
  * Assigns positional structure tags across the Document hierarchy:
- *   - Section-level: FIRST/LAST_SECTION_IN_DOCUMENT
  *   - Segment-level: FIRST/LAST_SEGMENT_IN_SECTION, FIRST/LAST_SEGMENT_IN_DOCUMENT
  *   - Line-level:    FIRST/LAST_LINE_IN_SECTION, FIRST/LAST_LINE_IN_SEGMENT
  *   - Word-level:    FIRST/LAST_WORD_IN_SECTION, FIRST/LAST_WORD_IN_SEGMENT,
@@ -26,11 +26,8 @@ export class StructureTagger extends Tagger {
   }
 
   private tagSection(section: Section, secIdx: number, totalSections: number): Section {
-    const tags = new Set<Tag>();
     const isFirstSection = secIdx === 0;
     const isLastSection = secIdx === totalSections - 1;
-    if (isFirstSection) tags.add(Tag.of(StructureTag.FIRST_SECTION_IN_DOCUMENT));
-    if (isLastSection) tags.add(Tag.of(StructureTag.LAST_SECTION_IN_DOCUMENT));
 
     const sectionWords = section.getWords();
     const sectionLines = section.getLines();
@@ -39,7 +36,7 @@ export class StructureTagger extends Tagger {
       this.tagSegment(segment, segIdx, section.segments.length, isFirstSection, isLastSection, sectionWords, sectionLines),
     );
 
-    return section.with({ segments: taggedSegments, structureTags: tags });
+    return section.with({ segments: taggedSegments });
   }
 
   private tagSegment(

@@ -1,7 +1,7 @@
 import type { WhisperDevice, WhisperModel } from '@tscaps/engine';
 
 export type TranscribeBackend = Extract<WhisperDevice, 'wasm' | 'webgpu'>;
-export type TranscribeModel = Extract<WhisperModel, 'tiny' | 'base' | 'small'>;
+export type TranscribeModel = Extract<WhisperModel, 'tiny' | 'base' | 'small' | 'medium'>;
 
 /**
  * User-tunable transcription settings. `backend` chooses where Whisper

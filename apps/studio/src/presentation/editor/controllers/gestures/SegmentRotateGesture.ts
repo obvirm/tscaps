@@ -1,7 +1,9 @@
 import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { UpdateRotationAction } from '@core/sheets/actions/style/UpdateRotationAction';
-import type { SetSegmentStyleOverrideAction } from '@core/captions/actions/segments/SetSegmentStyleOverrideAction';
-import type { SegmentStyleOverrides } from '@core/captions/domain/SegmentStyleOverrides';
+import type { AuthoredElementControl } from '@core/elements/domain/ElementControl';
+import { ElementFieldId } from '@core/elements/domain/fields/ElementFieldId';
+import type { StyledElementCatalog } from '@core/elements/domain/StyledElementCatalog';
+import type { SetElementFieldAction } from '@core/elements/actions/SetElementFieldAction';
 import type { RotationGeometryResolver } from '@presentation/editor/services/RotationGeometryResolver';
 import { DragSession } from '@presentation/editor/controllers/DragSession';
 import type { SegmentBindingRegistry } from '@presentation/editor/controllers/SegmentBindingRegistry';
@@ -16,29 +18,33 @@ import {
 /**
  * Gesture: drag the rotation icon on the selected segment to rotate
  * around the centre of its wrapper bounding box. Default writes the
- * sheet's rotation so every segment rotates together — the natural
- * model for captions — and clears the dragged segment's per-segment
- * rotation override on first commit so it stops standing still while
- * its siblings spin around. Holding Alt at pointerdown flips the
- * gesture: writes land on the override only.
+ * rotation of the segment's own sheet so every segment on it rotates
+ * together — the natural model for captions — and clears the dragged
+ * segment's per-segment rotation override on first commit so it stops
+ * standing still while its siblings spin around. Holding Alt at
+ * pointerdown flips the gesture: writes land on the override only.
  */
 export class SegmentRotateGesture {
   /** Effective rotation captured at pointerdown, used as the base the
    *  per-tick delta is added to. `null` between gestures. */
   private originalRotationDeg: number | null = null;
+  /** Sheet the segment under the handle belongs to, captured at
+   *  pointerdown. `null` between gestures. */
+  private targetSheetId: string | null = null;
   /** True when Alt was held at pointerdown: writes land on the
    *  segment override instead of the sheet. */
   private scopedToSegment = false;
-  /** True after the first non-scoped write has cleared the dragged
-   *  segment's override, so we don't issue a no-op clear every tick. */
-  private clearedSegmentOverride = false;
+  /** True after the first non-scoped write has taken the dragged
+   *  segment's own angle back, so we don't issue a no-op clear every tick. */
+  private clearedSegmentRotation = false;
 
   constructor(
     private readonly host: OverlayGestureHost,
     private readonly segments: SegmentBindingRegistry,
     private readonly editorStore: EditorStore,
     private readonly updateRotation: UpdateRotationAction,
-    private readonly setSegmentStyleOverride: SetSegmentStyleOverrideAction,
+    private readonly styledElementCatalog: StyledElementCatalog,
+    private readonly setElementField: SetElementFieldAction,
     private readonly rotationGeometry: RotationGeometryResolver,
   ) {}
 
@@ -77,32 +83,27 @@ export class SegmentRotateGesture {
   }
 
   cleanupOnEnd(): void {
-    // `scopedToSegment` and `clearedSegmentOverride` are deliberately NOT
-    // reset here — the host calls `cleanupOnEnd` BEFORE the final
-    // `commit`, and the commit must see the same scope as the move
-    // ticks. Both are re-initialised at the next `tryStart`.
+    // `scopedToSegment`, `clearedSegmentRotation` and `targetSheetId` are
+    // deliberately NOT reset here — they are latched for the whole
+    // gesture and re-initialised at the next `tryStart`.
     this.originalRotationDeg = null;
+  }
+
+  private rotationControl(): AuthoredElementControl {
+    return this.styledElementCatalog.requireControl('segment', ElementFieldId.ROTATION);
   }
 
   private writeRotation(segmentId: string, rotationDeg: number): void {
     if (this.scopedToSegment) {
-      const previous = this.editorStore.snapshot().segmentOverrides.getStyle(segmentId);
-      this.setSegmentStyleOverride.execute(segmentId, { ...previous, rotation: rotationDeg });
+      this.setElementField.execute(segmentId, 'segment', this.rotationControl(), rotationDeg);
       return;
     }
-    if (!this.clearedSegmentOverride) {
-      this.clearSegmentRotationOverride(segmentId);
-      this.clearedSegmentOverride = true;
+    if (this.targetSheetId === null) return;
+    if (!this.clearedSegmentRotation) {
+      this.setElementField.clear(segmentId, 'segment', this.rotationControl());
+      this.clearedSegmentRotation = true;
     }
-    this.updateRotation.execute({ angleDeg: rotationDeg });
-  }
-
-  private clearSegmentRotationOverride(segmentId: string): void {
-    const previous = this.editorStore.snapshot().segmentOverrides.getStyle(segmentId);
-    if (previous.rotation === undefined) return;
-    const next: Record<string, unknown> = { ...previous };
-    delete next.rotation;
-    this.setSegmentStyleOverride.execute(segmentId, next as SegmentStyleOverrides);
+    this.updateRotation.execute(this.targetSheetId, { angleDeg: rotationDeg });
   }
 
   private tryStart(target: SegmentRotateTarget, event: PointerEvent): void {
@@ -112,12 +113,13 @@ export class SegmentRotateGesture {
     if (!scaler) return;
     const segmentBinding = this.segments.get(target.segmentId);
     if (!segmentBinding) return;
-    const activeSheet = this.editorStore.activeSheet();
-    if (!activeSheet) return;
+    const sheet = this.editorStore.sheet(segmentBinding.sheetId);
+    if (!sheet) return;
     event.stopPropagation();
     this.scopedToSegment = event.altKey;
-    this.clearedSegmentOverride = false;
-    this.originalRotationDeg = this.readBaselineRotation(target.segmentId, activeSheet.rotationConfig.angleDeg);
+    this.clearedSegmentRotation = false;
+    this.targetSheetId = sheet.id;
+    this.originalRotationDeg = this.readBaselineRotation(target.segmentId, sheet.rotationConfig.angleDeg);
     const session = new DragSession(
       target,
       segmentBinding.wrapper.getBoundingClientRect(),
@@ -130,12 +132,13 @@ export class SegmentRotateGesture {
     this.host.activateSession(session);
   }
 
-  /** Per-segment override when present (latched user choice), else the
-   *  sheet's rotation (the effective baseline the user is rotating away
-   *  from). Either way the result is the angle the segment currently
-   *  appears at on screen — the per-tick delta is added on top. */
+  /** The segment's own angle when it has one (latched user choice),
+   *  else the sheet's rotation (the effective baseline the user is
+   *  rotating away from). Either way the result is the angle the
+   *  segment currently appears at on screen — the per-tick delta is
+   *  added on top. */
   private readBaselineRotation(segmentId: string, sheetRotationDeg: number): number {
-    const override = this.editorStore.snapshot().segmentOverrides.getStyle(segmentId).rotation;
-    return override ?? sheetRotationDeg;
+    const held = this.editorStore.snapshot().elementStyles.fieldNumber(segmentId, ElementFieldId.ROTATION);
+    return held ?? sheetRotationDeg;
   }
 }

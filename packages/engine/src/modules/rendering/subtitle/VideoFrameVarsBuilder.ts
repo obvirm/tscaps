@@ -7,6 +7,7 @@ import type { SegmentSubtreeHtmlBuilder } from '@modules/rendering/subtitle/Segm
 import type { SegmentPaintRegionResolver, SegmentAnchorPlacement } from '@modules/rendering/subtitle/SegmentPaintRegionResolver';
 import type { SegmentPaintRegionCache } from '@modules/rendering/subtitle/SegmentPaintRegionCache';
 import type { PreparedStyle } from '@modules/rendering/subtitle/PreparedStyle';
+import { profiler } from '@modules/profiling/Profiler';
 
 const NO_EXCLUDED_WORDS: ReadonlySet<string> = new Set();
 
@@ -44,14 +45,19 @@ export class VideoFrameVarsBuilder {
     t: number,
   ): Promise<InlineStyleMap> {
     if (!style.rendering.videoFrame.required) return {};
-    const region = this.resolvePaintRegion(style, seg, placement);
+    const region = profiler.time('VideoFrameVarsBuilder.paintRegion', () =>
+      this.resolvePaintRegion(style, seg, placement),
+    );
+    const frameUrl = await profiler.time('VideoFrameVarsBuilder.frameUrl', () =>
+      this.videoFrameSource!.getFrameAt(t, style.rendering.videoFrame.jpegQuality, region),
+    );
     // Offset vars assume the consuming element is a direct child of
     // the wrapper: `%` resolves against the wrapper. The region.x/y
     // bias positions the layer so the cropped frame's (0,0) lands on
     // viewport (region.x, region.y); when no crop applies the bias
     // is zero and the layer covers the full viewport.
     return {
-      [CssVariable.VIDEO_FRAME]: `url("${await this.videoFrameSource!.getFrameAt(t, style.rendering.videoFrame.jpegQuality, region)}")`,
+      [CssVariable.VIDEO_FRAME]: `url("${frameUrl}")`,
       [CssVariable.SUBTITLE_REGION_WIDTH]: `${region.width}px`,
       [CssVariable.SUBTITLE_REGION_HEIGHT]: `${region.height}px`,
       [CssVariable.SUBTITLE_REGION_X]: `calc(${placement.hAnchorPct}% - ${placement.xPx - region.x}px)`,
@@ -85,7 +91,8 @@ export class VideoFrameVarsBuilder {
     seg: Segment,
     placement: SegmentAnchorPlacement,
   ): VideoFrameRegion {
-    const segmentInlineStylesOverride = style.segmentOverrides.get(seg.id)?.inlineStyles;
+    const segmentOverride = style.segmentOverrides.get(seg.id);
+    const segmentInlineStylesOverride = segmentOverride?.inlineStyles;
     const baseInlineStyles: InlineStyleMap = segmentInlineStylesOverride
       ? { ...style.inlineStyles, ...segmentInlineStylesOverride }
       : style.inlineStyles;
@@ -96,8 +103,14 @@ export class VideoFrameVarsBuilder {
         wordOverrides: style.wordOverrides,
         splitWordsIntoLetters: style.rendering.splitWordsIntoLetters,
         includeVideoFrameLayer: style.rendering.videoFrame.required,
+        textDirection: style.rendering.textDirection,
         extraWrapperStyles: {},
+        extraSegmentClasses: segmentOverride?.classes ?? [],
         decorationPlacements: style.decorationPlacements,
+        // The probe measures geometry, so it has to carry the ids the
+        // stylesheet addresses: a rule targeting one element can change
+        // its box, and a region measured without it would be wrong.
+        addressableElementIds: style.addressableElementIds,
         inlineStyleEmitter: style.inlineStyleEmitter,
       },
       seg,

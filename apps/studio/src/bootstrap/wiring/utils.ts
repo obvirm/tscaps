@@ -1,8 +1,11 @@
 import { IndexedDbClient } from '@core/_shared/infrastructure/IndexedDbClient';
 import type { IndexedDbStoreDefinition } from '@core/_shared/infrastructure/IndexedDbStoreDefinition';
-import { UserAgentInspector } from '@core/_shared/infrastructure/UserAgentInspector';
+import { UserAgentInspector } from '@shared/browser';
 import { LocalStorageClient } from '@core/_shared/infrastructure/LocalStorageClient';
 import { E2EMode } from '@core/_shared/infrastructure/E2EMode';
+import { StorageFootprintProbe } from '@core/_shared/infrastructure/StorageFootprintProbe';
+import { StoragePersistence } from '@core/_shared/infrastructure/StoragePersistence';
+import { AnchorFileDownloader } from '@core/_shared/infrastructure/AnchorFileDownloader';
 
 const INDEXED_DB_NAME = 'tscaps';
 const INDEXED_DB_VERSION = 8;
@@ -27,7 +30,9 @@ export type UtilsModule = ReturnType<typeof bootUtils>;
  * consumers ask about without owning a domain of their own.
  */
 export function bootUtils(deps: UtilsDependencies) {
+  const storagePersistence = new StoragePersistence();
   return {
+    storagePersistence,
     userAgentInspector: new UserAgentInspector(),
     localStorageClient: new LocalStorageClient('tscaps'),
     indexedDb: new IndexedDbClient({
@@ -36,5 +41,7 @@ export function bootUtils(deps: UtilsDependencies) {
       stores: deps.indexedDbStores,
     }),
     e2eMode: new E2EMode(),
+    storageFootprintProbe: new StorageFootprintProbe(storagePersistence),
+    fileDownloader: new AnchorFileDownloader(),
   };
 }

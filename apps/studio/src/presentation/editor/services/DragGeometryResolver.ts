@@ -1,3 +1,5 @@
+import type { BoxOrigin, BoxSize } from '@presentation/editor/services/AlignmentGeometryResolver';
+
 export interface DragCentroid {
   readonly centroidXFrac: number;
   readonly centroidYFrac: number;
@@ -26,6 +28,27 @@ export class DragGeometryResolver {
       centroidYFrac: centroidPxY / scalerRect.height,
       boxWidthFrac: wrapperRect.width / scalerRect.width,
       boxHeightFrac: wrapperRect.height / scalerRect.height,
+    };
+  }
+
+  /**
+   * Same conversion as `centroid`, for a box already stated in frame
+   * coordinates. Preferred whenever the box's layout position is known:
+   * a measured client rect carries the element's rotation and lift
+   * transforms, and both would bake into the resolved anchor.
+   */
+  centroidFromOrigin(
+    origin: BoxOrigin,
+    box: BoxSize,
+    frame: BoxSize,
+    deltaX: number,
+    deltaY: number,
+  ): DragCentroid {
+    return {
+      centroidXFrac: (origin.left + box.width / 2 + deltaX) / frame.width,
+      centroidYFrac: (origin.top + box.height / 2 + deltaY) / frame.height,
+      boxWidthFrac: box.width / frame.width,
+      boxHeightFrac: box.height / frame.height,
     };
   }
 }

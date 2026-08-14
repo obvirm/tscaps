@@ -1,6 +1,6 @@
 import { memo, useRef, type ReactNode } from 'react';
 import { Plus, Upload } from 'lucide-react';
-import type { AppError } from '@core/_shared/domain/AppError';
+import type { AppError } from '@core/errors/domain/AppError';
 import type { ProjectMetadata } from '@core/projects/domain/ProjectMetadata';
 import type { ThemeController } from '@presentation/theme/controllers/ThemeController';
 import { ThemeToggle } from '@ui/_shared/components/ThemeToggle/ThemeToggle';

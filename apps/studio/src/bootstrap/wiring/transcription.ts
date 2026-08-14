@@ -7,13 +7,27 @@ import { WorkerTranscriber } from '@core/transcription/infrastructure/WorkerTran
 import { WordOverlapClamper } from '@core/transcription/services/WordOverlapClamper';
 import { TranscribeAction } from '@core/transcription/actions/TranscribeAction';
 import { UpdateTranscribePreferenceAction } from '@core/transcription/actions/UpdateTranscribePreferenceAction';
+import { UntranscribedRegionsStore } from '@core/transcription/store/UntranscribedRegionsStore';
 import { PreprocessingProgressStore } from '@core/preprocessing/store/PreprocessingProgressStore';
+import type { WorkerErrorMonitor } from '@core/_shared/workers/WorkerErrorMonitor';
+import type { TelemetryModule } from '@bootstrap/wiring/telemetry';
+import type { AppNoticeChannel } from '@core/errors/services/AppNoticeChannel';
+import type { AppErrorClassifier } from '@core/errors/services/AppErrorClassifier';
+import type { AppErrorTelemetryDescriber } from '@core/errors/services/AppErrorTelemetryDescriber';
+import type { StorageFootprintProbe } from '@core/_shared/infrastructure/StorageFootprintProbe';
+import { NonBlockingFailureReporter } from '@core/errors/services/NonBlockingFailureReporter';
 
 export interface TranscriptionDependencies {
   readonly store: EditorStore;
   readonly preferenceRepository: LocalStorageTranscribePreferenceRepository;
   readonly audioDecoder: AudioDecoder;
   readonly progressStore: PreprocessingProgressStore;
+  readonly workerErrorMonitor: WorkerErrorMonitor;
+  readonly telemetry: TelemetryModule;
+  readonly appNoticeChannel: AppNoticeChannel;
+  readonly errorClassifier: AppErrorClassifier;
+  readonly errorTelemetryDescriber: AppErrorTelemetryDescriber;
+  readonly storageFootprintProbe: StorageFootprintProbe;
   /** External transcriber; when omitted, picks the surface default. */
   readonly transcriber?: ConfigurableTranscriber;
 }
@@ -27,14 +41,19 @@ export type TranscriptionModule = ReturnType<typeof bootTranscription>;
  * preprocessing, so the broader-scoped store lives there.
  */
 export function bootTranscription(deps: TranscriptionDependencies) {
-  const transcriber = deps.transcriber ?? buildLocalTranscriber(deps.progressStore, deps.audioDecoder);
+  const transcriber = deps.transcriber ?? buildLocalTranscriber(deps);
+
+  const untranscribedRegionsStore = new UntranscribedRegionsStore();
 
   return {
+    untranscribedRegionsStore,
     actions: {
       transcribe: new TranscribeAction(
         transcriber,
         deps.progressStore,
         new WordOverlapClamper(),
+        untranscribedRegionsStore,
+        deps.telemetry.telemetry,
       ),
       updatePreference: new UpdateTranscribePreferenceAction(deps.store, deps.preferenceRepository),
     },
@@ -42,18 +61,25 @@ export function bootTranscription(deps: TranscriptionDependencies) {
 }
 
 
-function buildLocalTranscriber(
-  progressStore: PreprocessingProgressStore,
-  audioDecoder: AudioDecoder,
-): ConfigurableTranscriber {
+function buildLocalTranscriber(deps: TranscriptionDependencies): ConfigurableTranscriber {
+  const worker = new Worker(
+    new URL('../../core/transcription/infrastructure/workers/whisperWorker.ts', import.meta.url),
+    { type: 'module' },
+  );
+  deps.workerErrorMonitor.monitor(worker, 'whisper-worker');
   return new WorkerTranscriber(
-    new Worker(
-      new URL('../../core/transcription/infrastructure/workers/whisperWorker.ts', import.meta.url),
-      { type: 'module' },
-    ),
-    audioDecoder,
+    worker,
+    deps.audioDecoder,
     WHISPER_SAMPLE_RATE,
-    progressStore,
+    deps.progressStore,
+    new NonBlockingFailureReporter(
+      deps.telemetry.telemetry,
+      deps.appNoticeChannel,
+      deps.errorClassifier,
+      deps.errorTelemetryDescriber,
+      deps.storageFootprintProbe,
+      'transcription_model_cache_failed',
+    ),
   );
 }
 

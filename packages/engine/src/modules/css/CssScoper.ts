@@ -1,6 +1,5 @@
-const KEYFRAME_NAME_RE = /@(?:-webkit-|-moz-)?keyframes\s+([a-zA-Z_-][a-zA-Z0-9_-]*)/g;
+import { CssKeyframeNamespacer } from '@modules/css/CssKeyframeNamespacer';
 const AT_RULE_NAME_RE = /^@([a-zA-Z][a-zA-Z0-9-]*)/;
-const SELECTOR_SPECIAL_CHARS_RE = /[.*+?^${}()|[\]\\]/g;
 
 /** At-rules whose body holds regular style rules — selectors inside must be scoped. */
 const SCOPEABLE_AT_RULES: ReadonlySet<string> = new Set([
@@ -11,7 +10,16 @@ const SCOPEABLE_AT_RULES: ReadonlySet<string> = new Set([
   'scope',
 ]);
 
-const escapeRegex = (s: string): string => s.replace(SELECTOR_SPECIAL_CHARS_RE, '\\$&');
+/**
+ * Boundary that closes one top-level CSS construct. `brace` marks the
+ * `{` that opens a rule body; `semi` marks the `;` that terminates a
+ * statement-form at-rule (`@charset`, `@import`, ...); `end` means the
+ * scanned range finished without either.
+ */
+interface RuleTerminator {
+  readonly index: number;
+  readonly kind: 'brace' | 'semi' | 'end';
+}
 
 /**
  * Scopes a CSS string so it can coexist with sibling stylesheets in
@@ -29,36 +37,11 @@ const escapeRegex = (s: string): string => s.replace(SELECTOR_SPECIAL_CHARS_RE, 
  * (e.g. `.my-scope`); its identifier portion seeds the keyframe rename.
  */
 export class CssScoper {
+  private readonly keyframeNamespacer = new CssKeyframeNamespacer();
+
   scope(css: string, scopeSelector: string): string {
     const scopeKey = scopeSelector.replace(/^\.+/, '');
-    return this.scopeSelectorsInRange(this.scopeKeyframes(css, scopeKey), 0, undefined, scopeSelector);
-  }
-
-  private scopeKeyframes(css: string, scopeKey: string): string {
-    const names = new Set<string>();
-    for (const m of css.matchAll(KEYFRAME_NAME_RE)) names.add(m[1]!);
-    if (names.size === 0) return css;
-    let result = css;
-    for (const name of names) {
-      const scopedName = `${name}-${scopeKey}`;
-      const esc = escapeRegex(name);
-      result = result.replace(
-        new RegExp(`(@(?:-webkit-|-moz-)?keyframes\\s+)${esc}(?![\\w-])`, 'g'),
-        `$1${scopedName}`,
-      );
-      // Both `animation-name:` and the `animation:` shorthand can carry a
-      // comma-separated list of names. The rewrite scans the whole value
-      // range (between `:` and the next `;` or rule boundary) and replaces
-      // every whole-word occurrence, so the second entry in
-      // `animation-name: foo, bar` is reached. The value-bounded scope
-      // avoids touching a class or property elsewhere that happens to
-      // share the spelling.
-      const replaceInValue = (_m: string, prefix: string, value: string): string =>
-        prefix + value.replace(new RegExp(`(?<![\\w-])${esc}(?![\\w-])`, 'g'), scopedName);
-      result = result.replace(/(animation-name\s*:\s*)([^;{}]*)/g, replaceInValue);
-      result = result.replace(/(animation\s*:\s*)([^;{}]*)/g, replaceInValue);
-    }
-    return result;
+    return this.scopeSelectorsInRange(this.keyframeNamespacer.namespace(css, scopeKey), 0, undefined, scopeSelector);
   }
 
   private scopeSelectorsInRange(
@@ -79,11 +62,18 @@ export class CssScoper {
         i = commentEnd;
         continue;
       }
-      const braceIndex = this.findBraceOrEnd(css, i, stopAt);
-      if (braceIndex === stopAt) { result += css.slice(i, stopAt); return result; }
+      const { index: ruleEnd, kind } = this.findRuleTerminator(css, i, stopAt);
+      if (kind === 'end') { result += css.slice(i, stopAt); return result; }
+      if (kind === 'semi') {
+        // Statement-form at-rule (`@charset`, `@import`, `@namespace`,
+        // `@layer name;`): no block to scope, emit as-is and advance.
+        result += css.slice(i, ruleEnd + 1);
+        i = ruleEnd + 1;
+        continue;
+      }
 
-      const header = css.slice(i, braceIndex);
-      const bodyStart = braceIndex + 1;
+      const header = css.slice(i, ruleEnd);
+      const bodyStart = ruleEnd + 1;
       const bodyEnd = this.findMatchingClose(css, bodyStart, stopAt);
 
       if (this.isAtRuleHeader(header)) {
@@ -135,11 +125,33 @@ export class CssScoper {
     return closeIndex === -1 || closeIndex >= stopAt ? stopAt : closeIndex + 2;
   }
 
-  private findBraceOrEnd(css: string, start: number, stopAt: number): number {
-    for (let i = start; i < stopAt; i++) {
-      if (css[i] === '{') return i;
+  /**
+   * Locates the boundary that ends the current top-level construct:
+   * `{` opens a rule block, `;` terminates a statement-form at-rule
+   * (`@charset`, `@import`, `@namespace`, `@layer name;`), and `end`
+   * means the range was consumed without either.
+   *
+   * Skips over string literals and CSS comments so a `;` inside a
+   * `url("…")` or a commented-out block doesn't fool the caller.
+   */
+  private findRuleTerminator(css: string, start: number, stopAt: number): RuleTerminator {
+    let i = start;
+    let stringDelim: '"' | "'" | null = null;
+    while (i < stopAt) {
+      const ch = css[i]!;
+      if (stringDelim) {
+        if (ch === '\\' && i + 1 < stopAt) { i += 2; continue; }
+        if (ch === stringDelim) stringDelim = null;
+        i++;
+        continue;
+      }
+      if (ch === '"' || ch === '\'') { stringDelim = ch; i++; continue; }
+      if (this.isCommentStart(css, i)) { i = this.findCommentEnd(css, i, stopAt); continue; }
+      if (ch === '{') return { index: i, kind: 'brace' };
+      if (ch === ';') return { index: i, kind: 'semi' };
+      i++;
     }
-    return stopAt;
+    return { index: stopAt, kind: 'end' };
   }
 
   private isAtRuleHeader(header: string): boolean {

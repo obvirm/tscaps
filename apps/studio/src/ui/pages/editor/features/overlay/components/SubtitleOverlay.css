@@ -6,17 +6,17 @@
   white-space: nowrap;
 }
 
-/* Templates that declare `rendering.padding` give `.segment` a border-box
-   that extends past the hitzone (content-size, the margin-box collapsed by
-   the negative margin trick). Without this, clicks on the painted padded
-   area still hit `.segment`, ascend to the hitzone via `closest`, and the
-   selection's snap-to-nearest-word treats them as "inside the segment" —
-   producing a false word selection past the visible text. Making the
-   engine's structural elements transparent to pointer events and re-arming
-   only the leaf interactive nodes restores "the word's hitzone matches its
-   glyphs". Benign when no padding is declared: hitzone and `.segment`
-   border-box coincide, so redirecting the hit one level out lands on the
-   same point. */
+/* Pointer model: the engine's structural elements are transparent to
+   pointer events; only two surfaces catch segment-related hits.
+   Words and decorations re-arm as leaf targets, so a click on a glyph
+   resolves to that word. Everything else — the gap between lines,
+   template padding, the corona around the caption — lands on the
+   scaler-level `.subtitle-overlay-segment-hitzone` ghost, sized to
+   the caption content box + corona. `.segment` itself must never be a
+   hit target: templates that declare `rendering.padding` inflate its
+   border-box with safety-bleed for SVG filter regions (loki: 2em ≈
+   100px+), and an armed `.segment` would make that invisible bleed
+   clickable far past the selection chrome. */
 .subtitle-overlay-scaler .segment,
 .subtitle-overlay-scaler .line {
   pointer-events: none;
@@ -24,6 +24,7 @@
 .subtitle-overlay-scaler .word,
 .subtitle-overlay-scaler .word-decoration {
   pointer-events: auto;
+  cursor: pointer;
 }
 
 /* Glyph attached to a word (e.g. an AI-picked emoji). `inline-block` lets
@@ -36,24 +37,6 @@
 }
 .word > .word-decoration {
   margin-left: calc(0.25em * var(--decoration-gap-multiplier, 1));
-}
-
-/* Frame-accuracy contract: every animation in the subtitle is paused and
-   its delay is driven by --on-* CSS variables set per render frame.
-   Inline styles on .segment/.line/.word/.letter cover the real elements,
-   but pseudo-elements can't receive inline styles and don't inherit
-   animation-play-state — so anything a template animates on a ::before /
-   ::after would otherwise run on wall-clock and drift from the playhead.
-
-   !important is intentional: a template's `animation: ...` shorthand
-   resets all eight longhands including animation-play-state to its
-   `running` default, so a non-important paused declaration is silently
-   undone by every shorthand-using rule. The pause is a non-negotiable
-   system invariant, not a style preference. */
-.subtitle-overlay-wrapper *::before,
-.subtitle-overlay-wrapper *::after {
-  animation-play-state: paused !important;
-  animation-fill-mode: both;
 }
 
 .subtitle-overlay-container {
@@ -108,47 +91,39 @@
   min-height: 0;
 }
 
-/* Wraps SegmentView. Its box matches the visible caption exactly so
-   it never offsets the anchor; the click-target is extended outward
-   via `::before`, which sits visually behind the caption and carries
-   the selection outline/background. */
-.subtitle-overlay-segment-hitzone {
+/* Mirrors the engine's universal baseline (`.segment { position:
+   relative }`), which export prepends to every stylesheet, so absolute
+   overlays and the decoration containers resolve the same containing
+   block in preview and export. The positioning context must live on
+   `.segment` itself, never on its children: a positioned `.line` is a
+   self-painting layer whose text Chromium excludes from a
+   `background-clip: text` mask, turning gradient-text templates (lyra)
+   invisible. */
+.subtitle-overlay-scaler .segment {
   position: relative;
-  display: inline-block;
+}
+
+/* THE clickable surface for a segment: an invisible ghost sized to the
+   caption content box + a 22px / 32px corona, mounted at the scaler
+   level. It matches the visible selection chrome exactly, so what
+   looks selectable is selectable — no more, no less. Sits outside the
+   segment subtree so no template style on `.segment` (`overflow:
+   hidden`, safety-bleed padding, animation transforms) can clip or
+   inflate it. `pointer-events: auto` is required — it would otherwise
+   inherit `none` from the container and be silently inert. */
+.subtitle-overlay-segment-hitzone {
+  position: absolute;
   pointer-events: auto;
   cursor: pointer;
-  /* Drag-select would conflict with the click-to-select model — the user
-     should never see a native text-highlight inside the preview. */
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-/* Lifts the segment content above the `::before` chrome via tree
-   order in painting step 6, so we don't need a negative z-index +
-   `isolation: isolate` to contain it (which would trap descendant
-   `mix-blend-mode`). */
-.subtitle-overlay-segment-hitzone > * {
-  position: relative;
-}
-
-/* Click-target extension only — the visible selection chrome lives on
-   the scaler-level ghost (`.subtitle-overlay-segment-chrome`), which
-   paints above the actor cutout. The pseudo inflates the hitzone past
-   the segment text by ~22px vertical / 32px horizontal so clicks on
-   the padded area still select the segment. */
-.subtitle-overlay-segment-hitzone::before {
-  content: '';
-  position: absolute;
-  inset: -22px -32px;
 }
 
 /* Ghost box for the selected / drop-target segment, mounted at the
    scaler level after the actor cutout so the chrome is never occluded
    by it (the scaler's `container-type` is a stacking context, so no
    z-index inside the segment tree could cross the cutout). JS sets
-   left/top/width/height to mirror the hitzone; rotation applies here,
-   and wrapper-level offsets (behind-actor lift) are already baked into
-   the measured position. */
+   left/top/width/height to the caption content box; rotation applies
+   here, and wrapper-level offsets (behind-actor lift) are already
+   baked into the measured position. */
 .subtitle-overlay-segment-chrome {
   position: absolute;
   visibility: hidden;
@@ -156,8 +131,8 @@
   transform-origin: center;
 }
 
-/* Same rectangle the hitzone's click-extension pseudo covers, so the
-   painted chrome and the clickable area stay one visual unit.
+/* Same rectangle the segment hitzone ghost covers, so the painted
+   chrome and the clickable area stay one visual unit.
    Selection colors are hardcoded white-on-video — theme tokens would
    be wrong here, they paint over arbitrary frame colors and need to
    read against any background. */
@@ -259,8 +234,8 @@
    selection/popover and grabbable for re-positioning, so the host
    enables pointer events on itself; `data-tscaps-segment-id` on the
    same element lets the existing selection handler resolve the parent
-   segment from a click. `user-select: none` mirrors the segment hitzone
-   to avoid native text highlight on drag. */
+   segment from a click. `user-select: none` avoids native text
+   highlight on drag. */
 .subtitle-overlay-positioned-word-host {
   pointer-events: auto;
   cursor: pointer;
@@ -405,7 +380,7 @@
 }
 
 .subtitle-overlay-word-rotate-handle {
-  top: calc(var(--tscaps-rotate-handle-offset, 24px) * -1);
+  top: -6px;
   left: 50%;
   transform: translate(-50%, -50%);
 }

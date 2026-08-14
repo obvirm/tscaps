@@ -4,14 +4,11 @@ import type { RefreshDocumentAction } from '@core/editor/actions/RefreshDocument
 import { EditWordTextAction } from '@core/captions/actions/words/EditWordTextAction';
 import { EditWordTimeAction } from '@core/captions/actions/words/EditWordTimeAction';
 import { EditWordTagsAction } from '@core/captions/actions/words/EditWordTagsAction';
-import { SetWordStyleOverrideAction } from '@core/captions/actions/words/SetWordStyleOverrideAction';
-import { ClearWordAlignmentOverrideAction } from '@core/captions/actions/words/ClearWordAlignmentOverrideAction';
 import { DeleteWordsAction } from '@core/captions/actions/words/DeleteWordsAction';
 import { InsertWordAction } from '@core/captions/actions/words/InsertWordAction';
 import { AddDecorationAction } from '@core/captions/actions/decorations/AddDecorationAction';
 import { SetDecorationOverrideAction } from '@core/captions/actions/decorations/SetDecorationOverrideAction';
 import { ClearDecorationAction } from '@core/captions/actions/decorations/ClearDecorationAction';
-import { SetSegmentStyleOverrideAction } from '@core/captions/actions/segments/SetSegmentStyleOverrideAction';
 import { SetSegmentBehindActorOverrideAction } from '@core/captions/actions/segments/SetSegmentBehindActorOverrideAction';
 import { ApplyStructureEditAction } from '@core/captions/actions/segments/ApplyStructureEditAction';
 import { ApplySmartSegmentEditAction } from '@core/captions/actions/segments/ApplySmartSegmentEditAction';
@@ -22,6 +19,12 @@ import { RedistributeSegmentWordsAction } from '@core/captions/actions/segments/
 import { InsertSegmentAction } from '@core/captions/actions/segments/InsertSegmentAction';
 import { ResetSegmentLayoutAction } from '@core/captions/actions/segments/ResetSegmentLayoutAction';
 import { ResetSheetLayoutAction } from '@core/captions/actions/segments/ResetSheetLayoutAction';
+import { WordTimeBounds } from '@core/captions/services/WordTimeBounds';
+import { SegmentHardTime } from '@core/captions/services/SegmentHardTime';
+import { SegmentTimeBounds } from '@core/captions/services/SegmentTimeBounds';
+import { RelocatedWordClamp } from '@core/captions/services/RelocatedWordClamp';
+import { DocumentElementDescendantResolver } from '@core/captions/services/DocumentElementDescendantResolver';
+import { DocumentSheetElementResolver } from '@core/captions/services/DocumentSheetElementResolver';
 
 export interface CaptionsDependencies {
   readonly store: EditorStore;
@@ -45,14 +48,22 @@ export type CaptionsModule = ReturnType<typeof bootCaptions>;
 export function bootCaptions(deps: CaptionsDependencies) {
   const { store, deriver, refresh } = deps;
   const videoDurationProvider = () => store.snapshot().video.duration;
+  const wordTimeBounds = new WordTimeBounds();
+  const segmentHardTime = new SegmentHardTime();
+  const segmentTimeBounds = new SegmentTimeBounds(segmentHardTime);
+  const relocatedWordClamp = new RelocatedWordClamp(wordTimeBounds, segmentTimeBounds);
   return {
+    services: {
+      wordTimeBounds,
+      segmentTimeBounds,
+      elementDescendantResolver: new DocumentElementDescendantResolver(store),
+      sheetElementResolver: new DocumentSheetElementResolver(store),
+    },
     actions: {
       words: {
         editText: new EditWordTextAction(store, deriver),
-        editTime: new EditWordTimeAction(store, deriver),
+        editTime: new EditWordTimeAction(store, deriver, wordTimeBounds, segmentTimeBounds),
         editTags: new EditWordTagsAction(store, deriver),
-        setStyleOverride: new SetWordStyleOverrideAction(store),
-        clearAlignmentOverride: new ClearWordAlignmentOverrideAction(store),
         delete: new DeleteWordsAction(store, deriver),
         insert: new InsertWordAction(store, deriver),
       },
@@ -62,15 +73,14 @@ export function bootCaptions(deps: CaptionsDependencies) {
         clear: new ClearDecorationAction(store, deriver),
       },
       segments: {
-        setStyleOverride: new SetSegmentStyleOverrideAction(store),
         setBehindActorOverride: new SetSegmentBehindActorOverrideAction(store),
-        applyStructureEdit: new ApplyStructureEditAction(store, deriver),
+        applyStructureEdit: new ApplyStructureEditAction(store, deriver, relocatedWordClamp),
         applySmartEdit: new ApplySmartSegmentEditAction(store, deriver, videoDurationProvider),
         splitAtCursor: new SplitSegmentAtCursorAction(store, deriver, videoDurationProvider),
         mergeWithSibling: new MergeSegmentWithSiblingAction(store, deriver, videoDurationProvider),
-        editTime: new EditSegmentTimeAction(store, deriver),
+        editTime: new EditSegmentTimeAction(store, deriver, segmentTimeBounds),
         redistributeWords: new RedistributeSegmentWordsAction(store, deriver),
-        insert: new InsertSegmentAction(store, deriver, videoDurationProvider),
+        insert: new InsertSegmentAction(store, deriver, videoDurationProvider, segmentHardTime, segmentTimeBounds),
         resetLayout: new ResetSegmentLayoutAction(store, refresh),
         resetSheetLayout: new ResetSheetLayoutAction(store, refresh),
       },

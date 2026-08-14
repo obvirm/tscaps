@@ -1,4 +1,5 @@
 import { CssVariable } from '@modules/document/CssVariable';
+import { CssClass } from '@modules/document/CssClass';
 
 /** Default factor `font-size` of `.word-decoration` scales by, relative to its inherited size. Consumers override per sheet by setting `CssVariable.DECORATION_FONT_SIZE_MULTIPLIER` on the host node. */
 export const DECORATION_FONT_SIZE_MULTIPLIER = 1.8;
@@ -15,8 +16,8 @@ export const DECORATION_CONTAINER_BASELINE_CSS = `
 .word > .word-decoration {
   margin-left: calc(0.25em * var(${CssVariable.DECORATION_GAP_MULTIPLIER}, ${DECORATION_GAP_MULTIPLIER}));
 }
-.segment-decorations-above,
-.segment-decorations-below {
+.${CssClass.SEGMENT_DECORATIONS_ABOVE},
+.${CssClass.SEGMENT_DECORATIONS_BELOW} {
   position: absolute;
   left: 0;
   right: 0;
@@ -25,11 +26,11 @@ export const DECORATION_CONTAINER_BASELINE_CSS = `
   gap: 0.5em;
   pointer-events: auto;
 }
-.segment-decorations-above {
+.${CssClass.SEGMENT_DECORATIONS_ABOVE} {
   bottom: calc(100% - var(${CssVariable.SEGMENT_PADDING_TOP}, 0px));
   margin-bottom: calc(0.4em * var(${CssVariable.DECORATION_GAP_MULTIPLIER}, ${DECORATION_GAP_MULTIPLIER}));
 }
-.segment-decorations-below {
+.${CssClass.SEGMENT_DECORATIONS_BELOW} {
   top: calc(100% - var(${CssVariable.SEGMENT_PADDING_BOTTOM}, 0px));
   margin-top: calc(0.4em * var(${CssVariable.DECORATION_GAP_MULTIPLIER}, ${DECORATION_GAP_MULTIPLIER}));
 }

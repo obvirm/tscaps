@@ -21,13 +21,13 @@ export class BehindActorPreviewCompatibleTemplateRepository implements TemplateR
   async getAll(): Promise<Template[]> {
     const all = await this.inner.getAll();
     if (this.supportChecker.isSupported()) return all;
-    return all.filter((template) => !template.rendering.behindActor.required);
+    return all.filter((template) => !template.behindActor.required);
   }
 
   async getById(id: string): Promise<Template | null> {
     const template = await this.inner.getById(id);
     if (template === null) return null;
-    if (!template.rendering.behindActor.required) return template;
+    if (!template.behindActor.required) return template;
     if (this.supportChecker.isSupported()) return template;
     return null;
   }

@@ -1,4 +1,4 @@
-import type { AlignmentConfig } from '@tscaps/engine';
+import type { AlignmentConfig, HorizontalPlacement, HorizontalPlacementResolver, TextDirection } from '@tscaps/engine';
 import { CssVariable } from '@tscaps/engine';
 
 export interface AnchorStyle {
@@ -14,19 +14,26 @@ export interface AnchorStyle {
  * the inline style for the zero-sized anchor element, and the CSS
  * variables that drive the video-frame layer. Stateless derivation —
  * no DOM access, no observable side effects.
+ *
+ * A caption's horizontal anchor may be stated in reading terms, so every
+ * call takes the direction the caption reads in and answers in screen
+ * terms.
  */
 export class AlignmentCssBuilder {
+
+  constructor(private readonly horizontalPlacementResolver: HorizontalPlacementResolver) {}
+
   /**
    * Inline style for the zero-sized anchor element that places its
    * single grid child (the wrapper) at the anchor point with the right
    * edge pinned. Matches the engine's export-side anchor exactly.
    */
-  buildAnchorStyle(alignment: AlignmentConfig): AnchorStyle {
+  buildAnchorStyle(alignment: AlignmentConfig, textDirection: TextDirection): AnchorStyle {
     return {
       top: `${alignment.verticalOffset * 100}%`,
-      left: `${alignment.horizontalOffset * 100}%`,
-      alignItems: this.flexAlignmentFor(alignment.verticalAlign, 'top'),
-      justifyItems: this.flexAlignmentFor(alignment.horizontalAlign, 'left'),
+      left: `${this.horizontalOffsetFromLeft(alignment, textDirection) * 100}%`,
+      alignItems: this.gridAlignmentFor(this.verticalAnchorPercent(alignment)),
+      justifyItems: this.gridAlignmentFor(this.horizontalAnchorPercent(alignment, textDirection)),
     };
   }
 
@@ -36,26 +43,42 @@ export class AlignmentCssBuilder {
    * subtree's effective alignment so the layer stays in sync when a
    * segment or word is re-anchored away from the sheet's default.
    */
-  buildSubtitleRegionVars(alignment: AlignmentConfig): Record<string, string> {
-    const verticalAnchorPercent = this.anchorPercentFor(alignment.verticalAlign, 'top');
-    const horizontalAnchorPercent = this.anchorPercentFor(alignment.horizontalAlign, 'left');
+  buildSubtitleRegionVars(alignment: AlignmentConfig, textDirection: TextDirection): Record<string, string> {
+    const horizontalAnchorPercent = this.horizontalAnchorPercent(alignment, textDirection);
+    const horizontalOffsetPercent = this.horizontalOffsetFromLeft(alignment, textDirection) * 100;
     return {
       [CssVariable.SUBTITLE_REGION_WIDTH]: '100cqw',
       [CssVariable.SUBTITLE_REGION_HEIGHT]: '100cqh',
-      [CssVariable.SUBTITLE_REGION_X]: `calc(${horizontalAnchorPercent}% - ${alignment.horizontalOffset * 100}cqw)`,
-      [CssVariable.SUBTITLE_REGION_Y]: `calc(${verticalAnchorPercent}% - ${alignment.verticalOffset * 100}cqh)`,
+      [CssVariable.SUBTITLE_REGION_X]: `calc(${horizontalAnchorPercent}% - ${horizontalOffsetPercent}cqw)`,
+      [CssVariable.SUBTITLE_REGION_Y]: `calc(${this.verticalAnchorPercent(alignment)}% - ${alignment.verticalOffset * 100}cqh)`,
     };
   }
 
-  private flexAlignmentFor(align: string, startKeyword: string): 'start' | 'center' | 'end' {
-    if (align === startKeyword) return 'start';
-    if (align === 'center') return 'center';
-    return 'end';
+  private horizontalOffsetFromLeft(alignment: AlignmentConfig, textDirection: TextDirection): number {
+    return this.resolveHorizontal(alignment, textDirection).offsetFromLeft;
   }
 
-  private anchorPercentFor(align: string, startKeyword: string): number {
-    if (align === startKeyword) return 0;
-    if (align === 'center') return 50;
-    return 100;
+  private horizontalAnchorPercent(alignment: AlignmentConfig, textDirection: TextDirection): number {
+    const { side } = this.resolveHorizontal(alignment, textDirection);
+    if (side === 'left') return 0;
+    return side === 'center' ? 50 : 100;
+  }
+
+  private resolveHorizontal(alignment: AlignmentConfig, textDirection: TextDirection): HorizontalPlacement {
+    return this.horizontalPlacementResolver.resolve(
+      alignment.horizontalAlign,
+      alignment.horizontalOffset,
+      textDirection,
+    );
+  }
+
+  private verticalAnchorPercent(alignment: AlignmentConfig): number {
+    if (alignment.verticalAlign === 'top') return 0;
+    return alignment.verticalAlign === 'center' ? 50 : 100;
+  }
+
+  private gridAlignmentFor(anchorPercent: number): 'start' | 'center' | 'end' {
+    if (anchorPercent === 0) return 'start';
+    return anchorPercent === 50 ? 'center' : 'end';
   }
 }

@@ -1,6 +1,7 @@
 import type { ExportWriter } from '@core/export/domain/ExportWriter';
 import type { ExportWriterFactory } from '@core/export/domain/ExportWriterFactory';
-import type { UserAgentInspector } from '@core/_shared/infrastructure/UserAgentInspector';
+import type { UserAgentInspector } from '@shared/browser';
+import type { WorkerErrorMonitor } from '@core/_shared/workers/WorkerErrorMonitor';
 import { FilePickerExportWriter } from '@core/export/infrastructure/FilePickerExportWriter';
 import { OpfsExportWriter } from '@core/export/infrastructure/OpfsExportWriter';
 import { MemoryExportWriter } from '@core/export/infrastructure/MemoryExportWriter';
@@ -25,7 +26,10 @@ import { MemoryExportWriter } from '@core/export/infrastructure/MemoryExportWrit
  */
 export class DefaultExportWriterFactory implements ExportWriterFactory {
 
-  constructor(private readonly userAgentInspector: UserAgentInspector) {}
+  constructor(
+    private readonly userAgentInspector: UserAgentInspector,
+    private readonly workerErrorMonitor: WorkerErrorMonitor,
+  ) {}
 
   create(): ExportWriter {
     if (!this.userAgentInspector.isMobile() && FilePickerExportWriter.isSupported()) {
@@ -36,6 +40,7 @@ export class DefaultExportWriterFactory implements ExportWriterFactory {
         new URL('../../_shared/opfs/opfsWriterWorker.ts', import.meta.url),
         { type: 'module' },
       );
+      this.workerErrorMonitor.monitor(worker, 'opfs-writer-worker');
       return new OpfsExportWriter(worker);
     }
     return new MemoryExportWriter();

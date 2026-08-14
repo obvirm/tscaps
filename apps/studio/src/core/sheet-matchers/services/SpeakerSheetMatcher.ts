@@ -1,6 +1,6 @@
 import type { Document, Segment } from '@tscaps/engine';
 import type {
-  SheetMatcher,
+  SegmentSheetMatcher,
   SheetMatcherAvailability,
   SheetMatcherContext,
 } from '@core/sheet-matchers/domain/SheetMatcher';
@@ -32,10 +32,11 @@ export type SpeakerSheetMatcherUnavailableCode =
  * the engine's `SpeakerChangeSegmentSplitter` runs, segments are already
  * mono-speaker so the check is exact rather than majority-based.
  */
-export class SpeakerSheetMatcher implements SheetMatcher<SpeakerSheetMatcherParams> {
+export class SpeakerSheetMatcher implements SegmentSheetMatcher<SpeakerSheetMatcherParams> {
   readonly type = 'speaker';
   readonly label = 'By speaker';
   readonly cloudOnly = true;
+  readonly granularity = 'segment' as const;
 
   availability(ctx: SheetMatcherContext): SheetMatcherAvailability {
     const speakerIds = this.collectSpeakerIds(ctx.document);
@@ -53,7 +54,7 @@ export class SpeakerSheetMatcher implements SheetMatcher<SpeakerSheetMatcherPara
     return { speakerId: ids[0] ?? null };
   }
 
-  matches(segment: Segment, params: SpeakerSheetMatcherParams): boolean {
+  matchesSegment(segment: Segment, params: SpeakerSheetMatcherParams): boolean {
     const words = segment.getWords();
     if (words.length === 0) return false;
     return words.every((w) => w.speakerId === params.speakerId);

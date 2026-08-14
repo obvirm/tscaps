@@ -3,7 +3,9 @@ import type { IndexedDbStoreDefinition } from '@core/_shared/infrastructure/Inde
 import { IndexedDbUserTemplateRepository } from '@core/user-templates/infrastructure/repositories/IndexedDbUserTemplateRepository';
 import type { UserTemplateRepository } from '@core/user-templates/domain/UserTemplateRepository';
 import { UserSavedTemplateRepository } from '@core/user-templates/infrastructure/repositories/UserSavedTemplateRepository';
+import { TagConditionParser } from '@tscaps/engine';
 import { TemplateSerializer } from '@core/templates/services/TemplateSerializer';
+import { BehindActorTemplateConfigSerializer } from '@core/person-segmentation/services/BehindActorTemplateConfigSerializer';
 import { TemplateRecordMigrator } from '@core/templates/services/TemplateRecordMigrator';
 import { TemplateFromSheetBuilder } from '@core/user-templates/services/TemplateFromSheetBuilder';
 import { UserTemplateLibraryHydrator } from '@core/user-templates/services/UserTemplateLibraryHydrator';
@@ -38,6 +40,7 @@ export async function bootUserTemplates(deps: UserTemplatesDependencies) {
     deps.templates.cssAssetReferenceResolver,
     deps.engine.svgFilterDefinitionsParser,
     new TemplateRecordMigrator(),
+    new BehindActorTemplateConfigSerializer(new TagConditionParser()),
   );
   const repository = buildRepository(templateSerializer, deps);
   const templateRepository = new UserSavedTemplateRepository(repository);

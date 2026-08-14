@@ -2,7 +2,7 @@ import { Tagger } from '@modules/tagging/Tagger';
 import { Document } from '@modules/document/Document';
 import { Segment } from '@modules/document/Segment';
 import { Line } from '@modules/document/Line';
-import { Tag } from '@modules/document/Tag';
+import { Tag } from '@modules/tags/Tag';
 
 // Tags words whose text matches a given regular expression.
 export class RegexTagger extends Tagger {

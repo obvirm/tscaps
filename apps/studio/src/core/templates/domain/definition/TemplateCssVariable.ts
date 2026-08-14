@@ -41,6 +41,7 @@ export enum TemplateCssVariable {
   TEXT_ALIGN = '--tscaps-text-align',
   TEXT_TRANSFORM = '--tscaps-text-transform',
   TEXT_DECORATION = '--tscaps-text-decoration',
+  TEXT_DIRECTION = '--tscaps-text-direction',
   ROTATION = '--tscaps-rotation',
 
   PRIMARY_COLOR = '--tscaps-primary-color',

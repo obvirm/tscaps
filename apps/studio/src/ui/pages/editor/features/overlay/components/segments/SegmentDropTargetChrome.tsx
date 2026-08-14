@@ -1,17 +1,13 @@
-import type { RefObject } from 'react';
 import type { Sheet } from '@core/sheets/domain/Sheet';
-import type { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
+import type { ElementStyles } from '@core/elements/domain/ElementStyles';
 import { SegmentSelectionChrome } from '@ui/pages/editor/features/overlay/components/segments/SegmentSelectionChrome';
 import { useOverlayDragState } from '@ui/pages/editor/features/overlay/hooks/useOverlayDragState';
 
-const NO_VARS: Readonly<Record<string, string>> = {};
-
 interface SegmentDropTargetChromeProps {
   sheetBySegmentId: ReadonlyMap<string, Sheet>;
-  segmentOverrides: SegmentOverrides;
-  behindActorVarsBySegment: ReadonlyMap<string, Readonly<Record<string, string>>>;
-  /** The overlay scaler the chrome is measured against and mounted in. */
-  containerRef: RefObject<HTMLElement>;
+  elementStyles: ElementStyles;
+  /** The overlay scaler the chrome is mounted in and measured against. */
+  scaler: HTMLElement | null;
 }
 
 /**
@@ -22,9 +18,8 @@ interface SegmentDropTargetChromeProps {
  */
 export function SegmentDropTargetChrome({
   sheetBySegmentId,
-  segmentOverrides,
-  behindActorVarsBySegment,
-  containerRef,
+  elementStyles,
+  scaler,
 }: SegmentDropTargetChromeProps) {
   const dragState = useOverlayDragState();
   if (dragState?.kind !== 'word' || dragState.dropTargetSegmentId === null) return null;
@@ -35,9 +30,8 @@ export function SegmentDropTargetChrome({
     <SegmentSelectionChrome
       segmentId={segmentId}
       sheet={sheet}
-      segmentOverrides={segmentOverrides}
-      behindActorVars={behindActorVarsBySegment.get(segmentId) ?? NO_VARS}
-      containerRef={containerRef}
+      elementStyles={elementStyles}
+      scaler={scaler}
       variant="drop-target"
     />
   );

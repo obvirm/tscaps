@@ -2,8 +2,9 @@ import type { Document } from '@tscaps/engine';
 import type { EditorState } from '@core/editor/domain/EditorState';
 import type { VideoLayout, VideoLoadError, VideoState } from '@core/editor/domain/VideoState';
 import { Sheet, MAIN_SHEET_ID } from '@core/sheets/domain/Sheet';
-import { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
-import { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
+import { BehindActorSegmentOverrideRegistry } from '@core/person-segmentation/domain/BehindActorSegmentOverrideRegistry';
+import { FrozenSegmentSet } from '@core/captions/domain/FrozenSegmentSet';
+import { ElementStyles } from '@core/elements/domain/ElementStyles';
 import { DecorationOverrideRegistry } from '@core/captions/domain/DecorationOverrideRegistry';
 import { CutRegistry } from '@core/cuts/domain/CutRegistry';
 import { DEFAULT_TRANSCRIBE_PREFERENCE, type TranscribePreference } from '@core/transcription/domain/TranscribePreference';
@@ -13,8 +14,9 @@ interface UndoableSnapshot {
   readonly document: Document | null;
   readonly sheets: Sheet[];
   readonly activeSheetId: string | null;
-  readonly wordStyleOverrides: WordStyleOverrideRegistry;
-  readonly segmentOverrides: SegmentOverrides;
+  readonly behindActorOverrides: BehindActorSegmentOverrideRegistry;
+  readonly frozenSegments: FrozenSegmentSet;
+  readonly elementStyles: ElementStyles;
   readonly decorationOverrides: DecorationOverrideRegistry;
   readonly cuts: CutRegistry;
 }
@@ -34,6 +36,7 @@ export class EditorStore extends EventTarget {
         file: null,
         url: null,
         previewFile: null,
+        previewIsProxy: false,
         fileName: null,
         mimeType: null,
         size: null,
@@ -42,6 +45,8 @@ export class EditorStore extends EventTarget {
         loadError: null,
         currentTime: 0,
         duration: 0,
+        isProbing: false,
+        hasAudioTrack: null,
         volume: 1,
         playbackRate: 1,
         isPlaying: false,
@@ -53,8 +58,9 @@ export class EditorStore extends EventTarget {
       transcribePreference: initialPreference,
       sheets: [],
       activeSheetId: null,
-      wordStyleOverrides: WordStyleOverrideRegistry.empty(),
-      segmentOverrides: SegmentOverrides.empty(),
+      behindActorOverrides: BehindActorSegmentOverrideRegistry.empty(),
+      frozenSegments: FrozenSegmentSet.empty(),
+      elementStyles: ElementStyles.empty(),
       decorationOverrides: DecorationOverrideRegistry.empty(),
       cuts: CutRegistry.empty(),
       canUndo: false,
@@ -73,12 +79,25 @@ export class EditorStore extends EventTarget {
 
   patch(partial: EditorStatePatch): void {
     const { video, ...rest } = partial;
-    this._state = {
+    const merged: EditorState = {
       ...this._state,
       ...rest,
       ...(video ? { video: { ...this._state.video, ...video } as VideoState } : {}),
     };
+    this._state = this.withDerivedExclusionsSynced(this._state, merged);
     this.dispatchEvent(new Event('change'));
+  }
+
+  /**
+   * Hands the reflow exclusions the segments that currently carry a
+   * style of their own, so one that was cleared stops excluding its
+   * segment. Structural edits are recorded on the exclusions themselves
+   * and need no pass.
+   */
+  private withDerivedExclusionsSynced(previous: EditorState, next: EditorState): EditorState {
+    if (next.elementStyles === previous.elementStyles) return next;
+    const frozenSegments = next.frozenSegments.replacingStyled(next.elementStyles.segmentIds());
+    return frozenSegments === next.frozenSegments ? next : { ...next, frozenSegments };
   }
 
   /**
@@ -122,6 +141,7 @@ export class EditorStore extends EventTarget {
       file: null,
       url: null,
       previewFile: null,
+      previewIsProxy: false,
       fileName: null,
       mimeType: null,
       size: null,
@@ -130,9 +150,11 @@ export class EditorStore extends EventTarget {
       loadError: null,
       currentTime: 0,
       duration: 0,
+      isProbing: false,
+      hasAudioTrack: null,
       isPlaying: false,
     };
-    this._state = {
+    const cleared: EditorState = {
       ...this._state,
       // Cast keeps `Partial<VideoState>` from widening each field to `| undefined`.
       video: extraVideo ? { ...baseVideo, ...extraVideo } as VideoState : baseVideo,
@@ -141,8 +163,9 @@ export class EditorStore extends EventTarget {
       error: null,
       sheets: main ? [main] : [],
       activeSheetId: main ? MAIN_SHEET_ID : null,
-      wordStyleOverrides: WordStyleOverrideRegistry.empty(),
-      segmentOverrides: SegmentOverrides.empty(),
+      behindActorOverrides: BehindActorSegmentOverrideRegistry.empty(),
+      frozenSegments: FrozenSegmentSet.empty(),
+      elementStyles: ElementStyles.empty(),
       decorationOverrides: DecorationOverrideRegistry.empty(),
       cuts: CutRegistry.empty(),
       canUndo: false,
@@ -154,6 +177,7 @@ export class EditorStore extends EventTarget {
       dirty: false,
       ...restExtra,
     };
+    this._state = this.withDerivedExclusionsSynced(this._state, cleared);
     this.dispatchEvent(new Event('change'));
   }
 
@@ -162,9 +186,14 @@ export class EditorStore extends EventTarget {
    * actions whose effect targets the sheet currently shown in the StyleTab.
    */
   activeSheet(): Sheet | null {
-    const { sheets, activeSheetId } = this._state;
+    const { activeSheetId } = this._state;
     if (activeSheetId === null) return null;
-    return sheets.find((s) => s.id === activeSheetId) ?? null;
+    return this.sheet(activeSheetId);
+  }
+
+  /** Returns the Sheet with the given id, or null when it is not in the current state. */
+  sheet(sheetId: string): Sheet | null {
+    return this._state.sheets.find((s) => s.id === sheetId) ?? null;
   }
 
   /**
@@ -245,6 +274,16 @@ export class EditorStore extends EventTarget {
     this.patchVideo({ duration });
   }
 
+  setIsProbing(isProbing: boolean): void {
+    if (this._state.video.isProbing === isProbing) return;
+    this.patchVideo({ isProbing });
+  }
+
+  setHasAudioTrack(hasAudioTrack: boolean | null): void {
+    if (this._state.video.hasAudioTrack === hasAudioTrack) return;
+    this.patchVideo({ hasAudioTrack });
+  }
+
   setIsPlaying(playing: boolean): void {
     this.patchVideo({ isPlaying: playing });
   }
@@ -291,8 +330,9 @@ export class EditorStore extends EventTarget {
       document: s.document,
       sheets: s.sheets,
       activeSheetId: s.activeSheetId,
-      wordStyleOverrides: s.wordStyleOverrides,
-      segmentOverrides: s.segmentOverrides,
+      behindActorOverrides: s.behindActorOverrides,
+      frozenSegments: s.frozenSegments,
+      elementStyles: s.elementStyles,
       decorationOverrides: s.decorationOverrides,
       cuts: s.cuts,
     };

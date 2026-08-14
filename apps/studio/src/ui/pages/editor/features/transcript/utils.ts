@@ -1,4 +1,5 @@
-import type { Document, Segment } from '@tscaps/engine';
+import type { Segment } from '@tscaps/engine';
+import type { WordTimeLimits } from '@core/captions/services/WordTimeBounds';
 
 export function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
@@ -13,18 +14,22 @@ export interface WordTimeBounds {
 }
 
 /**
- * Visual slider stops for a single word's timing edit. Inside the segment,
- * the bounds are the adjacent non-empty words. At the edges, the bounds
- * extend to the neighbor *segment* (not the current segment's own start/
- * end), so dragging the first/last word past the current segment boundary
- * grows the slider's free space instead of collapsing it as the segment
- * auto-shrinks/grows around the word.
+ * Visual slider stops for a single word's timing edit. Inside the segment
+ * the stops are the adjacent non-empty words; at either edge there is no
+ * such word and `outer` is the stop.
+ *
+ * `outer` is the window the whole segment is held to — its same-sheet
+ * neighbours' hard time and the video's ends — which is the same wall the
+ * edit itself is clamped to. Reading it from here rather than working it
+ * out again is what keeps the slider from offering a value the edit would
+ * then pull back. It used to stop at the neighbouring segment's *drawn*
+ * window instead, which is padding: derived, re-stamped after every edit,
+ * and not a boundary anyone chose.
  */
 export function wordTimeBoundsInSegment(
-  doc: Document,
   segment: Segment,
   wordId: string,
-  videoDuration: number,
+  outer: WordTimeLimits,
 ): WordTimeBounds {
   const flat = segment.lines.flatMap((l) => l.words);
   const idx = flat.findIndex((w) => w.id === wordId);
@@ -43,18 +48,11 @@ export function wordTimeBoundsInSegment(
     if (w.text.length > 0) { nextStart = w.time.start; break; }
   }
 
-  if (prevEnd === null || nextStart === null) {
-    const segments = doc.getSegments();
-    const segIdx = segments.findIndex((s) => s.id === segment.id);
-    if (prevEnd === null) {
-      const prevSeg = segIdx > 0 ? segments[segIdx - 1] : null;
-      prevEnd = prevSeg ? prevSeg.time.end : 0;
-    }
-    if (nextStart === null) {
-      const nextSeg = segIdx >= 0 ? segments[segIdx + 1] : null;
-      nextStart = nextSeg ? nextSeg.time.start : Math.max(segment.time.end, videoDuration);
-    }
-  }
-
-  return { prevEnd, nextStart };
+  return {
+    prevEnd: prevEnd ?? outer.earliestStartSec,
+    // An unmeasured video leaves the far wall open, and a slider cannot
+    // be drawn against infinity: the segment's own end stands in.
+    nextStart: nextStart
+      ?? (Number.isFinite(outer.latestEndSec) ? outer.latestEndSec : segment.time.end),
+  };
 }

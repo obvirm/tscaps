@@ -22,6 +22,13 @@ export interface PlaybackActions {
    */
   scheduleAudioMuteAt: (sourceTimeSec: number) => void;
   cancelScheduledAudioMute: () => void;
+  /**
+   * Stop playback the moment the playhead reaches the given
+   * source-time position, coming to rest exactly on it. Consumed on
+   * arrival, and dropped by an explicit seek or pause.
+   */
+  scheduleStopAt: (sourceTimeSec: number) => void;
+  cancelScheduledStop: () => void;
 }
 
 const PlaybackContext = createContext<PlaybackActions | null>(null);

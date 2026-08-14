@@ -1,5 +1,6 @@
 import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { RefreshDocumentAction } from '@core/editor/actions/RefreshDocumentAction';
+import type { LinkedSheetsSync } from '@core/sheets/services/LinkedSheetsSync';
 
 const REDERIVE_DEBOUNCE_MS = 100;
 
@@ -8,7 +9,9 @@ const REDERIVE_DEBOUNCE_MS = 100;
  * copy. Passing `null` clears the override so the sheet renders with
  * the template's pristine filters again. Re-derivation is debounced
  * because the document deriver re-parses the SVG and re-materializes
- * the filter defs on every active segment.
+ * the filter defs on every active segment. When the sheet belongs to a
+ * link group, the same filters override rides across to every linked
+ * sibling.
  */
 export class UpdateSheetFiltersSvgOverrideAction {
   private _debounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -16,6 +19,7 @@ export class UpdateSheetFiltersSvgOverrideAction {
   constructor(
     private readonly store: EditorStore,
     private readonly refresh: RefreshDocumentAction,
+    private readonly linkedSheetsSync: LinkedSheetsSync,
   ) {}
 
   execute(filtersSvgOverride: string | null): void {
@@ -23,7 +27,7 @@ export class UpdateSheetFiltersSvgOverrideAction {
     if (!active) return;
     const updated = active.with({ filtersSvgOverride });
     this.store.commit(`filtersSvgOverride:${active.id}`);
-    this.store.patch({ sheets: this.store.replaceSheet(updated) });
+    this.store.patch({ sheets: this.linkedSheetsSync.applyStyleEdit(updated, this.store.snapshot().sheets) });
 
     if (this._debounceTimer !== null) clearTimeout(this._debounceTimer);
     this._debounceTimer = setTimeout(() => {

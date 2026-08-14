@@ -2,6 +2,7 @@ import type { PreviewProxyOutputStrategy } from '@core/preview/domain/PreviewPro
 import type { PreviewProxyOutputStrategyFactory } from '@core/preview/domain/PreviewProxyOutputStrategyFactory';
 import { MemoryPreviewProxyOutputStrategy } from '@core/preview/infrastructure/MemoryPreviewProxyOutputStrategy';
 import { OpfsPreviewProxyOutputStrategy } from '@core/preview/infrastructure/OpfsPreviewProxyOutputStrategy';
+import type { WorkerErrorMonitor } from '@core/_shared/workers/WorkerErrorMonitor';
 
 /**
  * Picks the output strategy for a proxy-generation run. Prefers the
@@ -17,12 +18,15 @@ import { OpfsPreviewProxyOutputStrategy } from '@core/preview/infrastructure/Opf
  */
 export class DefaultPreviewProxyOutputStrategyFactory implements PreviewProxyOutputStrategyFactory {
 
+  constructor(private readonly workerErrorMonitor: WorkerErrorMonitor) {}
+
   create(): PreviewProxyOutputStrategy {
     if (OpfsPreviewProxyOutputStrategy.isSupported()) {
       const worker = new Worker(
         new URL('../../_shared/opfs/opfsWriterWorker.ts', import.meta.url),
         { type: 'module' },
       );
+      this.workerErrorMonitor.monitor(worker, 'opfs-writer-worker');
       return new OpfsPreviewProxyOutputStrategy(worker);
     }
     return new MemoryPreviewProxyOutputStrategy();

@@ -1,5 +1,7 @@
 import type { TemplateAssets } from '@core/templates/infrastructure/LocalFileTemplateLoader';
 import type { JsonTemplateSchema } from '@core/templates/domain/definition/JsonTemplateSchema';
+import type { ControlField } from '@core/templates/domain/definition/ControlField';
+import type { DeclaredAnimation } from '@core/templates/domain/definition/DeclaredAnimation';
 
 /**
  * Assembles the `TemplateAssets` registry from raw module maps produced by
@@ -15,19 +17,36 @@ export class BuiltinTemplateAssetsBuilder {
     private readonly cssModules: Record<string, string>,
     private readonly configModules: Record<string, unknown>,
     private readonly filterModules: Record<string, string> = {},
+    private readonly declaredControlModules: Record<string, unknown> = {},
+    private readonly declaredAnimationModules: Record<string, unknown> = {},
   ) {}
 
   build(): TemplateAssets {
-    const filtersByTemplate = this.groupFiltersByTemplate();
+    const filtersByTemplate = this.keyedByTemplate<string>(this.filterModules);
+    const controlsByTemplate = this.keyedByTemplate<readonly ControlField[]>(this.declaredControlModules);
+    const animationsByTemplate = this.keyedByTemplate<readonly DeclaredAnimation[]>(this.declaredAnimationModules);
     const result: TemplateAssets = {};
     for (const [path, css] of Object.entries(this.cssModules)) {
       const name = this.templateNameFromPath(path);
       const filtersSvg = filtersByTemplate.get(name);
+      const declaredControls = controlsByTemplate.get(name);
+      const declaredAnimations = animationsByTemplate.get(name);
       const entry: TemplateAssets[string] = { css, config: this.configFor(name) };
       if (filtersSvg !== undefined) entry.filtersSvg = filtersSvg;
+      if (declaredControls !== undefined) entry.declaredControls = declaredControls;
+      if (declaredAnimations !== undefined) entry.declaredAnimations = declaredAnimations;
       result[name] = entry;
     }
     return result;
+  }
+
+  /** The templates a glob covers, each mapped to the one module it contributed. */
+  private keyedByTemplate<T>(modules: Record<string, unknown>): Map<string, T> {
+    const byTemplate = new Map<string, T>();
+    for (const [path, module] of Object.entries(modules)) {
+      byTemplate.set(this.templateNameFromPath(path), module as T);
+    }
+    return byTemplate;
   }
 
   private configFor(templateName: string): JsonTemplateSchema {
@@ -38,14 +57,6 @@ export class BuiltinTemplateAssetsBuilder {
       throw new Error(`Missing template.json for builtin template "${templateName}"`);
     }
     return entry[1] as JsonTemplateSchema;
-  }
-
-  private groupFiltersByTemplate(): Map<string, string> {
-    const grouped = new Map<string, string>();
-    for (const [path, source] of Object.entries(this.filterModules)) {
-      grouped.set(this.templateNameFromPath(path), source);
-    }
-    return grouped;
   }
 
   // `.../templates/brush/style.css` → `brush`

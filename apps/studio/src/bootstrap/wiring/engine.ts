@@ -16,14 +16,12 @@ import {
   VideoBoundSubtitleLayerSource,
   ComposedSubtitleLayerSource,
   BrowserCssResourceEmbedder,
-  BrowserAudioDecoder,
+  MediaBunnyAudioDecoder,
   GraphemeWordSplitter,
   DocumentEditor,
   SvgFilterDefinitionsParser,
-  VIDEO_FRAME_LAYER_CLASS,
-  VIDEO_FRAME_LAYER_BASELINE_CSS,
-  DECORATION_CONTAINER_BASELINE_CSS,
-  BEHIND_ACTOR_BASELINE_CSS,
+  BaselineCssComposer,
+  CssClass,
 } from '@tscaps/engine';
 import { SegmentSplitterRegistry } from '@core/segment-splitter/services/SegmentSplitterRegistry';
 import { LineSplitterRegistry } from '@core/line-splitter/services/LineSplitterRegistry';
@@ -65,7 +63,7 @@ export function bootEngine() {
   const cssResourceEmbedder = new BrowserCssResourceEmbedder();
   const documentEditor = new DocumentEditor();
   const svgFilterDefinitionsParser = new SvgFilterDefinitionsParser();
-  const audioDecoder = new BrowserAudioDecoder();
+  const audioDecoder = new MediaBunnyAudioDecoder();
   const transcodeCoordinator = new MediaBunnyTranscodeCoordinator({
     videoFrameDecoderFactory: new DefaultVideoFrameDecoderFactory(),
     videoTrackEncoderFactory: new MediaBunnyCanvasVideoTrackEncoderFactory(),
@@ -103,10 +101,12 @@ export function bootEngine() {
     effects,
     audioDecoder,
     constants: {
-      VIDEO_FRAME_LAYER_CLASS,
-      VIDEO_FRAME_LAYER_BASELINE_CSS,
-      DECORATION_CONTAINER_BASELINE_CSS,
-      BEHIND_ACTOR_BASELINE_CSS,
+      VIDEO_FRAME_LAYER_CLASS: CssClass.VIDEO_FRAME_LAYER,
+      // The same baseline the export composes, in the same layer. The
+      // preview renders into a document that already carries the
+      // universal half, so only the optional blocks come across.
+      CAPTION_BASELINE_CSS: new BaselineCssComposer().composeOptional({ decorations: true, videoFrame: true }),
+      BEHIND_ACTOR_ACTIVE_CLASS: CssClass.BEHIND_ACTOR_ACTIVE,
     },
   };
 }

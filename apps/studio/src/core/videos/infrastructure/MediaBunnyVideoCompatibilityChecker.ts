@@ -3,6 +3,7 @@ import {
   BlobSource,
   Input,
   Mp4OutputFormat,
+  VideoSampleSink,
   getFirstEncodableAudioCodec,
   getFirstEncodableVideoCodec,
   type InputVideoTrack,
@@ -13,8 +14,10 @@ import { UnsupportedAudioCodecError } from '@core/videos/domain/errors/Unsupport
 
 /**
  * mediabunny-backed implementation of {@link VideoCompatibilityChecker}.
- * Opens the source through `Input` solely to read codec metadata —
- * no decoding or buffering — and closes the input before returning.
+ * Opens the source through `Input`, reads codec metadata, and decodes
+ * exactly one video frame to prove the browser's decoder handles the
+ * real bitstream, then closes the input before returning. Audio is
+ * checked from metadata only.
  */
 export class MediaBunnyVideoCompatibilityChecker implements VideoCompatibilityChecker {
   private static readonly PROXY_TARGET_VIDEO_CODEC = 'avc';
@@ -35,8 +38,30 @@ export class MediaBunnyVideoCompatibilityChecker implements VideoCompatibilityCh
     if (!track) {
       throw new UnsupportedVideoCodecError({ codec: 'none' });
     }
-    if (await track.canDecode()) return;
-    throw new UnsupportedVideoCodecError({ codec: await this.readVideoCodec(track) });
+    if (!(await track.canDecode())) {
+      throw new UnsupportedVideoCodecError({ codec: await this.readVideoCodec(track) });
+    }
+    await this.checkFirstFrameDecodes(track);
+  }
+
+  /**
+   * `canDecode` only asks the browser whether a decoder for the codec
+   * string exists; browsers answer yes and still fail on the actual
+   * bitstream (hardware profile limits, corrupt samples). Decoding one
+   * real frame catches those upfront instead of deep inside a later
+   * pipeline stage.
+   */
+  private async checkFirstFrameDecodes(track: InputVideoTrack): Promise<void> {
+    try {
+      const sink = new VideoSampleSink(track);
+      const sample = await sink.getSample(await track.getFirstTimestamp());
+      if (!sample) {
+        throw new Error('The decoder produced no sample for the first frame.');
+      }
+      sample.close();
+    } catch (cause) {
+      throw new UnsupportedVideoCodecError({ codec: await this.readVideoCodec(track), cause });
+    }
   }
 
   private async readVideoCodec(track: InputVideoTrack): Promise<string> {

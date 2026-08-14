@@ -1,0 +1,40 @@
+@use '../_lib/animation/glitch-in' as *;
+@use '../_lib/segment-typography' as *;
+@use '../_lib/word-layout' as *;
+
+.segment {
+  @include segment-typography(
+    $font-family: 'Anton',
+    $font-size: 4.69cqh,
+    $letter-spacing: 0.025em,
+    $line-height: 1.15,
+    $text-transform: uppercase,
+  );
+  @include glitch-in($element: 'segment', $x: 0.03em, $y: -0.02em, $from-opacity: 0, $delay: var(--on-segment-starts));
+}
+
+.line {
+  display: block;
+}
+
+.line + .line {
+  margin-top: var(--tscaps-line-spacing, 0);
+}
+
+/* The split reuses one dial for both axes so the two ghosts land on
+   a diagonal that stretches uniformly as the user opens the offset. */
+.word {
+  @include word-layout(0.1em);
+  text-shadow:
+    var(--tscaps-split-x, 0.05em) var(--tscaps-split-x, 0.05em) 0 var(--tscaps-split-color-a, #ff00aa),
+    calc(var(--tscaps-split-x, 0.05em) * -1) calc(var(--tscaps-split-x, 0.05em) * -1) 0 var(--tscaps-split-color-b, #00e5ff),
+    -0.03em -0.03em 0 #000,
+    0.03em -0.03em 0 #000,
+    -0.03em 0.03em 0 #000,
+    0.03em 0.03em 0 #000;
+  -webkit-text-stroke: 0.01em black;
+}
+
+.word-being-narrated {
+  color: var(--tscaps-highlight-color, #fff200);
+}

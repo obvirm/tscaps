@@ -29,8 +29,8 @@ export class PreprocessingProgressStore extends EventTarget {
   };
 
   private static readonly PHASE_ORDER: Record<PreprocessingProgressPhase, number> = {
-    'model-download': 0,
-    'audio-extract': 1,
+    'audio-extract': 0,
+    'model-download': 1,
     'inferring': 2,
     'preview-proxy': 3,
     'complete': 4,
@@ -78,6 +78,11 @@ export class PreprocessingProgressStore extends EventTarget {
     if (!this._status.active) return;
     if (this._status.phase === 'inferring') return;
     this.publish({ phase: 'inferring', rawProgress: 0 });
+  }
+
+  setInferringProgress(progress: number): void {
+    if (!this._status.active) return;
+    this.publish({ phase: 'inferring', rawProgress: this.clamp01(progress) });
   }
 
   enterPreviewProxyPhase(): void {

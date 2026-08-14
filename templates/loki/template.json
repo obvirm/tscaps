@@ -20,29 +20,36 @@
       "label": "Text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "highlight-color",
       "label": "Highlight",
       "type": "color",
       "default": "#ffea00",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
+    },
+    {
+      "id": "outline-color",
+      "label": "Outline color",
+      "type": "color",
+      "default": "#000000",
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "shadow-color",
-      "label": "Outline",
-      "type": "color",
-      "default": "#000000",
-      "group": "colors"
+      "default": "#000000"
     },
     {
       "id": "glow-color",
       "label": "Glow color",
       "type": "color",
       "default": "#ffea00",
-      "advanced": true,
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "outline-thickness",
@@ -53,7 +60,8 @@
       "max": 0.2,
       "step": 0.005,
       "unit": "em",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "glow-radius",
@@ -64,41 +72,16 @@
       "max": 0.6,
       "step": 0.01,
       "unit": "em",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
-      "id": "animation-intensity",
-      "label": "Pop-in animation",
-      "type": "float",
-      "default": 0.1,
-      "min": 0,
-      "max": 1.8,
-      "step": 0.1,
-      "group": "appearance"
+      "id": "filter-shadow-distance",
+      "default": 0.04
     },
     {
-      "id": "shadow-distance",
-      "label": "Shadow distance",
-      "type": "float",
-      "default": 0.04,
-      "min": 0,
-      "max": 0.3,
-      "step": 0.01,
-      "unit": "em",
-      "advanced": true,
-      "group": "appearance"
-    },
-    {
-      "id": "shadow-blur",
-      "label": "Shadow blur",
-      "type": "float",
-      "default": 0.04,
-      "min": 0,
-      "max": 0.3,
-      "step": 0.005,
-      "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "id": "filter-shadow-blur",
+      "default": 0.04
     }
   ],
   "segmentSplitters": [

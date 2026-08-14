@@ -2,6 +2,7 @@ import type { IndexedDbClient } from '@core/_shared/infrastructure/IndexedDbClie
 import type { IndexedDbStoreDefinition } from '@core/_shared/infrastructure/IndexedDbStoreDefinition';
 import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { BehindActorPreviewSupportChecker } from '@core/person-segmentation/services/BehindActorPreviewSupportChecker';
+import { BehindActorExportContributor } from '@core/person-segmentation/services/BehindActorExportContributor';
 import { BehindActorGatingService } from '@core/person-segmentation/services/BehindActorGatingService';
 import { CancelPersonSegmentationAction } from '@core/person-segmentation/actions/CancelPersonSegmentationAction';
 import { EnsurePersonSegmentationCachedAction } from '@core/person-segmentation/actions/EnsurePersonSegmentationCachedAction';
@@ -31,11 +32,13 @@ import { PersonSegmenterWorkerClient } from '@core/person-segmentation/infrastru
 import { SceneValidityScanner } from '@core/person-segmentation/infrastructure/SceneValidityScanner';
 import { IndexedDbPersonSegmentationCacheRepository } from '@core/person-segmentation/infrastructure/repositories/IndexedDbPersonSegmentationCacheRepository';
 import { MAX_CACHED_PROJECT_ARTIFACTS } from '@core/videos/infrastructure/IndexedDbVideoBlobCache';
+import type { WorkerErrorMonitor } from '@core/_shared/workers/WorkerErrorMonitor';
 
 export interface PersonSegmentationDependencies {
   readonly indexedDb: IndexedDbClient;
   readonly editorStore: EditorStore;
   readonly previewSupportChecker: BehindActorPreviewSupportChecker;
+  readonly workerErrorMonitor: WorkerErrorMonitor;
 }
 
 export type PersonSegmentationModule = ReturnType<typeof bootPersonSegmentation>;
@@ -52,6 +55,7 @@ export function bootPersonSegmentation(deps: PersonSegmentationDependencies) {
     new URL('../../core/person-segmentation/infrastructure/workers/personSegmenterWorker.ts', import.meta.url),
     { type: 'module' },
   );
+  deps.workerErrorMonitor.monitor(worker, 'person-segmenter-worker');
   const workerClient = new PersonSegmenterWorkerClient(worker);
 
   const sceneScanner = new SceneValidityScanner(
@@ -102,6 +106,12 @@ export function bootPersonSegmentation(deps: PersonSegmentationDependencies) {
     segmentMaskBackfillStore,
   );
 
+  const exportContributor = new BehindActorExportContributor(
+    gatingService,
+    cacheRepository,
+    ensureSegmentMasksAction,
+  );
+
   const triggerAutomation = new PersonSegmentationTriggerAutomation(
     deps.editorStore,
     cacheRepository,
@@ -121,6 +131,7 @@ export function bootPersonSegmentation(deps: PersonSegmentationDependencies) {
     loadedCacheStore,
     segmentMaskBackfillStore,
     gatingService,
+    exportContributor,
     previewSupportChecker: deps.previewSupportChecker,
     triggerAutomation,
     cacheHydrationAutomation,

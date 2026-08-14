@@ -2,13 +2,16 @@ export type {
   Transcriber,
   TranscriberOptions,
   TranscriberProgressEvent,
+  UntranscribedRegion,
 } from '@modules/transcription/Transcriber';
 export type { AudioDecoder } from '@modules/transcription/AudioDecoder';
 export { PreDecodedAudioDecoder } from '@modules/transcription/PreDecodedAudioDecoder';
-export { BrowserAudioDecoder } from '@modules/transcription/BrowserAudioDecoder';
+export { MediaBunnyAudioDecoder } from '@modules/transcription/MediaBunnyAudioDecoder';
 export { PassthroughTranscriber } from '@modules/transcription/PassthroughTranscriber';
 export { SrtTranscriber } from '@modules/transcription/SrtTranscriber';
 export { VttTranscriber } from '@modules/transcription/VttTranscriber';
+export { SubtitleFileUnreadableError } from '@modules/transcription/SubtitleFileUnreadableError';
+export type { CueParseResult } from '@modules/transcription/CueParseResult';
 export {
   WhisperTranscriber,
   WHISPER_SAMPLE_RATE,
@@ -16,3 +19,7 @@ export {
   type WhisperDevice,
   type WhisperTranscriberConfig,
 } from '@modules/transcription/WhisperTranscriber';
+export { WhisperDeviceUnavailableError } from '@modules/transcription/WhisperDeviceUnavailableError';
+export type { ModelFileCache } from '@modules/transcription/ModelFileCache';
+export { CacheStorageModelFileCache } from '@modules/transcription/CacheStorageModelFileCache';
+export { ModelFileCacheUnavailableError } from '@modules/transcription/ModelFileCacheUnavailableError';

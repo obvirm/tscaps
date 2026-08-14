@@ -1,4 +1,4 @@
-import { AppError } from '@core/_shared/domain/AppError';
+import { AppError } from '@core/errors/domain/AppError';
 
 /**
  * Raised when persisting the current project to its backing store

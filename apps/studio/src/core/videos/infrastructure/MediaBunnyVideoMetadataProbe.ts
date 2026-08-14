@@ -8,6 +8,11 @@ import type { VideoSourceMetadata } from '@core/videos/domain/VideoSourceMetadat
  * void the rest — the returned metadata reports `null` for the fields
  * that could not be resolved. The input handle is always disposed,
  * even when probing raises.
+ *
+ * Duration is the one field with a second chance: when the container
+ * metadata carries no length, it falls back to a packet-timestamp
+ * scan, which is slower but works on files written without a duration
+ * header.
  */
 export class MediaBunnyVideoMetadataProbe implements VideoMetadataProbe {
   async probe(media: Blob): Promise<VideoSourceMetadata> {
@@ -20,13 +25,13 @@ export class MediaBunnyVideoMetadataProbe implements VideoMetadataProbe {
   }
 
   private async readAll(media: Blob, input: Input): Promise<VideoSourceMetadata> {
-    const [containerFormat, durationSeconds, audioTrack, videoTrack] = await Promise.all([
+    const [containerFormat, durationSeconds, audioProbe, videoTrack] = await Promise.all([
       this.readContainerFormat(input),
       this.readDuration(input),
       this.readPrimaryAudioTrack(input),
       this.readPrimaryVideoTrack(input),
     ]);
-    const [audioCodec, audioSampleRate, audioChannels] = await this.readAudioFacts(audioTrack);
+    const [audioCodec, audioSampleRate, audioChannels] = await this.readAudioFacts(audioProbe.track);
     const [videoCodec, videoWidthPx, videoHeightPx] = await this.readVideoFacts(videoTrack);
     return {
       mimeType: media.type ? media.type : null,
@@ -35,6 +40,7 @@ export class MediaBunnyVideoMetadataProbe implements VideoMetadataProbe {
       videoCodec,
       videoWidthPx,
       videoHeightPx,
+      hasAudioTrack: audioProbe.known ? audioProbe.track !== null : null,
       audioCodec,
       audioSampleRate,
       audioChannels,
@@ -49,11 +55,26 @@ export class MediaBunnyVideoMetadataProbe implements VideoMetadataProbe {
   }
 
   private readDuration(input: Input): Promise<number | null> {
-    return this.swallow(() => input.getDurationFromMetadata());
+    return this.swallow(async () => {
+      const fromMetadata = await input.getDurationFromMetadata();
+      if (fromMetadata !== null && fromMetadata > 0) return fromMetadata;
+      // Recordings written without a duration header (MediaRecorder
+      // WebM, fragmented MP4) land here; scanning packet timestamps
+      // is the only way to recover their real length.
+      return input.computeDuration();
+    });
   }
 
-  private readPrimaryAudioTrack(input: Input): Promise<InputAudioTrack | null> {
-    return this.swallow(() => input.getPrimaryAudioTrack());
+  // A missing track and a failed read must not collapse into the same
+  // `null`: the first is a positive "this video has no audio" fact.
+  private async readPrimaryAudioTrack(
+    input: Input,
+  ): Promise<{ track: InputAudioTrack | null; known: boolean }> {
+    try {
+      return { track: await input.getPrimaryAudioTrack(), known: true };
+    } catch {
+      return { track: null, known: false };
+    }
   }
 
   private readPrimaryVideoTrack(input: Input): Promise<InputVideoTrack | null> {

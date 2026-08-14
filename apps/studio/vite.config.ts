@@ -10,6 +10,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@tscaps/engine': resolve(__dirname, '../../packages/engine/src/index.ts'),
+      '@shared/telemetry': resolve(__dirname, './shared/telemetry/index.ts'),
+      '@shared/transcription-languages': resolve(__dirname, './shared/transcription-languages/index.ts'),
+      '@shared/browser': resolve(__dirname, './shared/browser/index.ts'),
       '@modules': resolve(__dirname, '../../packages/engine/src/modules'),
       '@bootstrap': resolve(__dirname, 'src/bootstrap'),
       '@core': resolve(__dirname, 'src/core'),

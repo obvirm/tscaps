@@ -38,7 +38,7 @@ export class ApplyMultipleSpeakersAction {
   ) {}
 
   execute(multipleSpeakers: boolean): void {
-    const { document, sheets, availableTemplates, video, segmentOverrides, decorationOverrides } = this.store.snapshot();
+    const { document, sheets, availableTemplates, video, frozenSegments, decorationOverrides } = this.store.snapshot();
     if (!document) return;
     if (!video.layout) return;
 
@@ -60,7 +60,7 @@ export class ApplyMultipleSpeakersAction {
       videoWidth: video.layout.width,
       videoHeight: video.layout.height,
       videoDurationSeconds: video.duration,
-      segmentOverrides,
+      frozenSegments,
       decorationOverrides,
     };
     const sheetsAfterFlip = [mainWithSplitter, ...otherSheets];
@@ -120,7 +120,9 @@ export class ApplyMultipleSpeakersAction {
    * subsequent entries are fresh sheets cloned from the same base.
    * Every sheet receives a distinct UI accent from the shared sheet
    * color palette and is pinned to a different style variant
-   * (cyclic by index) so each speaker reads its own preset.
+   * (cyclic by index) so each speaker reads its own preset. Every
+   * sheet also shares a freshly minted `linkGroupId`, so any later
+   * style edit on one speaker rides across to the rest by default.
    */
   private _buildSpeakerSheets(
     base: Sheet,
@@ -128,13 +130,14 @@ export class ApplyMultipleSpeakersAction {
     speakerCount: number,
   ): Sheet[] {
     const usedColors: (string | null)[] = existingOthers.map((s) => s.color);
+    const linkGroupId = crypto.randomUUID();
     const sheets: Sheet[] = [];
     for (let i = 0; i < speakerCount; i++) {
       const color = this.palette.pickColor(usedColors);
       usedColors.push(color);
       const draft = i === 0
-        ? base.with({ name: 'Speaker 1', color })
-        : base.with({ id: crypto.randomUUID(), name: `Speaker ${i + 1}`, color });
+        ? base.with({ name: 'Speaker 1', color, linkGroupId })
+        : base.with({ id: crypto.randomUUID(), name: `Speaker ${i + 1}`, color, linkGroupId });
       sheets.push(draft.withVariant(i));
     }
     return sheets;

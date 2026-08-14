@@ -32,7 +32,11 @@ export const WordChip = memo(function WordChip({ wordId, text, isActive, hasOver
       className={isActive ? WORD_ACTIVE : WORD_INACTIVE}
       onClick={(e) => { e.stopPropagation(); onActivate(wordId, isActive); }}
     >
-      <span>{text || <span className="text-fg-faint italic">·</span>}</span>
+      {/* The panel's own chrome reads left to right, but a caption word may
+          not. Left to inherit, a word carrying punctuation draws it on the
+          wrong side of itself; `auto` settles that from the word's own first
+          strong character, so the chip needs to know nothing about the sheet. */}
+      <span dir="auto">{text || <span className="text-fg-faint italic">·</span>}</span>
       {hasOverride && <span className={OVERRIDE_DOT} aria-label="Has style overrides" />}
     </span>
   );

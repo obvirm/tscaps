@@ -17,57 +17,16 @@
       "label": "Text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "highlight-color",
       "label": "Highlight",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
-    },
-    {
-      "id": "shadow-color",
-      "label": "Shadow",
-      "type": "color",
-      "default": "#000000",
-      "advanced": true,
-      "group": "colors"
-    },
-    {
-      "id": "reveal-distance",
-      "label": "Reveal distance",
-      "type": "float",
-      "default": 0.29,
-      "min": 0,
-      "max": 1.0,
-      "step": 0.01,
-      "unit": "em",
-      "group": "appearance"
-    },
-    {
-      "id": "shadow-distance",
-      "label": "Shadow distance",
-      "type": "float",
-      "default": 0.06,
-      "min": 0,
-      "max": 1.0,
-      "step": 0.01,
-      "unit": "em",
-      "advanced": true,
-      "group": "appearance"
-    },
-    {
-      "id": "shadow-blur",
-      "label": "Shadow blur",
-      "type": "float",
-      "default": 0.25,
-      "min": 0,
-      "max": 2.0,
-      "step": 0.01,
-      "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "colors"
     }
   ],
   "segmentSplitters": [
@@ -84,7 +43,7 @@
     "type": "balanced-pixel-width",
     "minLines": 2,
     "maxLines": 6,
-    "maxWidthRatio": 0.80
+    "maxWidthRatio": 0.8
   },
   "alignment": {
     "verticalAlign": "center",

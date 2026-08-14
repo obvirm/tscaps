@@ -16,6 +16,9 @@ import { SegmentPaddingCssRuleBuilder } from '@modules/rendering/styles/SegmentP
 import { PreparedStyleFactory } from '@modules/rendering/subtitle/PreparedStyleFactory';
 import { SpriteSheetSizeProber } from '@modules/rendering/subtitle/SpriteSheetSizeProber';
 import { ActiveRenderSessionFactory } from '@modules/rendering/subtitle/ActiveRenderSessionFactory';
+import { WordFragmenter } from '@modules/bidi/WordFragmenter';
+import { BidiJsAnalyzer } from '@modules/bidi/BidiJsAnalyzer';
+import { CursiveScriptDetector } from '@modules/bidi/CursiveScriptDetector';
 import type { ActiveRenderSession } from '@modules/rendering/subtitle/ActiveRenderSession';
 import type { PreparedStyle } from '@modules/rendering/subtitle/PreparedStyle';
 
@@ -73,7 +76,11 @@ export class BrowserSubtitleFrameRenderer implements SubtitleFrameRenderer {
     const sizeProber = options?.maxBufferPixels !== undefined
       ? new SpriteSheetSizeProber(options.maxBufferPixels)
       : new SpriteSheetSizeProber();
-    const sessionFactory = new ActiveRenderSessionFactory(wordSplitter, baselineCssComposer);
+    const sessionFactory = new ActiveRenderSessionFactory(
+      wordSplitter,
+      new WordFragmenter(new BidiJsAnalyzer(), new CursiveScriptDetector()),
+      baselineCssComposer,
+    );
     return new BrowserSubtitleFrameRenderer(preparedStyleFactory, sizeProber, sessionFactory);
   }
 

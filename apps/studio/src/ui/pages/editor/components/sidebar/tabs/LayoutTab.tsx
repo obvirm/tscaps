@@ -4,18 +4,18 @@ import type { ControlField, ControlValue } from '@core/templates/domain/definiti
 import type { SegmentSplitterConfig } from '@core/segment-splitter/domain/SegmentSplitterConfig';
 import type { SegmentSplitterContext } from '@core/segment-splitter/domain/SegmentSplitterDescriptor';
 import type { LineSplitterConfig } from '@core/line-splitter/domain/LineSplitterConfig';
-import type { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
 import { FieldsSection } from '@ui/_shared/components/controls/sections/FieldsSection';
 import { EditorTab, type SheetScope } from '@ui/pages/editor/components/sidebar/tabs/EditorTab';
 import { useEngine } from '@ui/_shared/contexts/modules/EngineContext';
 import { useSheets } from '@ui/_shared/contexts/modules/SheetsContext';
 import { useCaptions } from '@ui/_shared/contexts/modules/CaptionsContext';
 import { ConfirmDialog } from '@ui/_shared/components/Dialog/ConfirmDialog';
+import type { FrozenSegmentSet } from '@core/captions/domain/FrozenSegmentSet';
 
 interface LayoutTabProps {
   sheetScope: SheetScope;
   document: Document | null;
-  segmentOverrides: SegmentOverrides;
+  frozenSegments: FrozenSegmentSet;
 }
 
 type PendingChange =
@@ -25,7 +25,7 @@ type PendingChange =
 export const LayoutTab = memo(function LayoutTab({
   sheetScope,
   document,
-  segmentOverrides,
+  frozenSegments,
 }: LayoutTabProps) {
   const { segmentSplitters, lineSplitters } = useEngine();
   const sheets = useSheets();
@@ -77,11 +77,11 @@ export const LayoutTab = memo(function LayoutTab({
     for (const section of document.sections) {
       if (section.kind !== activeSheet.id) continue;
       for (const seg of section.segments) {
-        if (segmentOverrides.isFrozen(seg.id)) return true;
+        if (frozenSegments.has(seg.id)) return true;
       }
     }
     return false;
-  }, [document, activeSheet.id, segmentOverrides]);
+  }, [document, activeSheet.id, frozenSegments]);
 
   const [pendingChange, setPendingChange] = useState<PendingChange | null>(null);
 

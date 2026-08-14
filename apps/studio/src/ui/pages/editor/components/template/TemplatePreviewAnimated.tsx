@@ -51,11 +51,11 @@ export function TemplatePreviewAnimated({ letterSplitter, hostRef, onHoverLost }
   return (
     <div
       className={previewMock.segment.getCssClasses(currentTime).join(' ')}
-      style={{ animationPlayState: 'paused', animationFillMode: 'both', ...segVars } as React.CSSProperties}
+      style={segVars}
     >
       <div
         className={lineClass}
-        style={{ animationPlayState: 'paused', animationFillMode: 'both', ...lineVars } as React.CSSProperties}
+        style={lineVars}
       >
         {[...previewMock.line.words].map((word, indexInLine) => {
           const wordVars = word.getCssVariables(currentTime, { segTime, indexInLine }) as Record<string, string>;
@@ -67,8 +67,6 @@ export function TemplatePreviewAnimated({ letterSplitter, hostRef, onHoverLost }
                 key={word.text}
                 className={wordClass}
                 style={{
-                  animationPlayState: 'paused',
-                  animationFillMode: 'both',
                   ...wordVars,
                   ...letterAnimationStyleBuilder.buildWordContainerVars(letters.length),
                 }}
@@ -77,11 +75,7 @@ export function TemplatePreviewAnimated({ letterSplitter, hostRef, onHoverLost }
                   <span
                     key={i}
                     className="letter"
-                    style={{
-                      animationPlayState: 'paused',
-                      animationFillMode: 'both',
-                      ...letterAnimationStyleBuilder.buildLetterVars(i),
-                    }}
+                    style={letterAnimationStyleBuilder.buildLetterVars(i)}
                   >
                     {letter}
                   </span>
@@ -93,7 +87,7 @@ export function TemplatePreviewAnimated({ letterSplitter, hostRef, onHoverLost }
             <span
               key={word.text}
               className={wordClass}
-              style={{ animationPlayState: 'paused', animationFillMode: 'both', ...wordVars } as React.CSSProperties}
+              style={wordVars as React.CSSProperties}
             >
               {word.text}
             </span>

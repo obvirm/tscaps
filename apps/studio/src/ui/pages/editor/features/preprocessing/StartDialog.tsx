@@ -4,29 +4,16 @@ import { AppDialog, AppDialogActions } from '@ui/_shared/components/Dialog/AppDi
 import { AppErrorMessage, getAppErrorTitle } from '@ui/_shared/components/AppErrorMessage/AppErrorMessage';
 import { AsyncButton } from '@ui/_shared/components/AsyncButton/AsyncButton';
 import { BTN_PRIMARY_SM, BTN_SECONDARY_SM } from '@ui/_shared/styles/buttons';
-import type { AppError } from '@core/_shared/domain/AppError';
+import type { AppError } from '@core/errors/domain/AppError';
+import { WHISPER_SUPPORTED_LANGUAGES, type SupportedLanguage } from '@shared/transcription-languages';
 import type { TranscribePreference } from '@core/transcription/domain/TranscribePreference';
 import type { PreprocessVideoAction } from '@core/preprocessing/actions/PreprocessVideoAction';
 import type { UpdateTranscribePreferenceAction } from '@core/transcription/actions/UpdateTranscribePreferenceAction';
-import { SelectField, type SelectFieldOption } from '@ui/pages/editor/features/preprocessing/components/SelectField';
+import {
+  LanguagePicker,
+  AUTO_DETECT_LANGUAGE_VALUE,
+} from '@ui/pages/editor/features/preprocessing/components/LanguagePicker';
 import { AdvancedSection } from '@ui/pages/editor/features/preprocessing/components/AdvancedSection';
-
-const LANGUAGES: readonly SelectFieldOption[] = [
-  { value: 'auto', label: 'Auto-detect' },
-  { value: 'en',   label: 'English' },
-  { value: 'es',   label: 'Spanish' },
-  { value: 'pt',   label: 'Portuguese' },
-  { value: 'fr',   label: 'French' },
-  { value: 'de',   label: 'German' },
-  { value: 'it',   label: 'Italian' },
-  { value: 'nl',   label: 'Dutch' },
-  { value: 'ru',   label: 'Russian' },
-  { value: 'ja',   label: 'Japanese' },
-  { value: 'zh',   label: 'Chinese' },
-  { value: 'ko',   label: 'Korean' },
-  { value: 'ar',   label: 'Arabic' },
-  { value: 'hi',   label: 'Hindi' },
-];
 
 const DEFAULT_DESCRIPTION = 'Pick a language. Transcription runs in your browser.';
 
@@ -38,12 +25,27 @@ interface StartDialogProps {
   readonly preprocessVideo: PreprocessVideoAction;
   readonly updatePreference: UpdateTranscribePreferenceAction;
   readonly onCancel: () => void;
+  /** Disables the default Start action while the loaded video is not accepted yet. */
+  readonly startDisabled?: boolean;
   readonly description?: string;
   readonly extraFields?: ReactNode;
   readonly extraNotices?: ReactNode;
   readonly renderActions?: (start: () => Promise<void>) => ReactNode;
   /** Whether the transcriber runs in the browser. */
   readonly inBrowserTranscription?: boolean;
+  /**
+   * Languages offered by the transcriber this dialog is starting. Defaults
+   * to the Whisper list, matching the default in-browser transcriber.
+   */
+  readonly languages?: readonly SupportedLanguage[];
+  /**
+   * Adds an "Auto-detect" first row to the language picker and uses it as
+   * the initial value. Off by default: the in-browser Whisper transcriber
+   * silently falls back to English when nothing is picked, so we require
+   * an explicit choice there. Callers whose transcriber can detect the
+   * language from the audio turn this on.
+   */
+  readonly allowAutoDetect?: boolean;
 }
 
 /**
@@ -60,17 +62,32 @@ export function StartDialog({
   preprocessVideo,
   updatePreference,
   onCancel,
+  startDisabled = false,
   description,
   extraFields,
   extraNotices,
   renderActions,
   inBrowserTranscription = true,
+  languages = WHISPER_SUPPORTED_LANGUAGES,
+  allowAutoDetect = false,
 }: StartDialogProps) {
-  const [language, setLanguage] = useState<string>('auto');
+  const [language, setLanguage] = useState<string>(allowAutoDetect ? AUTO_DETECT_LANGUAGE_VALUE : '');
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [languageError, setLanguageError] = useState<string | null>(null);
 
-  const handleStart = (): Promise<void> => {
-    const transcriber: TranscriberOptions = language === 'auto' ? {} : { language };
+  const handleLanguageChange = (next: string) => {
+    setLanguage(next);
+    if (languageError !== null) setLanguageError(null);
+  };
+
+  const handleStart = async (): Promise<void> => {
+    if (!allowAutoDetect && language === '') {
+      setLanguageError('Please pick a language.');
+      document.getElementById('td-language')?.focus();
+      return;
+    }
+    const transcriber: TranscriberOptions =
+      language === '' || language === AUTO_DETECT_LANGUAGE_VALUE ? {} : { language };
     return preprocessVideo.execute({ transcriber, multipleSpeakers: false });
   };
 
@@ -83,12 +100,15 @@ export function StartDialog({
       title="Start your video"
       description={description ?? DEFAULT_DESCRIPTION}
     >
-      <SelectField
+      <LanguagePicker
         id="td-language"
         label="Language"
+        languages={languages}
         value={language}
-        options={LANGUAGES}
-        onChange={setLanguage}
+        onChange={handleLanguageChange}
+        allowAutoDetect={allowAutoDetect}
+        placeholder="Select a language"
+        errorMessage={languageError ?? undefined}
       />
 
       {extraFields}
@@ -128,7 +148,15 @@ export function StartDialog({
           : (
             <>
               <button type="button" className={BTN_SECONDARY_SM} onClick={onCancel}>Cancel</button>
-              <AsyncButton className={BTN_PRIMARY_SM} onClick={handleStart} autoFocus>Start</AsyncButton>
+              <AsyncButton
+                data-testid="start-flow-primary"
+                className={BTN_PRIMARY_SM}
+                onClick={handleStart}
+                disabled={startDisabled}
+                autoFocus
+              >
+                Start
+              </AsyncButton>
             </>
           )}
       </AppDialogActions>

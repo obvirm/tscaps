@@ -1,67 +1,66 @@
-import type { Document, Segment, InlineStyleMap } from '@tscaps/engine';
-import { CssVariable } from '@tscaps/engine';
+import type { Document, Segment } from '@tscaps/engine';
 import type { PersonSegmentationWindow } from '@core/person-segmentation/domain/PersonSegmentationWindow';
 import type { BehindActorSegmentOverride } from '@core/person-segmentation/domain/BehindActorSegmentOverride';
-
-interface BehindActorSegmentDecision {
-  readonly sceneValid: boolean;
-  readonly forced: boolean;
-}
+import type { BehindActorTemplateConfig } from '@core/person-segmentation/domain/BehindActorTemplateConfig';
+import { BEHIND_ACTOR_TEMPLATE_CONFIG_DEFAULT } from '@core/person-segmentation/domain/BehindActorTemplateConfig';
 
 /**
- * Derives the per-segment inline CSS variables the engine consumes to
- * publish text-behind-actor state on the segment wrapper. Combines
- * three inputs: the detector's valid windows, the user's per-segment
- * overrides, and the document's segments.
+ * The single decision point for whether the text-behind-actor effect
+ * is active on a segment. Combines four inputs: the user's per-segment
+ * override, the section's template config (opt-in flag + tag
+ * condition), the detector's valid windows, and the segment itself.
  *
- * A segment is marked `scene-valid` only when its entire time range
- * fits inside a single detector window; a segment straddling a window
+ * `force-on` is always active and `force-off` never is, regardless of
+ * the template. On `auto`, a segment is active only when its template
+ * opts in, the segment qualifies under the template's tag condition
+ * (evaluated against the union of the segment's tags; a `null`
+ * condition qualifies every segment), and its entire time range fits
+ * inside a single detector window — a segment straddling a window
  * boundary would flicker in and out of the effect mid-playback, so it
- * is treated as invalid. The user's override can force either input
- * on or off regardless of the detector's verdict.
- *
- * The returned map omits any segment whose inputs are all false, so
- * callers only pay for segments that actually publish state.
+ * is treated as inactive.
  */
 export class BehindActorGatingService {
 
-  buildSegmentInlineVars(
+  /**
+   * Ids of the segments the effect is active on, across the whole
+   * document. `templateConfigBySectionKind` maps each section kind to
+   * its template's config; sections without an entry never activate
+   * on `auto`.
+   */
+  buildActiveSegmentIds(
     document: Document,
     validWindows: ReadonlyArray<PersonSegmentationWindow>,
     overrides: ReadonlyMap<string, BehindActorSegmentOverride>,
-  ): ReadonlyMap<string, InlineStyleMap> {
-    const result = new Map<string, InlineStyleMap>();
+    templateConfigBySectionKind: ReadonlyMap<string, BehindActorTemplateConfig>,
+  ): ReadonlySet<string> {
+    const activeIds = new Set<string>();
     for (const section of document.sections) {
+      const templateConfig = templateConfigBySectionKind.get(section.kind) ?? BEHIND_ACTOR_TEMPLATE_CONFIG_DEFAULT;
       for (const segment of section.segments) {
-        const decision = this.decide(segment, overrides.get(segment.id) ?? 'auto', validWindows);
-        const vars = this.serializeVars(decision);
-        if (Object.keys(vars).length > 0) result.set(segment.id, vars);
+        if (this.isEffectivelyOn(segment, overrides.get(segment.id) ?? 'auto', validWindows, templateConfig)) {
+          activeIds.add(segment.id);
+        }
       }
     }
-    return result;
+    return activeIds;
   }
 
-  /**
-   * Whether the effect applies to `segment` once the user's override
-   * is combined with the detector's verdict: `force-on` is always on,
-   * `force-off` is always off, `auto` follows the windows.
-   */
   isEffectivelyOn(
     segment: Segment,
     override: BehindActorSegmentOverride,
     validWindows: ReadonlyArray<PersonSegmentationWindow>,
+    templateConfig: BehindActorTemplateConfig,
   ): boolean {
-    return this.decide(segment, override, validWindows).sceneValid;
+    if (override === 'force-on') return true;
+    if (override === 'force-off') return false;
+    return templateConfig.required
+      && this.matchesTagCondition(segment, templateConfig)
+      && this.isSegmentFullyContainedInAnyWindow(segment, validWindows);
   }
 
-  private decide(
-    segment: Segment,
-    override: BehindActorSegmentOverride,
-    validWindows: ReadonlyArray<PersonSegmentationWindow>,
-  ): BehindActorSegmentDecision {
-    if (override === 'force-on') return { sceneValid: true, forced: true };
-    if (override === 'force-off') return { sceneValid: false, forced: false };
-    return { sceneValid: this.isSegmentFullyContainedInAnyWindow(segment, validWindows), forced: false };
+  private matchesTagCondition(segment: Segment, templateConfig: BehindActorTemplateConfig): boolean {
+    if (templateConfig.tagCondition === null) return true;
+    return templateConfig.tagCondition.evaluate(segment.getAllTags());
   }
 
   private isSegmentFullyContainedInAnyWindow(
@@ -72,12 +71,5 @@ export class BehindActorGatingService {
       if (window.start <= segment.time.start && segment.time.end <= window.end) return true;
     }
     return false;
-  }
-
-  private serializeVars(decision: BehindActorSegmentDecision): InlineStyleMap {
-    const vars: Record<string, string> = {};
-    if (decision.sceneValid) vars[CssVariable.BEHIND_ACTOR_SCENE_VALID] = '1';
-    if (decision.forced) vars[CssVariable.BEHIND_ACTOR_FORCED] = '1';
-    return vars;
   }
 }

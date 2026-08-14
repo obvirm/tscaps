@@ -1,6 +1,6 @@
 import type { Transcriber, TranscriberOptions } from '@modules/transcription/Transcriber';
 import { WhisperTranscriber } from '@modules/transcription/WhisperTranscriber';
-import { BrowserAudioDecoder } from '@modules/transcription/BrowserAudioDecoder';
+import { MediaBunnyAudioDecoder } from '@modules/transcription/MediaBunnyAudioDecoder';
 import type { SegmentSplitter } from '@modules/splitting/SegmentSplitter';
 import type { LineSplitter } from '@modules/splitting/LineSplitter';
 import type { WordSplitter } from '@modules/splitting/WordSplitter';
@@ -92,7 +92,7 @@ const DEFAULT_RENDERING: RenderingConfig = {
   splitWordsIntoLetters: false,
   videoFrame: { required: false, jpegQuality: 1 },
   padding: null,
-  behindActor: { required: false },
+  textDirection: 'ltr',
 };
 
 const DEFAULT_SUBTITLE_CSS = `
@@ -372,7 +372,7 @@ export class RenderPipelineBuilder {
   }
 
   private buildDefaultTranscriber(): Transcriber {
-    return new WhisperTranscriber(new BrowserAudioDecoder());
+    return new WhisperTranscriber(new MediaBunnyAudioDecoder());
   }
 
   private buildDefaultSegmentSplitter(): SegmentSplitter {

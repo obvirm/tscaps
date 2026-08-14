@@ -1,12 +1,17 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import type { ExportVideoOptions } from '@core/export/actions/ExportVideoAction';
+import type { ExportSubtitlesOptions } from '@core/export/actions/ExportSubtitlesAction';
 import type { ExportNotice } from '@core/export/domain/ExportNotice';
-import type { UserAgentInspector } from '@core/_shared/infrastructure/UserAgentInspector';
-import type { AppError } from '@core/_shared/domain/AppError';
+import type { UserAgentInspector } from '@shared/browser';
+import type { AppError } from '@core/errors/domain/AppError';
 import { AppDialog, AppDialogActions } from '@ui/_shared/components/Dialog/AppDialog';
 import { AppErrorMessage, getAppErrorTitle } from '@ui/_shared/components/AppErrorMessage/AppErrorMessage';
 import { BTN_SECONDARY_SM } from '@ui/_shared/styles/buttons';
-import { ExportSettingsForm, type ResolutionView } from '@ui/pages/editor/features/export/components/ExportSettingsForm';
+import {
+  VideoExportSettings,
+  type ResolutionView,
+} from '@ui/pages/editor/features/export/components/VideoExportSettings';
+import { SubtitleExportSettings } from '@ui/pages/editor/features/export/components/SubtitleExportSettings';
 import { FallbackDecoderWarningView } from '@ui/pages/editor/features/export/components/FallbackDecoderWarningView';
 import { ExportNoticeView } from '@ui/pages/editor/features/export/components/ExportNoticeView';
 
@@ -30,13 +35,16 @@ interface ExportDialogProps {
   videoLayout: { width: number; height: number } | null;
   resolutionView: ResolutionView | null;
   extraNotice?: ReactNode;
-  onConfirm: (options: ExportVideoOptions) => Promise<void> | void;
+  onExportVideo: (options: ExportVideoOptions) => Promise<void> | void;
+  onExportSubtitles: (options: ExportSubtitlesOptions) => void;
   onAcceptFallback: () => void;
   onRejectFallback: () => void;
   onDismissNotice: () => void;
   onClose: () => void;
   userAgentInspector: UserAgentInspector;
 }
+
+type ExportKind = 'video' | 'subtitles';
 
 type SettingsDefaults = Pick<ExportVideoOptions, 'format' | 'quality'>;
 const DESKTOP_DEFAULTS: SettingsDefaults = { format: 'mp4', quality: 'high' };
@@ -52,17 +60,30 @@ export function ExportDialog({
   videoLayout,
   resolutionView,
   extraNotice,
-  onConfirm,
+  onExportVideo,
+  onExportSubtitles,
   onAcceptFallback,
   onRejectFallback,
   onDismissNotice,
   onClose,
   userAgentInspector,
 }: ExportDialogProps) {
+  const [kind, setKind] = useState<ExportKind>('video');
+  const [wasOpen, setWasOpen] = useState(open);
+
+  // Video is where almost everyone is headed, so every visit starts
+  // there however the last one ended. Adjusted while rendering rather
+  // than from an effect so the reset costs no extra commit.
+  if (open !== wasOpen) {
+    setWasOpen(open);
+    if (open) setKind('video');
+  }
+
   const defaults = userAgentInspector.isMobile() ? MOBILE_DEFAULTS : DESKTOP_DEFAULTS;
   const title = phase === 'error'              ? (error ? getAppErrorTitle(error) : 'Export failed')
               : phase === 'fallback-warning'   ? 'Slower export ahead'
               : phase === 'notice'             ? 'Export complete'
+              : kind === 'subtitles'           ? 'Export subtitles'
               :                                  'Export video';
   const locked = isExporting || phase === 'fallback-warning' || phase === 'notice';
 
@@ -74,12 +95,20 @@ export function ExportDialog({
       size="md"
       title={title}
     >
-      {phase === 'settings' && videoLayout && resolutionView && (
-        <ExportSettingsForm
+      {phase === 'settings' && kind === 'subtitles' && (
+        <SubtitleExportSettings
+          onConfirm={onExportSubtitles}
+          onSwitchToVideo={() => setKind('video')}
+          onCancel={onClose}
+        />
+      )}
+      {phase === 'settings' && kind === 'video' && videoLayout && resolutionView && (
+        <VideoExportSettings
           defaults={defaults}
           resolutionView={resolutionView}
           extraNotice={extraNotice}
-          onConfirm={onConfirm}
+          onConfirm={onExportVideo}
+          onSwitchToSubtitles={() => setKind('subtitles')}
           onCancel={onClose}
         />
       )}

@@ -1,9 +1,9 @@
 import { TimeFragment } from '@modules/document/TimeFragment';
-import { Tag } from '@modules/document/Tag';
-import { CssVariable } from '@modules/document/CssVariable';
+import { Tag } from '@modules/tags/Tag';
 import { Segment } from '@modules/document/Segment';
 import { Line } from '@modules/document/Line';
 import { Word } from '@modules/document/Word';
+import { DocumentNodeId } from '@modules/document/DocumentNodeId';
 
 export interface SectionProps<M = unknown> {
   readonly segments: ReadonlyArray<Segment>;
@@ -25,8 +25,6 @@ export interface SectionProps<M = unknown> {
  * engine treats it as an opaque string.
  */
 export class Section<M = unknown> {
-  static readonly CSS_CLASS = 'section';
-
   readonly segments: ReadonlyArray<Segment>;
   readonly kind: string;
   readonly structureTags: ReadonlySet<Tag>;
@@ -37,7 +35,7 @@ export class Section<M = unknown> {
     this.segments = props.segments;
     this.kind = props.kind;
     this.structureTags = props.structureTags ?? new Set();
-    this.id = props.id ?? crypto.randomUUID();
+    this.id = props.id ?? DocumentNodeId.generate();
     this.metadata = props.metadata;
   }
 
@@ -46,22 +44,6 @@ export class Section<M = unknown> {
     const last = this.segments[this.segments.length - 1];
     if (!first || !last) throw new Error('Section has no segments');
     return new TimeFragment(first.time.start, last.time.end);
-  }
-
-  getCssClasses(_currentTime: number): string[] {
-    const classes: string[] = [Section.CSS_CLASS];
-    for (const tag of this.structureTags) {
-      classes.push(tag.toCssClass());
-    }
-    return classes;
-  }
-
-  getCssVariables(currentTime: number): Record<string, string> {
-    return {
-      [CssVariable.SECTION_STARTS]: `${(this.time.start - currentTime).toFixed(3)}s`,
-      [CssVariable.SECTION_ENDS]: `${(this.time.end - currentTime).toFixed(3)}s`,
-      [CssVariable.SECTION_DURATION]: `${(this.time.end - this.time.start).toFixed(3)}s`,
-    };
   }
 
   getWords(): Word[] {

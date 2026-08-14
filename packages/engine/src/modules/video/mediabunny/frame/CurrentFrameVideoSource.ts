@@ -14,15 +14,15 @@ export class CurrentFrameVideoSource implements VideoFrameSource {
   // the producer and the subtitle renderer.
   private static readonly TIMESTAMP_TOLERANCE_S = 1e-6;
 
-  private readonly canvas: OffscreenCanvas;
-  private readonly ctx: OffscreenCanvasRenderingContext2D;
+  private readonly canvas: HTMLCanvasElement;
+  private readonly ctx: CanvasRenderingContext2D;
   private currentTimestamp: number | null = null;
 
   constructor(width: number, height: number) {
-    this.canvas = new OffscreenCanvas(width, height);
+    this.canvas = this.createCanvas(width, height);
     const ctx = this.canvas.getContext('2d');
     if (!ctx) {
-      throw new Error('OffscreenCanvas 2D context is not available in this environment.');
+      throw new Error('Canvas 2D context is not available in this environment.');
     }
     this.ctx = ctx;
   }
@@ -48,31 +48,56 @@ export class CurrentFrameVideoSource implements VideoFrameSource {
           `but the current slot holds ${this.currentTimestamp}.`,
       );
     }
-    const blob = await profiler.time('CurrentFrameVideoSource.convertToBlob', () =>
-      this.encode(region, jpegQuality),
-    );
-    return profiler.time('CurrentFrameVideoSource.blobToDataUrl', () => this.blobToDataUrl(blob));
+    return profiler.time('CurrentFrameVideoSource.encode', () => this.encode(region, jpegQuality));
   }
 
-  private encode(region: VideoFrameRegion | undefined, jpegQuality: number): Promise<Blob> {
-    if (!region) {
-      return this.canvas.convertToBlob({ type: 'image/jpeg', quality: jpegQuality });
+  private encode(region: VideoFrameRegion | undefined, jpegQuality: number): string {
+    const clipped = region ? this.clipToCanvas(region) : null;
+    if (!clipped || clipped.width === 0 || clipped.height === 0) {
+      return this.encodeJpeg(this.canvas, jpegQuality);
     }
-    const clipped = this.clipToCanvas(region);
-    if (clipped.width === 0 || clipped.height === 0) {
-      return this.canvas.convertToBlob({ type: 'image/jpeg', quality: jpegQuality });
-    }
-    const cropCanvas = new OffscreenCanvas(clipped.width, clipped.height);
-    const cropCtx = cropCanvas.getContext('2d');
-    if (!cropCtx) {
-      throw new Error('OffscreenCanvas 2D context is not available for cropping.');
-    }
-    cropCtx.drawImage(
-      this.canvas,
-      clipped.x, clipped.y, clipped.width, clipped.height,
-      0, 0, clipped.width, clipped.height,
+    return this.encodeJpeg(this.cropTo(clipped), jpegQuality);
+  }
+
+  private cropTo(clipped: VideoFrameRegion): HTMLCanvasElement {
+    const cropCanvas = this.createCanvas(clipped.width, clipped.height);
+    const cropCtx = profiler.time('CurrentFrameVideoSource.cropCanvasContext', () =>
+      cropCanvas.getContext('2d'),
     );
-    return cropCanvas.convertToBlob({ type: 'image/jpeg', quality: jpegQuality });
+    if (!cropCtx) {
+      throw new Error('Canvas 2D context is not available for cropping.');
+    }
+    profiler.time('CurrentFrameVideoSource.cropDraw', () =>
+      cropCtx.drawImage(
+        this.canvas,
+        clipped.x, clipped.y, clipped.width, clipped.height,
+        0, 0, clipped.width, clipped.height,
+      ),
+    );
+    return cropCanvas;
+  }
+
+  // Chosen for predictability over raw speed. `toDataURL` encodes inline;
+  // `OffscreenCanvas.convertToBlob` defers to the browser's async image
+  // scheduler, which was measured taking ~1s per call instead of the usual
+  // few ms, under a load that could not be pinned down or reproduced.
+  // Output is byte-identical between the two on Chrome and Firefox, and the
+  // async overhead is per-call rather than per-pixel, so the two only differ
+  // meaningfully at small crop sizes. The tradeoff accepted here is that
+  // encoding inline blocks the main thread for the whole encode, and that a
+  // DOM canvas rules out ever running this step in a Worker.
+  // Benchmarked in experiments/jpeg-encode-apis/.
+  private encodeJpeg(canvas: HTMLCanvasElement, jpegQuality: number): string {
+    return profiler.time('CurrentFrameVideoSource.encodeJpeg', () =>
+      canvas.toDataURL('image/jpeg', jpegQuality),
+    );
+  }
+
+  private createCanvas(width: number, height: number): HTMLCanvasElement {
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    return canvas;
   }
 
   private clipToCanvas(region: VideoFrameRegion): VideoFrameRegion {
@@ -81,14 +106,5 @@ export class CurrentFrameVideoSource implements VideoFrameSource {
     const right = Math.min(this.canvas.width, Math.ceil(region.x + region.width));
     const bottom = Math.min(this.canvas.height, Math.ceil(region.y + region.height));
     return { x, y, width: Math.max(0, right - x), height: Math.max(0, bottom - y) };
-  }
-
-  private blobToDataUrl(blob: Blob): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = () => reject(reader.error ?? new Error('FileReader failed to encode the frame.'));
-      reader.readAsDataURL(blob);
-    });
   }
 }

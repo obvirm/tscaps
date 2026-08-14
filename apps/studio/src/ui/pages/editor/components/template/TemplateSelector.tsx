@@ -13,6 +13,11 @@ interface TemplateSelectorProps {
   onDeleteUserTemplate: (id: string) => void;
   onRenameUserTemplate: (id: string) => void;
   library: TemplateLibraryView;
+  /**
+   * Category tab the picker opens on, or `null` for "All". A default,
+   * not a filter lock — every tab stays reachable.
+   */
+  preferredCategory?: string | null | undefined;
 }
 
 /** Built-in tab ids; user categories are appended after these. */
@@ -32,9 +37,18 @@ export const TemplateSelector = memo(function TemplateSelector({
   onDeleteUserTemplate,
   onRenameUserTemplate,
   library,
+  preferredCategory = null,
 }: TemplateSelectorProps) {
   const [query, setQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<TabId>('all');
+  const [activeTab, setActiveTab] = useState<TabId>(preferredCategory ?? 'all');
+
+  // Re-seed the tab when the preferred category changes (e.g. the active
+  // sheet switched role). Render-time sync avoids an extra effect tick.
+  const [lastPreferredCategory, setLastPreferredCategory] = useState(preferredCategory);
+  if (preferredCategory !== lastPreferredCategory) {
+    setLastPreferredCategory(preferredCategory);
+    setActiveTab(preferredCategory ?? 'all');
+  }
 
   const userTemplateIds = useMemo(
     () => new Set(userTemplates.map((t) => t.metadata.id)),

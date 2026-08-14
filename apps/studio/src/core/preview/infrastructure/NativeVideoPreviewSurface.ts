@@ -65,6 +65,7 @@ export class NativeVideoPreviewSurface extends EventTarget implements VideoPrevi
 
   private sourceUrl: string | null = null;
   private lastObservedSourceTimeSec = 0;
+  private scheduledStopSourceSec: number | null = null;
   private scheduledSkipTimerId: number | null = null;
   private timeDispatchRafId = 0;
   private loadGeneration = 0;
@@ -152,6 +153,7 @@ export class NativeVideoPreviewSurface extends EventTarget implements VideoPrevi
     this.videoSize = null;
     this.durationSec = 0;
     this.lastObservedSourceTimeSec = 0;
+    this.scheduledStopSourceSec = null;
     this.isReadyFlag = false;
     this.isPlayingFlag = false;
     this.dispatchChange();
@@ -173,6 +175,7 @@ export class NativeVideoPreviewSurface extends EventTarget implements VideoPrevi
 
   pause(): void {
     if (!this.videoElement || !this.isPlayingFlag) return;
+    this.cancelScheduledStop();
     this.videoElement.pause();
     this.isPlayingFlag = false;
     this.clearScheduledSkip();
@@ -183,6 +186,7 @@ export class NativeVideoPreviewSurface extends EventTarget implements VideoPrevi
 
   seek(sourceTimeSec: number): void {
     if (!this.videoElement) return;
+    this.cancelScheduledStop();
     const target = this.resolveSeekTarget(sourceTimeSec);
     this.seekVideoElementTo(target);
     this.dispatchTimeChange();
@@ -213,6 +217,14 @@ export class NativeVideoPreviewSurface extends EventTarget implements VideoPrevi
 
   cancelScheduledAudioMute(): void {
     this.audioGraph?.cancelScheduledMute();
+  }
+
+  scheduleStopAt(sourceTimeSec: number): void {
+    this.scheduledStopSourceSec = sourceTimeSec;
+  }
+
+  cancelScheduledStop(): void {
+    this.scheduledStopSourceSec = null;
   }
 
   setPlaybackRate(rate: number): void {
@@ -450,10 +462,23 @@ export class NativeVideoPreviewSurface extends EventTarget implements VideoPrevi
       this.skipPastCut(containing);
       return;
     }
+    if (this.pauseIfScheduledStopReached()) return;
     const next = this.videoElement.currentTime;
     if (Math.abs(next - this.lastObservedSourceTimeSec) < TIME_DISPATCH_THRESHOLD_SEC) return;
     this.lastObservedSourceTimeSec = next;
     this.dispatchTimeChange();
+  }
+
+  private pauseIfScheduledStopReached(): boolean {
+    const stopSourceSec = this.scheduledStopSourceSec;
+    if (stopSourceSec === null || !this.videoElement) return false;
+    if (this.videoElement.currentTime < stopSourceSec) return false;
+    this.cancelScheduledStop();
+    this.pause();
+    this.seekVideoElementTo(stopSourceSec);
+    this.lastObservedSourceTimeSec = stopSourceSec;
+    this.dispatchTimeChange();
+    return true;
   }
 
   private dispatchChange(): void {

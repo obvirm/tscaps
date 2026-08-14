@@ -109,6 +109,25 @@ export default {
           '0%, 100%': { transform: 'translateX(0%)' },
           '50%':      { transform: 'translateX(233%)' },
         },
+        // A toast lands over content it has nothing to do with, so it
+        // travels further than an in-flow element would: the movement is
+        // what tells someone looking elsewhere on screen that it arrived.
+        'toast-in-from-top': {
+          from: { opacity: '0', transform: 'translateY(-12px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+        'toast-in-from-bottom': {
+          from: { opacity: '0', transform: 'translateY(12px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+        'toast-out': {
+          from: { opacity: '1' },
+          to: { opacity: '0' },
+        },
+        'toast-timer': {
+          from: { transform: 'scaleX(1)' },
+          to: { transform: 'scaleX(0)' },
+        },
       },
       animation: {
         'fade-in': 'fade-in 0.12s ease',
@@ -116,6 +135,15 @@ export default {
         'dot-blink': 'wordmark-dot-blink 1.4s cubic-bezier(0.2, 0.8, 0.2, 1) infinite',
         'caption-paint': 'wordmark-caption-paint 560ms cubic-bezier(0.16, 1, 0.3, 1) both',
         'indeterminate-bounce': 'indeterminate-bounce 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite',
+        // `backwards` rather than `both`: the toast carries an inline
+        // transform and opacity for the swipe gesture, and a persisted
+        // end state would outrank them once the entrance is over.
+        'toast-in-from-top': 'toast-in-from-top 220ms cubic-bezier(0.16, 1, 0.3, 1) backwards',
+        'toast-in-from-bottom': 'toast-in-from-bottom 220ms cubic-bezier(0.16, 1, 0.3, 1) backwards',
+        'toast-out': 'toast-out 150ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards',
+        // Duration is supplied per toast; the shorthand only names the
+        // curve so the countdown reads as elapsed time rather than motion.
+        'toast-timer': 'toast-timer linear forwards',
       },
     },
   },

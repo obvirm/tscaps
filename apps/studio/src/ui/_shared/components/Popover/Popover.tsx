@@ -16,6 +16,13 @@ interface BasePopoverProps {
   side?: 'top' | 'bottom' | 'left' | 'right';
   align?: 'start' | 'center' | 'end';
   sideOffset?: number;
+  /**
+   * Shifts the content along the alignment axis, in pixels. Lets a
+   * trigger wider than the content place the popover somewhere inside
+   * itself — at the point that was pressed, say — instead of at its
+   * own edge. Collision handling still applies afterwards.
+   */
+  alignOffset?: number;
   collisionPadding?: number;
 }
 
@@ -55,7 +62,7 @@ export type PopoverProps = PopoverWithTrigger | PopoverWithPoint;
 export function Popover(props: PopoverProps) {
   const {
     open, onOpenChange, screens, initialScreen,
-    side = 'bottom', align = 'start', sideOffset = 4, collisionPadding = 8,
+    side = 'bottom', align = 'start', sideOffset = 4, alignOffset = 0, collisionPadding = 8,
   } = props;
 
   const screenKeys = useMemo(() => Object.keys(screens), [screens]);
@@ -117,6 +124,7 @@ export function Popover(props: PopoverProps) {
           side={side}
           align={align}
           sideOffset={sideOffset}
+          alignOffset={alignOffset}
           collisionPadding={collisionPadding}
           className={CHROME}
           data-floating-layer

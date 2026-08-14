@@ -12,6 +12,10 @@ import type { TypographyConfig } from '@core/sheets/domain/TypographyConfig';
 import type { RotationConfig } from '@core/sheets/domain/RotationConfig';
 import type { StyleVariants } from '@core/templates/domain/definition/StyleVariant';
 import type { CssAssetReferenceResolver } from '@core/templates/services/CssAssetReferenceResolver';
+import type {
+  BehindActorTemplateConfigSerializer,
+  SerializedBehindActorTemplateConfig,
+} from '@core/person-segmentation/services/BehindActorTemplateConfigSerializer';
 import {
   TEMPLATE_RECORD_CURRENT_VERSION,
   type TemplateRecordMigrator,
@@ -25,6 +29,7 @@ export interface SerializedTemplate {
   readonly alignment: AlignmentConfig;
   readonly rendering: RenderingConfig;
   readonly features: FeaturesConfig;
+  readonly behindActor: SerializedBehindActorTemplateConfig;
   readonly effectConfigs: readonly EffectConfig[];
   readonly segmentSplitterConfigs: readonly SegmentSplitterConfig[];
   readonly lineSplitter: LineSplitterConfig;
@@ -51,6 +56,7 @@ export class TemplateSerializer {
     private readonly cssAssetReferenceResolver: CssAssetReferenceResolver,
     private readonly svgFilterDefinitionsParser: SvgFilterDefinitionsParser,
     private readonly migrator: TemplateRecordMigrator,
+    private readonly behindActorTemplateConfigSerializer: BehindActorTemplateConfigSerializer,
   ) {}
 
   serialize(template: Template): SerializedTemplate {
@@ -62,6 +68,7 @@ export class TemplateSerializer {
       alignment: template.alignment,
       rendering: template.rendering,
       features: template.features,
+      behindActor: this.behindActorTemplateConfigSerializer.serialize(template.behindActor),
       effectConfigs: template.effectConfigs,
       segmentSplitterConfigs: template.segmentSplitterConfigs,
       lineSplitter: template.lineSplitter,
@@ -95,6 +102,7 @@ export class TemplateSerializer {
       migrated.alignment,
       migrated.rendering,
       this.backfillFeatures(migrated.features),
+      this.behindActorTemplateConfigSerializer.deserialize(migrated.behindActor),
       migrated.effectConfigs,
       migrated.segmentSplitterConfigs,
       migrated.lineSplitter,
@@ -103,6 +111,7 @@ export class TemplateSerializer {
       filtersSvg ? this.svgFilterDefinitionsParser.parse(filtersSvg) : SvgFilterDefinitions.empty(),
       this.cssAssetReferenceResolver.resolve(migrated.css),
       filtersSvg ? this.cssAssetReferenceResolver.resolve(filtersSvg) : '',
+      [],
     );
   }
 

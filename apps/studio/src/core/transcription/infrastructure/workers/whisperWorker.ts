@@ -1,13 +1,19 @@
-import { WhisperTranscriber, PreDecodedAudioDecoder, type WhisperTranscriberConfig } from '@tscaps/engine';
+import {
+  WhisperTranscriber,
+  PreDecodedAudioDecoder,
+  CacheStorageModelFileCache,
+  type WhisperTranscriberConfig,
+} from '@tscaps/engine';
 import { TranscriberWorkerHost } from '@core/transcription/infrastructure/workers/TranscriberWorkerHost';
+import { WorkerUncaughtErrorForwarder } from '@core/_shared/workers/WorkerUncaughtErrorForwarder';
 
-self.addEventListener('error', (e: ErrorEvent) => {
-  console.error('[whisper worker] uncaught error', e.message, e.filename + ':' + e.lineno, e.error);
-});
-self.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
-  console.error('[whisper worker] unhandled rejection', e.reason);
-});
+new WorkerUncaughtErrorForwarder('whisper-worker').install();
 
-new TranscriberWorkerHost(
-  (config) => new WhisperTranscriber(new PreDecodedAudioDecoder(), config as WhisperTranscriberConfig | undefined),
-).start();
+const host: TranscriberWorkerHost = new TranscriberWorkerHost(
+  (config) => new WhisperTranscriber(
+    new PreDecodedAudioDecoder(),
+    config as WhisperTranscriberConfig | undefined,
+    new CacheStorageModelFileCache((error) => host.reportAssetsNotKept(error)),
+  ),
+);
+host.start();

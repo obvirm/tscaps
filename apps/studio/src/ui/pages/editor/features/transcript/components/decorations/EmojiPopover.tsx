@@ -1,24 +1,23 @@
 import { type ReactElement } from 'react';
 import { Smile, Palette, Trash2 } from 'lucide-react';
-import type { AlignmentConfig, Decoration } from '@tscaps/engine';
-import type { WordStyleOverrides } from '@core/captions/domain/WordStyleOverrides';
+import type { Decoration } from '@tscaps/engine';
+import type { Sheet } from '@core/sheets/domain/Sheet';
 import { Popover } from '@ui/_shared/components/Popover/Popover';
 import { usePopoverNav } from '@ui/_shared/components/Popover/usePopoverNav';
 import { EmojiPickerScreen } from '@ui/pages/editor/features/transcript/components/decorations/EmojiPickerScreen';
-import { DecorationStyleOverridesPanel } from '@ui/pages/editor/features/transcript/components/decorations/DecorationStyleOverridesPanel';
+import { DecorationStyleScreen } from '@ui/pages/editor/features/transcript/components/element-style/DecorationStyleScreen';
 
 interface EmojiPopoverActions {
   onCommitGlyph: (glyph: string) => void;
-  onCommitStyleOverrides: (overrides: WordStyleOverrides) => void;
   onDelete: () => void;
 }
 
 interface EmojiPopoverData extends EmojiPopoverActions {
   decoration: Decoration;
-  /** Decoration's inherited alignment (sheet + segment + placement default, no user override) — drives the position-field baseline. */
-  inheritedAlignment: AlignmentConfig;
-  styleOverrides: WordStyleOverrides;
-  styleBaseline: Partial<WordStyleOverrides>;
+  /** The sheet whose rules the glyph renders under, which is what its fields fall back to. */
+  sheet: Sheet;
+  /** The elements the glyph sits inside, nearest first: its host word, then the scene. */
+  ancestorIds: ReadonlyArray<string>;
 }
 
 interface EmojiPopoverWithTrigger extends EmojiPopoverData {
@@ -46,19 +45,18 @@ const ACTION_BTN_DELETE = `${ACTION_BTN_BASE} text-danger/75 hover:bg-danger/10 
 /**
  * Popover for an emoji decoration. Three screens: `menu` (glyph
  * preview + action buttons), `picker` (searchable emoji-mart grid),
- * `styles` (size / rotation panel). Anchor is either a DOM element
- * via `trigger` or a viewport point via `point`.
+ * `styles` (the glyph's own fields plus where it sits). Anchor is
+ * either a DOM element via `trigger` or a viewport point via `point`.
  */
 export function EmojiPopover(props: EmojiPopoverProps) {
   const screens = {
     menu: <EmojiMenuScreen {...props} />,
     picker: <EmojiPickerScreen onPick={props.onCommitGlyph} />,
     styles: (
-      <DecorationStyleOverridesPanel
-        inheritedAlignment={props.inheritedAlignment}
-        currentOverrides={props.styleOverrides}
-        baseline={props.styleBaseline}
-        onCommit={props.onCommitStyleOverrides}
+      <DecorationStyleScreen
+        sheet={props.sheet}
+        decorationId={props.decoration.id}
+        ancestorIds={props.ancestorIds}
       />
     ),
   };

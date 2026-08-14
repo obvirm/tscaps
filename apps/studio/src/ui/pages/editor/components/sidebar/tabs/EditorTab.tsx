@@ -12,11 +12,15 @@ export interface SheetScope {
   onRenameSheet: (sheetId: string, name: string) => void;
   onDeleteSheet: (sheetId: string) => void;
   onCopyStylesFromSheet: (targetSheetId: string, sourceSheetId: string) => void;
+  onLinkSheet: (targetSheetId: string, sourceSheetId: string) => void;
+  onUnlinkSheet: (sheetId: string) => void;
 }
 
 interface EditorTabProps {
   /** Title rendered at the top of the tab. */
   title: string;
+  /** When true, suppresses the title row entirely (title + headerAction + reset). Use when the tab body renders its own chrome that would clash. */
+  hideTitleRow?: boolean;
   /** When provided, renders the SheetSelector above the title. */
   sheetScope?: SheetScope | undefined;
   /** When provided, renders a subtle reset button aligned with the title. */
@@ -36,7 +40,7 @@ interface EditorTabProps {
  * even when the body has only one Section, so that section's first-child
  * border-removal still applies.
  */
-export function EditorTab({ title, sheetScope, onResetToTemplate, headerAction, children }: EditorTabProps) {
+export function EditorTab({ title, hideTitleRow, sheetScope, onResetToTemplate, headerAction, children }: EditorTabProps) {
   return (
     <div className="flex flex-col">
       {sheetScope && (
@@ -49,29 +53,33 @@ export function EditorTab({ title, sheetScope, onResetToTemplate, headerAction, 
             onRename={sheetScope.onRenameSheet}
             onDelete={sheetScope.onDeleteSheet}
             onCopyStylesFromSheet={sheetScope.onCopyStylesFromSheet}
+            onLinkSheet={sheetScope.onLinkSheet}
+            onUnlinkSheet={sheetScope.onUnlinkSheet}
           />
         </div>
       )}
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="font-mono text-xs uppercase tracking-[0.08em] text-fg-primary m-0">
-          {title}
-        </h2>
-        <div className="flex items-center gap-1">
-          {headerAction}
-          {onResetToTemplate && (
-            <Tooltip text="Reset to template default">
-              <button
-                type="button"
-                onClick={onResetToTemplate}
-                aria-label="Reset to template default"
-                className="inline-flex items-center justify-center w-8 h-8 rounded-xs bg-transparent border-none text-fg-faint cursor-pointer transition-colors duration-quick ease-standard hover:text-fg-secondary focus-visible:outline-none focus-visible:text-fg-secondary"
-              >
-                <RotateCcw size={15} strokeWidth={2} />
-              </button>
-            </Tooltip>
-          )}
+      {!hideTitleRow && (
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-mono text-xs uppercase tracking-[0.08em] text-fg-primary m-0">
+            {title}
+          </h2>
+          <div className="flex items-center gap-1">
+            {headerAction}
+            {onResetToTemplate && (
+              <Tooltip text="Reset to template default">
+                <button
+                  type="button"
+                  onClick={onResetToTemplate}
+                  aria-label="Reset to template default"
+                  className="inline-flex items-center justify-center w-8 h-8 rounded-xs bg-transparent border-none text-fg-faint cursor-pointer transition-colors duration-quick ease-standard hover:text-fg-secondary focus-visible:outline-none focus-visible:text-fg-secondary"
+                >
+                  <RotateCcw size={15} strokeWidth={2} />
+                </button>
+              </Tooltip>
+            )}
+          </div>
         </div>
-      </div>
+      )}
       <div className="flex flex-col">
         {children}
       </div>

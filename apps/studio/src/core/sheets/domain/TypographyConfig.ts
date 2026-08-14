@@ -1,3 +1,5 @@
+import type { HorizontalSide } from '@tscaps/engine';
+
 /**
  * Typography is a fixed set of universally-meaningful knobs (font family,
  * font size, font weight, three flavours of spacing, text case, and the
@@ -31,7 +33,15 @@ export interface TypographyConfig {
 }
 
 export type TextCase = 'none' | 'uppercase' | 'lowercase';
-export type TextAlign = 'left' | 'center' | 'right';
+
+/**
+ * Either a reading side (`start` / `end`), so the ragged edge follows the
+ * language of the video, or a screen side (`left` / `right`), which a
+ * template whose block hugs one edge of the frame declares so its text keeps
+ * growing out of that same edge. Resolved to a physical CSS value at the
+ * point where the direction is known.
+ */
+export type TextAlign = HorizontalSide;
 
 /**
  * `fontSize` is in `cqh` units — a percentage of the video's height — so

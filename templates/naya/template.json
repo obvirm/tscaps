@@ -9,7 +9,7 @@
     "fontSize": 4.69,
     "letterSpacing": 0.015,
     "wordSpacing": 0.14,
-    "lineSpacing": 0.10,
+    "lineSpacing": 0.1,
     "textCase": "uppercase"
   },
   "rendering": {
@@ -21,22 +21,24 @@
       "label": "Text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "highlight-color",
       "label": "Highlight",
       "type": "color",
       "default": "#ffff00",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
-      "id": "shadow-color",
-      "label": "Shadow",
+      "id": "outline-color",
+      "label": "Outline color",
       "type": "color",
       "default": "#000000",
-      "advanced": true,
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "outline-thickness",
@@ -47,17 +49,8 @@
       "max": 0.16,
       "step": 0.01,
       "unit": "em",
-      "group": "appearance"
-    },
-    {
-      "id": "word-pop",
-      "label": "Pop intensity",
-      "type": "float",
-      "default": 0.10,
-      "min": 0,
-      "max": 0.3,
-      "step": 0.01,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     }
   ],
   "segmentSplitters": [

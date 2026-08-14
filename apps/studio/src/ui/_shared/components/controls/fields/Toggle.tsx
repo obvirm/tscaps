@@ -1,10 +1,12 @@
-import { memo } from 'react';
+import { memo, type ReactNode } from 'react';
 import * as Switch from '@radix-ui/react-switch';
 
 interface ToggleProps {
   label: string;
   value: boolean;
   disabled?: boolean | undefined;
+  /** Rendered next to the label, for a field whose name is not self-explanatory. */
+  adornment?: ReactNode;
   onChange: (value: boolean) => void;
 }
 
@@ -30,11 +32,13 @@ export const Toggle = memo(function Toggle({
   label,
   value,
   disabled,
+  adornment,
   onChange,
 }: ToggleProps) {
   return (
     <div className="flex items-center gap-2">
       <span className="text-xs text-fg-muted min-w-[90px] shrink-0">{label}</span>
+      {adornment}
       <Switch.Root
         checked={value}
         disabled={disabled}

@@ -2,7 +2,8 @@ import { Tagger } from '@modules/tagging/Tagger';
 import { Document } from '@modules/document/Document';
 import { Section } from '@modules/document/Section';
 import { Segment } from '@modules/document/Segment';
-import { Tag, StructureTag } from '@modules/document/Tag';
+import { Tag } from '@modules/tags/Tag';
+import { StructureTag } from '@modules/tags/StructureTag';
 
 export interface PauseTaggerConfig {
   /**

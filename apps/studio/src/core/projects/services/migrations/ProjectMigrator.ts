@@ -8,6 +8,19 @@ import { ProjectV6ToV7Migration } from '@core/projects/services/migrations/Proje
 import { ProjectV7ToV8Migration } from '@core/projects/services/migrations/ProjectV7ToV8Migration';
 import { ProjectV8ToV9Migration } from '@core/projects/services/migrations/ProjectV8ToV9Migration';
 import { ProjectV9ToV10Migration } from '@core/projects/services/migrations/ProjectV9ToV10Migration';
+import { ProjectV10ToV11Migration } from '@core/projects/services/migrations/ProjectV10ToV11Migration';
+import { ProjectV11ToV12Migration } from '@core/projects/services/migrations/ProjectV11ToV12Migration';
+import { ProjectV12ToV13Migration } from '@core/projects/services/migrations/ProjectV12ToV13Migration';
+import { ProjectV13ToV14Migration } from '@core/projects/services/migrations/ProjectV13ToV14Migration';
+import { ProjectV14ToV15Migration } from '@core/projects/services/migrations/ProjectV14ToV15Migration';
+import { ProjectV15ToV16Migration } from '@core/projects/services/migrations/ProjectV15ToV16Migration';
+import { ProjectV16ToV17Migration } from '@core/projects/services/migrations/ProjectV16ToV17Migration';
+import { StoredCaptionElementScanner } from '@core/projects/services/migrations/StoredCaptionElementScanner';
+import { StoredTypographyReader } from '@core/projects/services/migrations/StoredTypographyReader';
+import type { StyledElementCatalog } from '@core/elements/domain/StyledElementCatalog';
+import type { ElementControlCssWriter } from '@core/elements/services/css/ElementControlCssWriter';
+import type { ElementAnimationCssWriter } from '@core/elements/services/css/ElementAnimationCssWriter';
+import type { HorizontalPlacementResolver } from '@tscaps/engine';
 
 /**
  * Runs registered ProjectMigrations in sequence to upgrade an old serialized
@@ -24,7 +37,13 @@ import { ProjectV9ToV10Migration } from '@core/projects/services/migrations/Proj
 export class ProjectMigrator {
   private readonly _byFromVersion = new Map<number, ProjectMigration>();
 
-  constructor() {
+  constructor(
+    styledElementCatalog: StyledElementCatalog,
+    controlCssWriter: ElementControlCssWriter,
+    horizontalPlacementResolver: HorizontalPlacementResolver,
+    animationCssWriter: ElementAnimationCssWriter,
+  ) {
+    const captionElementScanner = new StoredCaptionElementScanner();
     this.register(new ProjectV1ToV2Migration());
     this.register(new ProjectV2ToV3Migration());
     this.register(new ProjectV3ToV4Migration());
@@ -34,6 +53,18 @@ export class ProjectMigrator {
     this.register(new ProjectV7ToV8Migration());
     this.register(new ProjectV8ToV9Migration());
     this.register(new ProjectV9ToV10Migration());
+    this.register(new ProjectV10ToV11Migration());
+    this.register(new ProjectV11ToV12Migration());
+    this.register(new ProjectV12ToV13Migration());
+    this.register(new ProjectV13ToV14Migration(
+      captionElementScanner,
+      new StoredTypographyReader(),
+      styledElementCatalog,
+      controlCssWriter,
+    ));
+    this.register(new ProjectV14ToV15Migration(captionElementScanner, horizontalPlacementResolver));
+    this.register(new ProjectV15ToV16Migration(animationCssWriter));
+    this.register(new ProjectV16ToV17Migration());
   }
 
   /**

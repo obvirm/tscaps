@@ -1,0 +1,24 @@
+import type {
+  TranscriptionAudioLengthCap,
+  TranscriptionAudioLengthPolicy,
+} from '@core/transcription/domain/TranscriptionAudioLengthPolicy';
+
+const NO_CAP: TranscriptionAudioLengthCap = { state: 'no-cap' };
+
+/**
+ * `TranscriptionAudioLengthPolicy` that never applies a cap. Used on
+ * surfaces where transcription runs locally in the browser and no
+ * per-request duration limit is enforced. The cap never changes, so
+ * `subscribe` returns an unsubscribe that has nothing to detach.
+ */
+export class NoOpTranscriptionAudioLengthPolicy implements TranscriptionAudioLengthPolicy {
+  capState(): TranscriptionAudioLengthCap {
+    return NO_CAP;
+  }
+
+  enforce(): void {}
+
+  subscribe(): () => void {
+    return () => {};
+  }
+}

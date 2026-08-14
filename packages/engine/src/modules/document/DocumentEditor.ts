@@ -13,6 +13,15 @@ export interface WordPosition {
 }
 
 /**
+ * One piece of a segment replacement: the segments to insert and the
+ * Section `kind` they get lifted under.
+ */
+export interface SegmentReplacementPart {
+  readonly segments: ReadonlyArray<Segment>;
+  readonly kind: string;
+}
+
+/**
  * Editing helper: a Segment paired with the Section it belongs to. The
  * Section reference (by identity) is kept across edits so that `rebuild`
  * can re-group consecutive same-section segments and preserve every
@@ -135,6 +144,10 @@ export class DocumentEditor {
    * `wordId` so the user can type immediately. If `time` is omitted the
    * new segment clones the anchor's time — callers that want the first
    * keystrokes to claim real duration should pass an explicit window.
+   *
+   * A document with no segments accepts the insertion too, into its
+   * first Section (or a fresh one when no Section exists); there is no
+   * anchor to clone from, so this case requires an explicit `time`.
    */
   insertSegmentAt(
     doc: Document,
@@ -143,6 +156,11 @@ export class DocumentEditor {
     time?: TimeFragment,
   ): { doc: Document; wordId: string; segmentId: string } {
     const slots = this._flatten(doc);
+    if (slots.length === 0) {
+      return time
+        ? this._insertIntoEmptyDocument(doc, time)
+        : { doc, wordId: '', segmentId: '' };
+    }
     const anchor = slots[segIdx];
     if (!anchor) return { doc, wordId: '', segmentId: '' };
 
@@ -161,12 +179,42 @@ export class DocumentEditor {
       segmentId: newSegment.id,
     };
   }
+
+  private _insertIntoEmptyDocument(
+    doc: Document,
+    time: TimeFragment,
+  ): { doc: Document; wordId: string; segmentId: string } {
+    const newWord = new Word({ text: '', time });
+    const newSegment = new Segment({ lines: [new Line({ words: [newWord] })] });
+    const section = doc.sections[0] ?? new Section({ kind: '', segments: [] });
+    return {
+      doc: this._rebuild([{ segment: newSegment, section }], doc),
+      wordId: newWord.id,
+      segmentId: newSegment.id,
+    };
+  }
   
+  /**
+   * Moves one word's start and end. The segment keeps holding the same
+   * words, so an explicit window it was given still says what its
+   * caller meant and is carried across; any Effect-computed window is
+   * dropped, having been measured against boundaries that just moved.
+   */
   updateWordTime(doc: Document, segIdx: number, lineIdx: number, wordIdx: number, start: number, end: number): Document {
-    const word = doc.getSegments()[segIdx]!.lines[lineIdx]!.words[wordIdx]!;
-    return this._replaceWords(doc, segIdx, lineIdx, wordIdx, [
+    const segment = doc.getSegments()[segIdx]!;
+    const word = segment.lines[lineIdx]!.words[wordIdx]!;
+    const edited = this._replaceWords(doc, segIdx, lineIdx, wordIdx, [
       word.with({ time: new TimeFragment(start, end) }),
     ]);
+    return this._restoreCustomTime(edited, segIdx, segment.customTime);
+  }
+
+  private _restoreCustomTime(doc: Document, segIdx: number, customTime: TimeFragment | null): Document {
+    if (!customTime) return doc;
+    const slots = this._flatten(doc);
+    const slot = slots[segIdx];
+    if (!slot) return doc;
+    return this._replaceSegmentSlot(doc, slots, segIdx, slot.segment.with({ customTime }));
   }
 
   /**
@@ -504,10 +552,7 @@ export class DocumentEditor {
 
   /**
    * Replaces a single segment with a list of new segments, all lifted into
-   * a fresh Section with the given `kind`. Slots in the original Section
-   * after the target are reparented to a clone of the original Section
-   * (with a new id) so id-uniqueness holds when `_rebuild` reassembles
-   * and applies the adjacent-same-kind merge invariant.
+   * a fresh Section with the given `kind`.
    */
   replaceSegmentWithKind(
     doc: Document,
@@ -515,14 +560,33 @@ export class DocumentEditor {
     newSegments: ReadonlyArray<Segment>,
     newKind: string,
   ): Document {
+    return this.replaceSegmentWithSections(doc, segmentId, [{ segments: newSegments, kind: newKind }]);
+  }
+
+  /**
+   * Replaces a single segment with an ordered sequence of parts, each part
+   * lifting its segments into a fresh Section with that part's `kind` —
+   * so one segment can split into content routed to different kinds in
+   * place. Empty parts are skipped; if every part is empty the document is
+   * returned unchanged. Slots in the original Section after the target are
+   * reparented to a clone of the original Section (with a new id) so
+   * id-uniqueness holds when `_rebuild` reassembles and applies the
+   * adjacent-same-kind merge invariant.
+   */
+  replaceSegmentWithSections(
+    doc: Document,
+    segmentId: string,
+    parts: ReadonlyArray<SegmentReplacementPart>,
+  ): Document {
+    const filledParts = parts.filter((p) => p.segments.length > 0);
+    if (filledParts.length === 0) return doc;
+
     const slots = this._flatten(doc);
     const slotIdx = slots.findIndex((s) => s.segment.id === segmentId);
     if (slotIdx < 0) return doc;
-    if (newSegments.length === 0) return doc;
 
     const target = slots[slotIdx]!;
     const originalSection = target.section;
-    const lifted = new Section({ segments: [], kind: newKind });
     const tail = new Section({ segments: [], kind: originalSection.kind, structureTags: originalSection.structureTags });
 
     let pastTarget = false;
@@ -531,8 +595,11 @@ export class DocumentEditor {
       const slot = slots[i]!;
       if (i === slotIdx) {
         pastTarget = true;
-        for (const seg of newSegments) {
-          newSlots.push({ segment: seg, section: lifted });
+        for (const part of filledParts) {
+          const lifted = new Section({ segments: [], kind: part.kind });
+          for (const seg of part.segments) {
+            newSlots.push({ segment: seg, section: lifted });
+          }
         }
         continue;
       }
@@ -571,14 +638,17 @@ export class DocumentEditor {
   }
 
   /**
-   * Rebuilds a segment with a new set of lines and clears any `customTime`
-   * the segment was carrying. `customTime` overrides the segment's time
-   * window with a value chosen against the previous word composition;
-   * once the words change that value no longer reflects the segment's
-   * actual range, so it falls back to the natural, word-derived time.
+   * Rebuilds a segment with a new set of lines and drops both of its
+   * imposed windows. Each was chosen against the previous word
+   * composition, so once the segment holds different words neither
+   * describes it any more and the natural, word-derived time is the
+   * only honest answer.
+   *
+   * Changing what a word *says* or when it *sounds* is not a change of
+   * composition and must not come through here carrying that loss.
    */
   private _withLines(segment: Segment, lines: ReadonlyArray<Line>): Segment {
-    return segment.with({ lines, customTime: null });
+    return segment.with({ lines, customTime: null, effectTime: null });
   }
 
   private _replaceSegmentSlot(doc: Document, slots: SegmentSlot[], segIdx: number, newSegment: Segment): Document {

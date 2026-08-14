@@ -33,6 +33,7 @@ export class CopyStylesFromSheetAction {
       lineSplitterConfig: source.lineSplitterConfig,
       alignmentConfig: source.alignmentConfig,
       effectConfigs: source.effectConfigs,
+      animations: source.animations,
       cssOverride: source.cssOverride,
     });
 

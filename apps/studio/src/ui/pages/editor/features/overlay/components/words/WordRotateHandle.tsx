@@ -1,17 +1,16 @@
-import { memo, useLayoutEffect, useRef, type MouseEvent, type RefObject } from 'react';
+import { memo, useLayoutEffect, useRef, type MouseEvent } from 'react';
 import { RotateCw } from 'lucide-react';
 import { useOverlayManipulationController } from '@ui/pages/editor/features/overlay/contexts/OverlayManipulationContext';
+import { applyChromeGeometry, measureWordChrome } from '@ui/pages/editor/features/overlay/chromeGeometry';
+import { useChromeReposition } from '@ui/pages/editor/features/overlay/hooks/useChromeReposition';
 import { useOverlayDragState } from '@ui/pages/editor/features/overlay/hooks/useOverlayDragState';
-import { measureWordRotatedBox } from '@ui/pages/editor/features/overlay/wordRotatedBoxProbe';
+import { findWordSpan } from '@ui/pages/editor/features/overlay/wordRotatedBoxProbe';
 
 interface WordRotateHandleProps {
   wordId: string;
-  /** Positioned ancestor the layout is mounted in and measured against — the scaler. */
-  containerRef: RefObject<HTMLElement>;
+  /** The overlay scaler the chrome is mounted in and measured against. */
+  scaler: HTMLElement | null;
 }
-
-const WORD_ROTATE_FRAME_PADDING_PX = 3;
-const WORD_ROTATE_HANDLE_OFFSET_PX = 6;
 
 /**
  * Rotation icon mounted above the selected word. Rendered inside a
@@ -20,34 +19,22 @@ const WORD_ROTATE_HANDLE_OFFSET_PX = 6;
  * bounding rect.
  *
  * Mounted at the scaler level so it survives segments rendered empty
- * and stays outside any segment-level SVG filter that would distort
- * it. Re-measures the word's bbox on every drag-state transition.
+ * and stays outside any segment-level SVG filter that would distort it.
  */
-export const WordRotateHandle = memo(function WordRotateHandle({ wordId, containerRef }: WordRotateHandleProps) {
+export const WordRotateHandle = memo(function WordRotateHandle({ wordId, scaler }: WordRotateHandleProps) {
   const controller = useOverlayManipulationController();
   const dragState = useOverlayDragState();
   const frameRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLDivElement>(null);
 
-  useLayoutEffect(() => {
-    const frame = frameRef.current;
-    const container = containerRef.current;
-    if (!frame || !container) return;
-    const scope = container.closest<HTMLElement>('.subtitle-overlay-scaler') ?? container;
-    const reposition = (): void => repositionFrame(frame, container, scope, wordId);
-    reposition();
-    const observer = new ResizeObserver(reposition);
-    observer.observe(container);
-    return () => observer.disconnect();
-  }, [wordId, containerRef]);
-
-  useLayoutEffect(() => {
-    const frame = frameRef.current;
-    const container = containerRef.current;
-    if (!frame || !container) return;
-    const scope = container.closest<HTMLElement>('.subtitle-overlay-scaler') ?? container;
-    repositionFrame(frame, container, scope, wordId);
-  }, [dragState, wordId, containerRef]);
+  useChromeReposition({
+    boxRef: frameRef,
+    scaler,
+    targetId: wordId,
+    resolveTarget: findWordSpan,
+    measure: measureWordChrome,
+    apply: applyChromeGeometry,
+  });
 
   useLayoutEffect(() => {
     const handle = handleRef.current;
@@ -73,28 +60,4 @@ export const WordRotateHandle = memo(function WordRotateHandle({ wordId, contain
 
 function swallowClick(event: MouseEvent): void {
   event.stopPropagation();
-}
-
-function repositionFrame(
-  frame: HTMLDivElement,
-  container: HTMLElement,
-  scope: HTMLElement,
-  wordId: string,
-): void {
-  const measured = measureWordRotatedBox(scope, wordId);
-  if (!measured) {
-    frame.style.visibility = 'hidden';
-    return;
-  }
-  const box = container.getBoundingClientRect();
-  const width = measured.unrotatedWidth + WORD_ROTATE_FRAME_PADDING_PX * 2;
-  const height = measured.unrotatedHeight + WORD_ROTATE_FRAME_PADDING_PX * 2;
-  frame.style.visibility = 'visible';
-  frame.style.left = `${measured.visualCenterX - width / 2 - box.left}px`;
-  frame.style.top = `${measured.visualCenterY - height / 2 - box.top}px`;
-  frame.style.width = `${width}px`;
-  frame.style.height = `${height}px`;
-  frame.style.transform = measured.transform;
-  frame.style.transformOrigin = 'center';
-  frame.style.setProperty('--tscaps-rotate-handle-offset', `${WORD_ROTATE_HANDLE_OFFSET_PX}px`);
 }

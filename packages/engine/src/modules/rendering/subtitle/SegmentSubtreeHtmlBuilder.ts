@@ -10,10 +10,16 @@ import type { InlineStyleEmitter } from '@modules/rendering/styles/InlineStyleEm
 import type { ElementRenderOverrides } from '@modules/rendering/types/ElementRenderOverrides';
 import type { DecorationPlacementSide } from '@modules/rendering/types/DecorationPlacementSide';
 import type { WordSplitter } from '@modules/splitting/WordSplitter';
-import { VIDEO_FRAME_LAYER_CLASS } from '@modules/rendering/styles/VideoFrameLayerClass';
+import { CssClass } from '@modules/document/CssClass';
+import { DataAttribute } from '@modules/document/DataAttribute';
+import type { TextDirection } from '@modules/bidi/TextDirection';
+import type { WordFragment } from '@modules/bidi/WordFragment';
+import type { WordFragmenter } from '@modules/bidi/WordFragmenter';
 
-const SEGMENT_DECORATIONS_ABOVE_CLASS = 'segment-decorations-above';
-const SEGMENT_DECORATIONS_BELOW_CLASS = 'segment-decorations-below';
+// Words are emitted already ordered as they paint, so the line must lay its
+// children out left to right no matter what direction it would inherit —
+// an inherited `rtl` would reverse an order that is already final.
+const LINE_LAYOUT_STYLE = 'direction: ltr; ';
 
 /**
  * Per-style inputs every build call needs. `inlineStyleEmitter`
@@ -27,9 +33,35 @@ export interface SegmentSubtreeStyleInput {
   readonly splitWordsIntoLetters: boolean;
   readonly includeVideoFrameLayer: boolean;
   readonly extraWrapperStyles: InlineStyleMap;
+  /** Classes appended to the `.segment` element's class list, after the structural ones. */
+  readonly extraSegmentClasses: ReadonlyArray<string>;
   /** Decorations lifted out of line flow, keyed by decoration id. Absent ids render inline next to their host word. */
   readonly decorationPlacements: ReadonlyMap<string, DecorationPlacementSide>;
   readonly inlineStyleEmitter: InlineStyleEmitter;
+  /** Paragraph direction every line is resolved against. */
+  readonly textDirection: TextDirection;
+  /**
+   * Ids of elements the stylesheet addresses individually. Each such
+   * element is stamped with {@link DataAttribute.ELEMENT_ID}; the rest
+   * carry no id, because the markup is serialized once per frame and
+   * stamping everything grows it by roughly a quarter.
+   */
+  readonly addressableElementIds: ReadonlySet<string>;
+}
+
+/** A word that survived exclusion, paired with the position it holds in its line. */
+interface VisibleWord {
+  readonly word: Word;
+  readonly indexInLine: number;
+}
+
+/** Everything one painted fragment of a word needs to become a `<span>`. */
+interface WordFragmentRenderInput {
+  readonly fragment: WordFragment;
+  readonly word: Word;
+  readonly indexInLine: number;
+  /** Inline declarations that close the inter-word gap against a neighbour it reads continuously with. */
+  readonly gapStyle: string;
 }
 
 /**
@@ -45,7 +77,10 @@ export interface SegmentSubtreeStyleInput {
  */
 export class SegmentSubtreeHtmlBuilder {
 
-  constructor(private readonly wordSplitter: WordSplitter) {}
+  constructor(
+    private readonly wordSplitter: WordSplitter,
+    private readonly wordFragmenter: WordFragmenter,
+  ) {}
 
   /**
    * Builds the wrapper + segment subtree containing every line and
@@ -93,7 +128,7 @@ export class SegmentSubtreeHtmlBuilder {
     indexInLine: number,
   ): string {
     const segTime = seg.time;
-    const wordHtml = this.buildWordHtml(style, word, t, segTime, indexInLine);
+    const wordHtml = this.buildWordsHtml(style, [{ word, indexInLine }], t, segTime);
     const lineHtml = this.buildLineWrapperHtml(style, line, t, segTime, wordHtml);
     const innerHtml = this.maybeVideoFrameLayerHtml(style) + lineHtml;
     return this.wrapInScope(style, seg, t, indexInSection, innerHtml);
@@ -138,6 +173,10 @@ export class SegmentSubtreeHtmlBuilder {
     return `display: inline-block; width: max-content; min-width: 0; min-height: 0; ${inlineStyleString}`;
   }
 
+  // The extra classes ride the segment element, not the scope wrapper:
+  // scoped stylesheets prefix every selector with the scope class as an
+  // ancestor, so a class sharing the wrapper node would be unreachable
+  // from them.
   private composeSegmentHtml(
     style: SegmentSubtreeStyleInput,
     seg: Segment,
@@ -145,9 +184,9 @@ export class SegmentSubtreeHtmlBuilder {
     indexInSection: number,
     innerHtml: string,
   ): string {
-    const classes = seg.getCssClasses(t).join(' ');
-    const segStyle = style.inlineStyleEmitter.serializeAnimatedVars(seg.getCssVariables(t, { indexInSection }));
-    return `<div class="${classes}" style="${segStyle}">${innerHtml}</div>`;
+    const classes = [...seg.getCssClasses(t), ...style.extraSegmentClasses].join(' ');
+    const segStyle = style.inlineStyleEmitter.serializeStyles(seg.getCssVariables(t, { indexInSection }));
+    return `<div class="${classes}" style="${segStyle}"${this.elementIdAttr(style, seg.id)}>${innerHtml}</div>`;
   }
 
   private buildLineWrapperHtml(
@@ -158,8 +197,9 @@ export class SegmentSubtreeHtmlBuilder {
     innerHtml: string,
   ): string {
     const classes = line.getCssClasses(t).join(' ');
-    const lineStyle = style.inlineStyleEmitter.serializeAnimatedVars(line.getCssVariables(t, { segTime }));
-    return `<div class="${classes}" style="${lineStyle}">${innerHtml}</div>`;
+    const lineStyle = LINE_LAYOUT_STYLE
+      + style.inlineStyleEmitter.serializeStyles(line.getCssVariables(t, { segTime }));
+    return `<div class="${classes}" style="${lineStyle}"${this.elementIdAttr(style, line.id)}>${innerHtml}</div>`;
   }
 
   private buildLineHtml(
@@ -169,7 +209,7 @@ export class SegmentSubtreeHtmlBuilder {
     excludedWordIds: ReadonlySet<string>,
     segTime: TimeFragment,
   ): string {
-    const visibleWords: { word: Word; indexInLine: number }[] = [];
+    const visibleWords: VisibleWord[] = [];
     for (let i = 0; i < line.words.length; i++) {
       const word = line.words[i]!;
       if (excludedWordIds.has(word.id)) continue;
@@ -180,10 +220,43 @@ export class SegmentSubtreeHtmlBuilder {
     // decorations (bubble backgrounds, tails, sibling-combinator gaps)
     // with no content to anchor them.
     if (visibleWords.length === 0) return '';
-    const wordsHtml = visibleWords
-      .map(({ word, indexInLine }) => this.buildWordHtml(style, word, t, segTime, indexInLine))
-      .join('');
+    const wordsHtml = this.buildWordsHtml(style, visibleWords, t, segTime);
     return this.buildLineWrapperHtml(style, line, t, segTime, wordsHtml);
+  }
+
+  /**
+   * Emits the words of one line as `<span>`s already ordered the way they
+   * paint. The words are fragmented together rather than one at a time,
+   * because the direction the algorithm resolves for a word depends on
+   * the words beside it.
+   */
+  private buildWordsHtml(
+    style: SegmentSubtreeStyleInput,
+    visibleWords: ReadonlyArray<VisibleWord>,
+    t: number,
+    segTime: TimeFragment,
+  ): string {
+    const fragments = this.wordFragmenter.fragment(
+      visibleWords.map(({ word }) => word.displayText),
+      style.textDirection,
+    );
+    return fragments
+      .map((fragment, index) => this.buildWordFragmentHtml(style, {
+        fragment,
+        word: visibleWords[fragment.wordIndex]!.word,
+        indexInLine: visibleWords[fragment.wordIndex]!.indexInLine,
+        gapStyle: this.buildGapStyle(fragments, index),
+      }, t, segTime))
+      .join('');
+  }
+
+  // Two fragments that read as one uninterrupted stretch must not be pushed
+  // apart by the per-word margin templates set for the spaces between words.
+  private buildGapStyle(fragments: ReadonlyArray<WordFragment>, index: number): string {
+    let style = '';
+    if (fragments[index]!.joinedToPrevious) style += 'margin-left: 0; ';
+    if (fragments[index + 1]?.joinedToPrevious) style += 'margin-right: 0; ';
+    return style;
   }
 
   // Lives inside `.segment` so the segment's own clipping and
@@ -191,39 +264,53 @@ export class SegmentSubtreeHtmlBuilder {
   // to any other child.
   private maybeVideoFrameLayerHtml(style: SegmentSubtreeStyleInput): string {
     return style.includeVideoFrameLayer
-      ? `<div class="${VIDEO_FRAME_LAYER_CLASS}"></div>`
+      ? `<div class="${CssClass.VIDEO_FRAME_LAYER}"></div>`
       : '';
   }
 
-  private buildWordHtml(
+  private buildWordFragmentHtml(
     style: SegmentSubtreeStyleInput,
-    word: Word,
+    input: WordFragmentRenderInput,
     t: number,
     segTime: TimeFragment,
-    indexInLine: number,
   ): string {
+    const { fragment, word, indexInLine } = input;
     const wordClasses = word.getCssClasses(t);
     const wordVars = word.getCssVariables(t, { segTime, indexInLine });
     const overrideStyle = style.inlineStyleEmitter.serializeStyles(style.wordOverrides.get(word.id)?.inlineStyles);
-    const decorationHtml = this.shouldEmitInlineDecoration(style, word)
+    const decorationHtml = fragment.carriesWordTail && this.shouldEmitInlineDecoration(style, word)
       ? this.buildDecorationSpanHtml(style, word.decoration, t, segTime, word.time)
       : '';
-    const trailHtml = word.decoration ? this.escapeHtml(word.decoration.trail) : '';
+    const trailHtml = fragment.carriesWordTail && word.decoration ? this.escapeHtml(word.decoration.trail) : '';
+    const fragmentStyle = this.buildDirectionStyle(fragment) + input.gapStyle;
+    // Every painted fragment of a word carries the word's id: a word split
+    // across two embedding levels is two elements and one word, and a rule
+    // addressing it means all of it.
+    const wordIdAttr = this.elementIdAttr(style, word.id);
 
-    if (!style.splitWordsIntoLetters) {
-      const wordStyle = style.inlineStyleEmitter.serializeAnimatedVars(wordVars) + overrideStyle;
-      return `<span class="${wordClasses.join(' ')}" style="${wordStyle}">${this.escapeHtml(word.displayText)}${decorationHtml}${trailHtml}</span>`;
+    // Letters of a joining script take their shape from their neighbours, so
+    // painting them one box at a time would leave the word disconnected.
+    if (!style.splitWordsIntoLetters || fragment.charactersJoin) {
+      const wordStyle = style.inlineStyleEmitter.serializeStyles(wordVars) + overrideStyle + fragmentStyle;
+      return `<span class="${wordClasses.join(' ')}" style="${wordStyle}"${wordIdAttr}>${this.escapeHtml(fragment.text)}${decorationHtml}${trailHtml}</span>`;
     }
 
-    const letters = this.wordSplitter.split(word.displayText);
-    const wordStyle = style.inlineStyleEmitter.serializeAnimatedVars(
+    const letters = this.wordSplitter.split(fragment.text);
+    const wordStyle = style.inlineStyleEmitter.serializeStyles(
       { ...wordVars, [CssVariable.LETTER_COUNT]: String(letters.length) },
-    ) + overrideStyle;
+    ) + overrideStyle + fragmentStyle;
     const lettersHtml = letters.map((letter, i) => {
-      const letterStyle = style.inlineStyleEmitter.serializeAnimatedVars({ [CssVariable.LETTER_INDEX]: String(i) });
+      const letterStyle = style.inlineStyleEmitter.serializeStyles({ [CssVariable.LETTER_INDEX]: String(i) });
       return `<span class="${Letter.CSS_CLASS}" style="${letterStyle}">${this.escapeHtml(letter)}</span>`;
     }).join('');
-    return `<span class="${wordClasses.join(' ')}" style="${wordStyle}">${lettersHtml}${decorationHtml}${trailHtml}</span>`;
+    return `<span class="${wordClasses.join(' ')}" style="${wordStyle}"${wordIdAttr}>${lettersHtml}${decorationHtml}${trailHtml}</span>`;
+  }
+
+  // Only a fragment reading against the line's left-to-right flow has to say
+  // so; the rest inherit it, and spelling it out would add bytes to every
+  // word of every frame.
+  private buildDirectionStyle(fragment: WordFragment): string {
+    return fragment.direction === 'rtl' ? 'direction: rtl; ' : '';
   }
 
   private shouldEmitInlineDecoration(style: SegmentSubtreeStyleInput, word: Word): boolean {
@@ -244,7 +331,7 @@ export class SegmentSubtreeHtmlBuilder {
     if (style.decorationPlacements.size === 0) return '';
     const decorationsHtml = this.collectPromotedDecorationsHtml(style, seg, t, side, segTime);
     if (!decorationsHtml) return '';
-    const containerClass = side === 'above' ? SEGMENT_DECORATIONS_ABOVE_CLASS : SEGMENT_DECORATIONS_BELOW_CLASS;
+    const containerClass = side === 'above' ? CssClass.SEGMENT_DECORATIONS_ABOVE : CssClass.SEGMENT_DECORATIONS_BELOW;
     return `<div class="${containerClass}">${decorationsHtml}</div>`;
   }
 
@@ -280,8 +367,17 @@ export class SegmentSubtreeHtmlBuilder {
   ): string {
     if (!decoration) return '';
     const overrideStyle = style.inlineStyleEmitter.serializeStyles(style.wordOverrides.get(decoration.id)?.inlineStyles);
-    const animatedVars = style.inlineStyleEmitter.serializeAnimatedVars(decoration.getCssVariables(t, { segTime, wordTime }));
-    return `<span class="${Decoration.CSS_CLASS}" style="${animatedVars}${overrideStyle}">${this.escapeHtml(decoration.glyph)}</span>`;
+    const animatedVars = style.inlineStyleEmitter.serializeStyles(decoration.getCssVariables(t, { segTime, wordTime }));
+    return `<span class="${Decoration.CSS_CLASS}" style="${animatedVars}${overrideStyle}"${this.elementIdAttr(style, decoration.id)}>${this.escapeHtml(decoration.glyph)}</span>`;
+  }
+
+  /**
+   * The id attribute for an element the stylesheet addresses, or an
+   * empty string for one it does not.
+   */
+  private elementIdAttr(style: SegmentSubtreeStyleInput, id: string): string {
+    if (!style.addressableElementIds.has(id)) return '';
+    return ` ${DataAttribute.ELEMENT_ID}="${this.escapeHtml(id)}"`;
   }
 
   private escapeHtml(text: string): string {

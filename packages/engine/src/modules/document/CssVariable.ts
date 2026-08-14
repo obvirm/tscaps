@@ -24,10 +24,6 @@ export enum CssVariable {
   // stylesheet reads them through `var(...)` to drive animations,
   // pick up structural metadata, or paint the video frame.
 
-  SECTION_STARTS = '--on-section-starts',
-  SECTION_ENDS = '--on-section-ends',
-  SECTION_DURATION = '--section-duration',
-
   SEGMENT_STARTS = '--on-segment-starts',
   SEGMENT_ENDS = '--on-segment-ends',
   SEGMENT_DURATION = '--segment-duration',
@@ -70,10 +66,6 @@ export enum CssVariable {
 
   SEGMENT_PADDING_TOP = '--segment-padding-top',
   SEGMENT_PADDING_BOTTOM = '--segment-padding-bottom',
-
-  BEHIND_ACTOR_SCENE_VALID = '--behind-actor-scene-valid',
-  BEHIND_ACTOR_FORCED = '--behind-actor-forced',
-  BEHIND_ACTOR_ACTIVE = '--behind-actor-active',
 
   // ── Consumer-written ───────────────────────────────────────────
   // The engine's baseline CSS reads these with sensible defaults;

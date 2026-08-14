@@ -49,9 +49,11 @@ function useProgressStatus(store: PreprocessingProgressStore): PreprocessingProg
  * Splash shown while the preprocessing pipeline runs. Owns the full
  * viewport until the surrounding shell flips off the `preprocessing`
  * branch. Each phase reports its own `[0, 1]` progress; `inferring`
- * has no real progress signal from the server, so it shows a spinner
- * instead of a bar. The optional copy resolver lets the host override
- * the primary/helper strings per surface.
+ * starts indeterminate and switches to a determinate bar as soon as the
+ * transcriber emits its first real progress signal (short clips stay
+ * indeterminate for the whole pass, because Whisper only reports at
+ * pipeline-window boundaries). The optional copy resolver lets the host
+ * override the primary/helper strings per surface.
  */
 export function PreprocessingScreen({
   store,
@@ -59,13 +61,14 @@ export function PreprocessingScreen({
 }: PreprocessingScreenProps) {
   const status = useProgressStatus(store);
   const { primary, helper } = selectCopy(status);
+  const inferringIsIndeterminate = status.phase === 'inferring' && status.rawProgress === 0;
 
   return (
     <div className="flex flex-col items-center justify-center gap-10 flex-1 w-full">
       <Wordmark size="lg" working />
 
       <div className="flex flex-col items-center gap-4 w-full max-w-md min-h-14 justify-center">
-        {status.phase === 'inferring'
+        {inferringIsIndeterminate
           ? <IndeterminatePaintBar />
           : <PhaseProgressBar rawProgress={status.rawProgress} />}
       </div>

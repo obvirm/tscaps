@@ -2,7 +2,7 @@ import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { RefreshDocumentAction } from '@core/editor/actions/RefreshDocumentAction';
 
 /**
- * Wipes every per-segment freeze and style override for the segments
+ * Wipes the own style and the hand-drawn boundaries of every segment
  * belonging to the given sheet, then re-derives so the splitter
  * pipeline reflows the sheet's sections from scratch.
  */
@@ -23,11 +23,12 @@ export class ResetSheetLayoutAction {
       for (const seg of section.segments) sheetSegmentIds.push(seg.id);
     }
 
-    const next = snap.segmentOverrides.resetSegments(sheetSegmentIds);
-    if (next === snap.segmentOverrides) return;
+    const elementStyles = snap.elementStyles.without(sheetSegmentIds);
+    const frozenSegments = snap.frozenSegments.withoutStructurallyEdited(sheetSegmentIds);
+    if (elementStyles === snap.elementStyles && frozenSegments === snap.frozenSegments) return;
 
     this.store.commit();
-    this.store.patch({ segmentOverrides: next });
+    this.store.patch({ elementStyles, frozenSegments });
     this.refresh.execute();
   }
 }

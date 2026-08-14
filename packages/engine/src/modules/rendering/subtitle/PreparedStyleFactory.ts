@@ -45,7 +45,6 @@ export class PreparedStyleFactory {
     const baselineNeeds: BaselineNeeds = {
       decorations: this.hasDecorationsForKind(doc, kind),
       videoFrame: style.rendering.videoFrame.required,
-      behindActor: style.rendering.behindActor.required,
     };
     const baselineCss = this.baselineCssComposer.compose(baselineNeeds);
 
@@ -77,6 +76,7 @@ export class PreparedStyleFactory {
       wordOverrides: style.wordOverrides ?? ElementRenderOverrides.empty(),
       segmentOverrides: style.segmentOverrides ?? ElementRenderOverrides.empty(),
       decorationPlacements: style.decorationPlacements ?? new Map<string, DecorationPlacementSide>(),
+      addressableElementIds: style.addressableElementIds ?? new Set<string>(),
       probeStyleElement: probeStyleEl,
       probeContainer,
       scopeClass,

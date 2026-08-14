@@ -1,5 +1,8 @@
 import type { EditorStore } from '@core/editor/store/EditorStore';
-import type { SetWordStyleOverrideAction } from '@core/captions/actions/words/SetWordStyleOverrideAction';
+import type { AuthoredElementControl } from '@core/elements/domain/ElementControl';
+import { ElementFieldId } from '@core/elements/domain/fields/ElementFieldId';
+import type { StyledElementCatalog } from '@core/elements/domain/StyledElementCatalog';
+import type { SetElementFieldAction } from '@core/elements/actions/SetElementFieldAction';
 import type { RotationGeometryResolver } from '@presentation/editor/services/RotationGeometryResolver';
 import { DragSession } from '@presentation/editor/controllers/DragSession';
 import {
@@ -13,20 +16,21 @@ import {
 /**
  * Gesture: drag the rotation icon on the selected word to rotate
  * that word's span around the centre of its glyph bounding box.
- * Commits a per-word `rotation` override on every pointermove; the
- * action's coalescing key collapses the per-tick stream into a
- * single undo entry. Per-word rotation is post-derivation so the
- * line-splitter never reruns mid-gesture.
+ * Commits the word's rotation on every pointermove; the field write
+ * collapses the per-tick stream into a single undo entry. A word's
+ * rotation is post-derivation so the line-splitter never reruns
+ * mid-gesture.
  */
 export class WordRotateGesture {
-  /** Rotation override the word carried at pointerdown, used as the
-   *  base the per-tick delta is added to. `null` between gestures. */
+  /** Angle the word carried at pointerdown, used as the base the
+   *  per-tick delta is added to. `null` between gestures. */
   private originalRotationDeg: number | null = null;
 
   constructor(
     private readonly host: OverlayGestureHost,
     private readonly editorStore: EditorStore,
-    private readonly setWordStyleOverride: SetWordStyleOverrideAction,
+    private readonly styledElementCatalog: StyledElementCatalog,
+    private readonly setElementField: SetElementFieldAction,
     private readonly rotationGeometry: RotationGeometryResolver,
   ) {}
 
@@ -56,20 +60,23 @@ export class WordRotateGesture {
   }
 
   applyMoveSideEffects(_session: DragSession, state: WordRotateState): void {
-    this.writeRotationOverride(state.wordId, state.rotationDeg);
+    this.writeRotation(state.wordId, state.rotationDeg);
   }
 
   commit(state: WordRotateState): void {
-    this.writeRotationOverride(state.wordId, state.rotationDeg);
+    this.writeRotation(state.wordId, state.rotationDeg);
   }
 
   cleanupOnEnd(): void {
     this.originalRotationDeg = null;
   }
 
-  private writeRotationOverride(wordId: string, rotationDeg: number): void {
-    const previous = this.editorStore.snapshot().wordStyleOverrides.get(wordId);
-    this.setWordStyleOverride.execute(wordId, { ...previous, rotation: rotationDeg });
+  private rotationControl(): AuthoredElementControl {
+    return this.styledElementCatalog.requireControl('word', ElementFieldId.ROTATION);
+  }
+
+  private writeRotation(wordId: string, rotationDeg: number): void {
+    this.setElementField.execute(wordId, 'word', this.rotationControl(), rotationDeg);
   }
 
   private tryStart(target: WordRotateTarget, event: PointerEvent): void {
@@ -97,11 +104,11 @@ export class WordRotateGesture {
     return scaler.querySelector<HTMLElement>(`[data-tscaps-word-id="${CSS.escape(wordId)}"]`);
   }
 
-  /** Per-word rotation override when present (latched user choice),
-   *  else `0` — the segment / sheet rotation already cascades into
-   *  the word's screen-position, so the per-tick delta only needs
-   *  to add the user's incremental twist on top. */
+  /** The word's own angle when it has one, else `0` — the segment /
+   *  sheet rotation already cascades into the word's screen-position,
+   *  so the per-tick delta only needs to add the user's incremental
+   *  twist on top. */
   private readBaselineRotation(wordId: string): number {
-    return this.editorStore.snapshot().wordStyleOverrides.get(wordId).rotation ?? 0;
+    return this.editorStore.snapshot().elementStyles.fieldNumber(wordId, ElementFieldId.ROTATION) ?? 0;
   }
 }

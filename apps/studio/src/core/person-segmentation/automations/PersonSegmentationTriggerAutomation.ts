@@ -40,7 +40,7 @@ export class PersonSegmentationTriggerAutomation {
     if (templateId === this.lastCheckedTemplateId) return;
     this.lastCheckedTemplateId = templateId;
     if (!activeSheet) return;
-    if (!activeSheet.template.rendering.behindActor.required) return;
+    if (!activeSheet.template.behindActor.required) return;
     const projectId = this.editorStore.snapshot().projectId;
     if (projectId !== null) {
       const cached = await this.cacheRepository.load(projectId);

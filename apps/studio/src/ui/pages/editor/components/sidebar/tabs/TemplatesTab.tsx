@@ -2,13 +2,14 @@ import { memo, useCallback, useMemo, useState } from 'react';
 import { AlertCircle, BookmarkPlus, CheckCircle2, Save } from 'lucide-react';
 import type { Template } from '@core/templates/domain/Template';
 import type { TemplateLibraryView } from '@core/templates/store/TemplateLibraryStore';
+import { SHEET_ROLE_TEMPLATE_CATEGORIES } from '@core/sheets/domain/SheetRole';
 import { TemplateSelector } from '@ui/pages/editor/components/template/TemplateSelector';
 import { Section } from '@ui/_shared/components/controls/sections/Section';
 import { EditorTab, type SheetScope } from '@ui/pages/editor/components/sidebar/tabs/EditorTab';
 import { Tooltip } from '@ui/_shared/components/Tooltip/Tooltip';
 import { PromptDialog } from '@ui/_shared/components/Dialog/PromptDialog';
 import { ConfirmDialog } from '@ui/_shared/components/Dialog/ConfirmDialog';
-import { Toast } from '@ui/_shared/components/Toast/Toast';
+import { Toast, TOAST_AUTO_DISMISS_MS } from '@ui/_shared/components/Toast/Toast';
 import { useSheets } from '@ui/_shared/contexts/modules/SheetsContext';
 import { useUserTemplates } from '@ui/_shared/contexts/modules/UserTemplatesContext';
 
@@ -194,6 +195,9 @@ export const TemplatesTab = memo(function TemplatesTab({ sheetScope, templates, 
           onDeleteUserTemplate={onDeleteRequest}
           onRenameUserTemplate={onRenameRequest}
           library={library}
+          preferredCategory={sheetScope.activeSheet.role
+            ? SHEET_ROLE_TEMPLATE_CATEGORIES[sheetScope.activeSheet.role]
+            : null}
         />
       </Section>
 
@@ -235,7 +239,7 @@ export const TemplatesTab = memo(function TemplatesTab({ sheetScope, templates, 
         tone="success"
         icon={<CheckCircle2 size={16} strokeWidth={2.5} />}
         title={toastSuccess ?? ''}
-        duration={3000}
+        duration={TOAST_AUTO_DISMISS_MS}
         onDismiss={dismissToastSuccess}
       />
 

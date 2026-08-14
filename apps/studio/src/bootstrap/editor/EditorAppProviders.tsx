@@ -2,8 +2,10 @@ import * as RadixTooltip from '@radix-ui/react-tooltip';
 import type { ReactNode } from 'react';
 import type { AppModules } from '@bootstrap/AppModules';
 import { UserFontsBridge } from '@ui/_shared/contexts/UserFontsContext';
+import { ToastStackProvider } from '@ui/_shared/components/Toast/ToastStack';
 import { EngineProvider } from '@ui/_shared/contexts/modules/EngineContext';
 import { UtilsProvider } from '@ui/_shared/contexts/modules/UtilsContext';
+import { ErrorsProvider } from '@ui/_shared/contexts/modules/ErrorsContext';
 import { RoutingProvider } from '@ui/_shared/contexts/modules/RoutingContext';
 import { RenderingProvider } from '@ui/_shared/contexts/modules/RenderingContext';
 import { SheetsProvider } from '@ui/_shared/contexts/modules/SheetsContext';
@@ -11,6 +13,7 @@ import { TaggingProvider } from '@ui/_shared/contexts/modules/TaggingContext';
 import { EditorProvider } from '@ui/_shared/contexts/modules/EditorContext';
 import { CaptionsProvider } from '@ui/_shared/contexts/modules/CaptionsContext';
 import { CutsProvider } from '@ui/_shared/contexts/modules/CutsContext';
+import { ElementsProvider } from '@ui/_shared/contexts/modules/ElementsContext';
 import { PreviewProvider } from '@ui/_shared/contexts/modules/PreviewContext';
 import { TranscriptionProvider } from '@ui/_shared/contexts/modules/TranscriptionContext';
 import { PreprocessingProvider } from '@ui/_shared/contexts/modules/PreprocessingContext';
@@ -30,13 +33,14 @@ interface EditorAppProvidersProps {
 
 /**
  * Wraps the editor tree in every feature-module context provider and
- * the cross-cutting providers (fonts, radix tooltip). Lives apart
+ * the cross-cutting providers (fonts, radix tooltip, toast stacks). Lives apart
  * from `EditorApp` so the provider pyramid does not drown the
  * routing layout in noise.
  */
 export function EditorAppProviders({ modules, children }: EditorAppProvidersProps) {
   return (
     <TelemetryProvider value={modules.telemetry}>
+            <ErrorsProvider value={modules.errors}>
             <UtilsProvider value={modules.utils}>
               <RoutingProvider value={modules.routing}>
                 <TranscriptionProvider value={modules.transcription}>
@@ -48,6 +52,7 @@ export function EditorAppProviders({ modules, children }: EditorAppProvidersProp
                             <EditorProvider value={modules.editor}>
                               <CaptionsProvider value={modules.captions}>
                                 <CutsProvider value={modules.cuts}>
+                                  <ElementsProvider value={modules.elements}>
                                   <PreviewProvider value={modules.preview}>
                                   <EngineProvider value={modules.engine}>
                                     <RenderingProvider value={modules.rendering}>
@@ -61,7 +66,9 @@ export function EditorAppProviders({ modules, children }: EditorAppProvidersProp
                                                   delete={(id) => modules.fonts.actions.delete.execute(id)}
                                                 >
                                                   <RadixTooltip.Provider delayDuration={200} skipDelayDuration={500} disableHoverableContent>
-                                                    {children}
+                                                    <ToastStackProvider>
+                                                      {children}
+                                                    </ToastStackProvider>
                                                   </RadixTooltip.Provider>
                                                 </UserFontsBridge>
                                               </AssetLibraryProvider>
@@ -72,6 +79,7 @@ export function EditorAppProviders({ modules, children }: EditorAppProvidersProp
                                     </RenderingProvider>
                                   </EngineProvider>
                                   </PreviewProvider>
+                                  </ElementsProvider>
                                 </CutsProvider>
                               </CaptionsProvider>
                             </EditorProvider>
@@ -83,6 +91,7 @@ export function EditorAppProviders({ modules, children }: EditorAppProvidersProp
                 </TranscriptionProvider>
               </RoutingProvider>
             </UtilsProvider>
+            </ErrorsProvider>
     </TelemetryProvider>
   );
 }

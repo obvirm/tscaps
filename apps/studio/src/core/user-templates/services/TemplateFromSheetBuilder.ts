@@ -36,6 +36,7 @@ export class TemplateFromSheetBuilder {
       sheet.alignmentConfig,
       sheet.template.rendering,
       sheet.template.features,
+      sheet.template.behindActor,
       sheet.effectConfigs,
       sheet.segmentSplitterConfigs,
       sheet.lineSplitterConfig,
@@ -44,6 +45,7 @@ export class TemplateFromSheetBuilder {
       filtersSvg ? this.svgFilterDefinitionsParser.parse(filtersSvg) : SvgFilterDefinitions.empty(),
       sheet.resolveCss(),
       filtersSvg,
+      [],
     );
   }
 

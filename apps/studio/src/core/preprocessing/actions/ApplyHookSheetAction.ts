@@ -1,17 +1,10 @@
 import { Document, Line, Section, Segment, Word } from '@tscaps/engine';
 import type { EditorStore } from '@core/editor/store/EditorStore';
-import type { Template } from '@core/templates/domain/Template';
 import type { TagName } from '@core/tagging/domain/TagName';
+import type { HookTemplatePicker } from '@core/sheets/services/HookTemplatePicker';
 import { Sheet, HOOK_SHEET_ID, MAIN_SHEET_ID } from '@core/sheets/domain/Sheet';
 
 const HOOK_TAG_NAME: TagName = 'hook';
-
-/**
- * Id of the template used as the default for the auto-created Hook sheet.
- * Hand-picked to harmonize with the platform default for Main; if the
- * pairing needs to change, edit this constant.
- */
-const HOOK_DEFAULT_TEMPLATE_ID = 'levi';
 
 /**
  * Applies the platform's hook auto-styling to the freshly transcribed and
@@ -27,6 +20,7 @@ const HOOK_DEFAULT_TEMPLATE_ID = 'levi';
 export class ApplyHookSheetAction {
   constructor(
     private readonly store: EditorStore,
+    private readonly hookTemplatePicker: HookTemplatePicker,
   ) {}
 
   execute(): void {
@@ -42,7 +36,7 @@ export class ApplyHookSheetAction {
     const nonHookWords = this._collectNonHookWords(document, hookWords);
     if (nonHookWords.length === 0) return;
 
-    const hookTemplate = this._pickHookTemplate(availableTemplates, main.template);
+    const hookTemplate = this.hookTemplatePicker.pick(availableTemplates, main.template);
     if (!hookTemplate) return;
 
     const hookSheet = Sheet.createHook(hookTemplate);
@@ -61,22 +55,6 @@ export class ApplyHookSheetAction {
   private _collectNonHookWords(document: Document, hookWords: ReadonlyArray<Word>): Word[] {
     const hookIds = new Set(hookWords.map((w) => w.id));
     return document.getWords().filter((w) => !hookIds.has(w.id));
-  }
-
-  /**
-   * Returns the template the Hook sheet should ship with. Picks the
-   * platform default by id; falls back to the first available template
-   * that is not Main's template, so the Hook sheet always looks visually
-   * distinct from Main. Returns `null` when no suitable template exists.
-   */
-  private _pickHookTemplate(
-    availableTemplates: ReadonlyArray<Template>,
-    mainTemplate: Template,
-  ): Template | null {
-    const preferred = availableTemplates.find((t) => t.metadata.id === HOOK_DEFAULT_TEMPLATE_ID);
-    if (preferred) return preferred;
-    const fallback = availableTemplates.find((t) => t.metadata.id !== mainTemplate.metadata.id);
-    return fallback ?? null;
   }
 
   /**

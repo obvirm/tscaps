@@ -1,6 +1,7 @@
 import type { Sheet } from '@core/sheets/domain/Sheet';
 import type { TypographyCssVarBuilder } from '@core/sheets/services/TypographyCssVarBuilder';
 import type { RotationCssVarBuilder } from '@core/sheets/services/RotationCssVarBuilder';
+import type { TextDirectionCssVarBuilder } from '@core/sheets/services/TextDirectionCssVarBuilder';
 import type { StyleValuesCssVarsBuilder } from '@core/sheets/services/StyleValuesCssVarsBuilder';
 import type { EmojiCssVarBuilder } from '@core/effect/services/EmojiCssVarBuilder';
 
@@ -18,6 +19,7 @@ import type { EmojiCssVarBuilder } from '@core/effect/services/EmojiCssVarBuilde
 export class SheetCssVarsBuilder {
   constructor(
     private readonly typographyCssVarBuilder: TypographyCssVarBuilder,
+    private readonly textDirectionCssVarBuilder: TextDirectionCssVarBuilder,
     private readonly rotationCssVarBuilder: RotationCssVarBuilder,
     private readonly styleValuesCssVarsBuilder: StyleValuesCssVarsBuilder,
     private readonly emojiCssVarBuilder: EmojiCssVarBuilder,
@@ -25,7 +27,8 @@ export class SheetCssVarsBuilder {
 
   build(sheet: Sheet): Record<string, string> {
     return {
-      ...this.typographyCssVarBuilder.build(sheet.typographyConfig),
+      ...this.typographyCssVarBuilder.build(sheet.typographyConfig, sheet.textDirection, sheet.textScript),
+      ...this.textDirectionCssVarBuilder.build(sheet.textDirection),
       ...this.rotationCssVarBuilder.build(sheet.rotationConfig),
       ...this.styleValuesCssVarsBuilder.build(sheet.styleValues),
       ...this.emojiCssVarBuilder.build(sheet.effectConfig('emoji')),

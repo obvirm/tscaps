@@ -1,4 +1,5 @@
 import type { VideoFrameRegion } from '@modules/rendering/types/VideoFrameSource';
+import { profiler } from '@modules/profiling/Profiler';
 
 /**
  * Anchor placement of a wrapper element within the viewport: the
@@ -44,11 +45,13 @@ export class SegmentPaintRegionResolver {
     host.style.cssText = `container-type: size; width: ${input.viewportWidth}px; height: ${input.viewportHeight}px;`;
     const inner = document.createElement('div');
     inner.style.cssText = 'display:inline-block;';
-    inner.innerHTML = input.segmentHtml;
-    host.appendChild(inner);
-    input.probeContainer.appendChild(host);
+    profiler.time('SegmentPaintRegionResolver.mount', () => {
+      inner.innerHTML = input.segmentHtml;
+      host.appendChild(inner);
+      input.probeContainer.appendChild(host);
+    });
     try {
-      return this.composeRegion(inner, input);
+      return profiler.time('SegmentPaintRegionResolver.measure', () => this.composeRegion(inner, input));
     } finally {
       input.probeContainer.removeChild(host);
     }

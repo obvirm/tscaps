@@ -5,6 +5,7 @@ import type { PreparedStyle } from '@modules/rendering/subtitle/PreparedStyle';
 import type { AnimationProbe } from '@modules/rendering/subtitle/AnimationProbe';
 import { AssetGroupBuilder } from '@modules/rendering/subtitle/AssetGroupBuilder';
 import type { BatchPlan, RenderItem, AssetGroup, TileAssignment } from '@modules/rendering/subtitle/BatchPlan';
+import { profiler } from '@modules/profiling/Profiler';
 
 /**
  * Plans one batch: for each timestamp, finds the active prepared
@@ -23,28 +24,31 @@ export class BatchPlanner {
 
   plan(timestamps: ReadonlyArray<number>): BatchPlan {
     const builders = new Map<string, AssetGroupBuilder>();
-
-    const assignments = timestamps.map((t): TileAssignment | null => {
-      const items = this.itemsAt(t);
-      if (items.length === 0) return null;
-
-      const assetKey = this.computeAssetKey(items);
-      let builder = builders.get(assetKey);
-      if (!builder) {
-        builder = new AssetGroupBuilder(assetKey);
-        builders.set(assetKey, builder);
-      }
-
-      const stateKey = this.computeStateKey(items, t);
-      const tile = builder.upsertTile(stateKey, items);
-      return { assetKey, tileIndex: tile.tileIndex };
-    });
+    const assignments = profiler.time('BatchPlanner.assignTiles', () =>
+      timestamps.map((t) => this.assignTile(t, builders)),
+    );
 
     const groups = new Map<string, AssetGroup>();
     for (const builder of builders.values()) {
       groups.set(builder.assetKey, builder.build());
     }
     return { groups, assignments };
+  }
+
+  private assignTile(t: number, builders: Map<string, AssetGroupBuilder>): TileAssignment | null {
+    const items = profiler.time('BatchPlanner.itemsAt', () => this.itemsAt(t));
+    if (items.length === 0) return null;
+
+    const assetKey = this.computeAssetKey(items);
+    let builder = builders.get(assetKey);
+    if (!builder) {
+      builder = new AssetGroupBuilder(assetKey);
+      builders.set(assetKey, builder);
+    }
+
+    const stateKey = profiler.time('BatchPlanner.computeStateKey', () => this.computeStateKey(items, t));
+    const tile = builder.upsertTile(stateKey, items);
+    return { assetKey, tileIndex: tile.tileIndex };
   }
 
   private itemsAt(t: number): RenderItem[] {

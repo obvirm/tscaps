@@ -1,35 +1,29 @@
-import { memo, useRef, useState, type ReactNode } from 'react';
+import { memo, useRef, type ReactNode } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
-import { LayoutTemplate, Subtitles, Type, Palette, Move, Sparkles, WrapText, Code2 } from 'lucide-react';
+import { LayoutTemplate, Subtitles, Type, Palette, Move, Orbit, Sparkles, WrapText, Code2 } from 'lucide-react';
 import type { Document } from '@tscaps/engine';
-import type { AppError } from '@core/_shared/domain/AppError';
+import type { AppError } from '@core/errors/domain/AppError';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 import type { Template } from '@core/templates/domain/Template';
-import type { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
-import type { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
+import type { ElementStyles } from '@core/elements/domain/ElementStyles';
+import type { BehindActorSegmentOverrideRegistry } from '@core/person-segmentation/domain/BehindActorSegmentOverrideRegistry';
+import type { FrozenSegmentSet } from '@core/captions/domain/FrozenSegmentSet';
 import type { DecorationOverrideRegistry } from '@core/captions/domain/DecorationOverrideRegistry';
 import type { TemplateLibraryView } from '@core/templates/store/TemplateLibraryStore';
+import type { CaptionsTabId } from '@presentation/editor/stores/CaptionsTabStore';
 import { ScrollFade } from '@ui/_shared/components/ScrollFade/ScrollFade';
 import { AppErrorMessage, getAppErrorTitle } from '@ui/_shared/components/AppErrorMessage/AppErrorMessage';
 import { TranscriptHost } from '@ui/pages/editor/features/transcript/TranscriptHost';
-import { EditorTab } from '@ui/pages/editor/components/sidebar/tabs/EditorTab';
 import { TemplatesTab } from '@ui/pages/editor/components/sidebar/tabs/TemplatesTab';
 import { TypographyTab } from '@ui/pages/editor/components/sidebar/tabs/TypographyTab';
 import { StyleTab } from '@ui/pages/editor/components/sidebar/tabs/StyleTab';
 import { PositionTab } from '@ui/pages/editor/components/sidebar/tabs/PositionTab';
 import { EffectsTab } from '@ui/pages/editor/components/sidebar/tabs/EffectsTab';
+import { MotionTab } from '@ui/pages/editor/components/sidebar/tabs/motion/MotionTab';
 import { LayoutTab } from '@ui/pages/editor/components/sidebar/tabs/LayoutTab';
 import { CodeTab } from '@ui/pages/editor/components/sidebar/tabs/CodeTab';
-
-type CaptionsTabId =
-  | 'templates'
-  | 'transcript'
-  | 'typography'
-  | 'style'
-  | 'position'
-  | 'effects'
-  | 'layout'
-  | 'code';
+import { useCaptionsTabStore } from '@ui/pages/editor/contexts/CaptionsTabContext';
+import { useActiveCaptionsTab } from '@ui/pages/editor/hooks/useActiveCaptionsTab';
 
 interface CaptionsPanelProps {
   sheets: Sheet[];
@@ -38,8 +32,9 @@ interface CaptionsPanelProps {
   library: TemplateLibraryView;
   document: Document | null;
   activeSegmentId: string | null;
-  wordStyleOverrides: WordStyleOverrideRegistry;
-  segmentOverrides: SegmentOverrides;
+  elementStyles: ElementStyles;
+  behindActorOverrides: BehindActorSegmentOverrideRegistry;
+  frozenSegments: FrozenSegmentSet;
   decorationOverrides: DecorationOverrideRegistry;
   videoDuration: number;
   isPlaying: boolean;
@@ -50,6 +45,8 @@ interface CaptionsPanelProps {
   onRenameSheet: (sheetId: string, name: string) => void;
   onDeleteSheet: (sheetId: string) => void;
   onCopyStylesFromSheet: (targetSheetId: string, sourceSheetId: string) => void;
+  onLinkSheet: (targetSheetId: string, sourceSheetId: string) => void;
+  onUnlinkSheet: (sheetId: string) => void;
 }
 
 interface RailEntry {
@@ -109,6 +106,7 @@ const RAIL: RailEntry[] = [
   { id: 'typography', label: 'Typography', icon: <Type              size={ICON_SIZE} /> },
   { id: 'style',      label: 'Style',      icon: <Palette           size={ICON_SIZE} /> },
   { id: 'position',   label: 'Position',   icon: <Move              size={ICON_SIZE} /> },
+  { id: 'motion',     label: 'Motion',     icon: <Orbit             size={ICON_SIZE} /> },
   { id: 'effects',    label: 'Effects',    icon: <Sparkles          size={ICON_SIZE} /> },
   { id: 'layout',     label: 'Layout',     icon: <WrapText          size={ICON_SIZE} /> },
   { id: 'code',       label: 'Code',       icon: <Code2             size={ICON_SIZE} /> },
@@ -117,11 +115,13 @@ const RAIL: RailEntry[] = [
 export const CaptionsPanel = memo(function CaptionsPanel(props: CaptionsPanelProps) {
   const {
     sheets, activeSheet, templates, library, document, activeSegmentId,
-    wordStyleOverrides, segmentOverrides, decorationOverrides, videoDuration, isPlaying, error, isMobileDevice,
+    elementStyles, behindActorOverrides, frozenSegments, decorationOverrides, videoDuration, isPlaying, error, isMobileDevice,
     onSetActiveSheet, onCreateSheet, onRenameSheet, onDeleteSheet, onCopyStylesFromSheet,
+    onLinkSheet, onUnlinkSheet,
   } = props;
 
-  const [activeTab, setActiveTab] = useState<CaptionsTabId>('templates');
+  const tabStore = useCaptionsTabStore();
+  const activeTab = useActiveCaptionsTab();
 
   // Per-tab refs so `ScrollFade` reattaches on tab change. ScrollFade's
   // effect depends on the RefObject identity — sharing one ref across all
@@ -131,6 +131,7 @@ export const CaptionsPanel = memo(function CaptionsPanel(props: CaptionsPanelPro
   const typographyRef = useRef<HTMLDivElement>(null);
   const styleRef = useRef<HTMLDivElement>(null);
   const positionRef = useRef<HTMLDivElement>(null);
+  const motionRef = useRef<HTMLDivElement>(null);
   const effectsRef = useRef<HTMLDivElement>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const codeRef = useRef<HTMLDivElement>(null);
@@ -141,6 +142,7 @@ export const CaptionsPanel = memo(function CaptionsPanel(props: CaptionsPanelPro
     typography: typographyRef,
     style: styleRef,
     position: positionRef,
+    motion: motionRef,
     effects: effectsRef,
     layout: layoutRef,
     code: codeRef,
@@ -155,13 +157,15 @@ export const CaptionsPanel = memo(function CaptionsPanel(props: CaptionsPanelPro
         onRenameSheet,
         onDeleteSheet,
         onCopyStylesFromSheet,
+        onLinkSheet,
+        onUnlinkSheet,
       }
     : null;
 
   return (
     <Tabs.Root
       value={activeTab}
-      onValueChange={(v) => setActiveTab(v as CaptionsTabId)}
+      onValueChange={(v) => tabStore.setActiveTab(v as CaptionsTabId)}
       orientation="vertical"
       className={SIDEBAR_CARD_CLASS}
     >
@@ -177,19 +181,18 @@ export const CaptionsPanel = memo(function CaptionsPanel(props: CaptionsPanelPro
         </Tabs.Content>
 
         <Tabs.Content value="transcript" className={SIDEBAR_CONTENT_CLASS} ref={transcriptRef}>
-          <EditorTab title="Transcript">
-            <TranscriptHost
-              document={document}
-              activeSegmentId={activeSegmentId}
-              sheets={sheets}
-              activeSheetId={activeSheet?.id ?? null}
-              wordStyleOverrides={wordStyleOverrides}
-              segmentOverrides={segmentOverrides}
-              decorationOverrides={decorationOverrides}
-              videoDuration={videoDuration}
-              isPlaying={isPlaying}
-            />
-          </EditorTab>
+          <TranscriptHost
+            document={document}
+            activeSegmentId={activeSegmentId}
+            sheets={sheets}
+            activeSheetId={activeSheet?.id ?? null}
+            elementStyles={elementStyles}
+            behindActorOverrides={behindActorOverrides}
+            frozenSegments={frozenSegments}
+            decorationOverrides={decorationOverrides}
+            videoDuration={videoDuration}
+            isPlaying={isPlaying}
+          />
         </Tabs.Content>
 
         <Tabs.Content value="typography" className={SIDEBAR_CONTENT_CLASS} ref={typographyRef}>
@@ -204,6 +207,10 @@ export const CaptionsPanel = memo(function CaptionsPanel(props: CaptionsPanelPro
           {sheetScopeProps && <PositionTab sheetScope={sheetScopeProps} />}
         </Tabs.Content>
 
+        <Tabs.Content value="motion" className={SIDEBAR_CONTENT_CLASS} ref={motionRef}>
+          {sheetScopeProps && <MotionTab sheetScope={sheetScopeProps} document={document} />}
+        </Tabs.Content>
+
         <Tabs.Content value="effects" className={SIDEBAR_CONTENT_CLASS} ref={effectsRef}>
           {sheetScopeProps && <EffectsTab sheetScope={sheetScopeProps} />}
         </Tabs.Content>
@@ -213,7 +220,7 @@ export const CaptionsPanel = memo(function CaptionsPanel(props: CaptionsPanelPro
             <LayoutTab
               sheetScope={sheetScopeProps}
               document={document}
-              segmentOverrides={segmentOverrides}
+              frozenSegments={frozenSegments}
             />
           )}
         </Tabs.Content>

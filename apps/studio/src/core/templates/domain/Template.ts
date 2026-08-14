@@ -1,6 +1,7 @@
 import type { AlignmentConfig, SvgFilterDefinitions } from '@tscaps/engine';
 import type { TemplateMetadata } from '@core/templates/domain/TemplateMetadata';
 import type { ControlField } from '@core/templates/domain/definition/ControlField';
+import type { DeclaredAnimation } from '@core/templates/domain/definition/DeclaredAnimation';
 import type { SegmentSplitterConfig } from '@core/segment-splitter/domain/SegmentSplitterConfig';
 import type { LineSplitterConfig } from '@core/line-splitter/domain/LineSplitterConfig';
 import type { EffectConfig } from '@core/effect/domain/EffectConfig';
@@ -9,6 +10,7 @@ import type { RotationConfig } from '@core/sheets/domain/RotationConfig';
 import type { RenderingConfig } from '@core/templates/domain/definition/RenderingConfig';
 import type { FeaturesConfig } from '@core/templates/domain/definition/FeaturesConfig';
 import type { StyleVariants } from '@core/templates/domain/definition/StyleVariant';
+import type { BehindActorTemplateConfig } from '@core/person-segmentation/domain/BehindActorTemplateConfig';
 
 /**
  * A template carries configs (not splitter / effect instances) so the
@@ -24,6 +26,7 @@ export class Template {
     readonly alignment: AlignmentConfig,
     readonly rendering: RenderingConfig,
     readonly features: FeaturesConfig,
+    readonly behindActor: BehindActorTemplateConfig,
     readonly effectConfigs: readonly EffectConfig[],
     readonly segmentSplitterConfigs: readonly SegmentSplitterConfig[],
     readonly lineSplitter: LineSplitterConfig,
@@ -32,6 +35,7 @@ export class Template {
     readonly svgFilterDefinitions: SvgFilterDefinitions,
     private readonly css: string,
     private readonly filtersSvg: string,
+    readonly declaredAnimations: readonly DeclaredAnimation[],
   ) { }
 
   getCss(): string {

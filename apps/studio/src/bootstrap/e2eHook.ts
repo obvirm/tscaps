@@ -21,13 +21,17 @@ export interface E2EHookDeps {
   loadVideo: LoadVideoAction;
   exportRun: ExportVideoAction;
   previewSurface: VideoPreviewSurface;
+  /** Absolute path of the editor route, base included, so specs never hardcode the mount. */
+  editorPath: string;
 }
 
 declare global {
   interface Window {
     __tscapsE2E?: {
       ready: boolean;
-      setVideo: (blob: Blob) => Promise<void>;
+      editorPath: string;
+      setVideo: (blob: Blob, opts?: { publishPreview?: boolean }) => Promise<void>;
+      setVideoLayout: (width: number, height: number) => void;
       setDocument: (json: unknown) => Promise<void>;
       triggerExport: () => Promise<void>;
       playPreview: () => Promise<void>;
@@ -196,13 +200,27 @@ export function attachE2EHook(deps: E2EHookDeps): void {
   window.__tscapsE2E = {
     ready: false,
 
-    setVideo: async (blob: Blob) => {
+    editorPath: deps.editorPath,
+
+    setVideo: async (blob: Blob, opts?: { publishPreview?: boolean }) => {
       await waitForTemplates(deps.editorStore, 10_000);
       const file = new File([blob], 'sample.mp4', { type: blob.type || 'video/mp4' });
       deps.loadVideo.execute(file);
-      // The preprocessing flow (which normally publishes the preview blob) is bypassed
-      // under the hook; mirror the proxy-disabled path where the source doubles as preview.
-      deps.editorStore.patchVideoState({ previewFile: file });
+      // Tests that bypass preprocessing (which normally publishes the preview
+      // blob) mirror the proxy-disabled path where the source doubles as
+      // preview. Tests that exercise the pre-preprocessing state — where no
+      // preview exists yet — pass `publishPreview: false` to keep the store
+      // faithful to production.
+      if (opts?.publishPreview !== false) {
+        deps.editorStore.patchVideoState({ previewFile: file });
+      }
+    },
+
+    // Preprocessing is the only thing that publishes a layout in
+    // production, and it runs a transcription to get there. A spec that
+    // only needs the caption surface on screen states the frame itself.
+    setVideoLayout: (width: number, height: number) => {
+      deps.editorStore.setVideoLayout({ width, height });
     },
 
     setDocument: async (json: unknown) => {

@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback } from 'react';
 import data from '@emoji-mart/data';
 import Picker from '@emoji-mart/react';
 import { PopoverHeader } from '@ui/_shared/components/Popover/PopoverHeader';
-import { useTheme } from '@bootstrap/ThemeContext';
-import type { Theme } from '@presentation/theme/controllers/ThemeController';
+import { useCurrentTheme } from '@ui/_shared/hooks/useCurrentTheme';
 
 interface EmojiPickerScreenProps {
   onPick: (glyph: string) => void;
@@ -21,14 +20,7 @@ interface PickedEmoji {
  * unicode glyph.
  */
 export function EmojiPickerScreen({ onPick }: EmojiPickerScreenProps) {
-  const theme = useTheme();
-  const [currentTheme, setCurrentTheme] = useState<Theme>(() => theme.getTheme());
-  useEffect(() => {
-    const update = () => setCurrentTheme(theme.getTheme());
-    theme.addEventListener('change', update);
-    update();
-    return () => theme.removeEventListener('change', update);
-  }, [theme]);
+  const currentTheme = useCurrentTheme();
 
   const handleSelect = useCallback((emoji: PickedEmoji) => {
     if (emoji.native) onPick(emoji.native);

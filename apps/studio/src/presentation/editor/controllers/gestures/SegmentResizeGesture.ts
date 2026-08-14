@@ -1,9 +1,11 @@
 import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { UpdateTypographyAction } from '@core/sheets/actions/style/UpdateTypographyAction';
-import type { SetSegmentStyleOverrideAction } from '@core/captions/actions/segments/SetSegmentStyleOverrideAction';
-import type { SegmentStyleOverrides } from '@core/captions/domain/SegmentStyleOverrides';
+import type { AuthoredElementControl } from '@core/elements/domain/ElementControl';
+import { ElementFieldId } from '@core/elements/domain/fields/ElementFieldId';
+import type { StyledElementCatalog } from '@core/elements/domain/StyledElementCatalog';
+import type { SetElementFieldAction } from '@core/elements/actions/SetElementFieldAction';
 import type { ResizeGeometryResolver } from '@presentation/editor/services/ResizeGeometryResolver';
-import type { FontSizeBounds } from '@presentation/editor/services/FontSizeBounds';
+import type { ElementControlRange } from '@presentation/editor/services/ElementControlRange';
 import { DragSession } from '@presentation/editor/controllers/DragSession';
 import type { SegmentBindingRegistry } from '@presentation/editor/controllers/SegmentBindingRegistry';
 import {
@@ -16,33 +18,37 @@ import {
 
 /**
  * Gesture: drag a corner handle on the selected segment to scale
- * typography. Default rescales the sheet's font-size so every segment
- * grows together — the natural model for captions — and clears the
- * dragged segment's per-segment font-size override on first commit so
- * it stops standing still while its siblings scale around it. Holding
- * Alt at pointerdown flips the gesture: writes land on the override
- * only.
+ * typography. Default rescales the font-size of the segment's own sheet
+ * so every segment on it grows together — the natural model for
+ * captions — and clears the dragged segment's per-segment font-size
+ * override on first commit so it stops standing still while its
+ * siblings scale around it. Holding Alt at pointerdown flips the
+ * gesture: writes land on the override only.
  */
 export class SegmentResizeGesture {
   /** Effective font-size captured at pointerdown so per-move commits
    *  scale the original value linearly with the cursor instead of
    *  compounding each tick. `null` between gestures. */
   private originalFontSize: number | null = null;
+  /** Sheet the segment under the handle belongs to, captured at
+   *  pointerdown. `null` between gestures. */
+  private targetSheetId: string | null = null;
   /** True when Alt was held at pointerdown: writes land on the
    *  segment override instead of the sheet. */
   private scopedToSegment = false;
-  /** True after the first non-scoped write has cleared the dragged
-   *  segment's override, so we don't issue a no-op clear every tick. */
-  private clearedSegmentOverride = false;
+  /** True after the first non-scoped write has taken the dragged
+   *  segment's own size back, so we don't issue a no-op clear every tick. */
+  private clearedSegmentFontSize = false;
 
   constructor(
     private readonly host: OverlayGestureHost,
     private readonly segments: SegmentBindingRegistry,
     private readonly editorStore: EditorStore,
     private readonly updateTypography: UpdateTypographyAction,
-    private readonly setSegmentStyleOverride: SetSegmentStyleOverrideAction,
+    private readonly styledElementCatalog: StyledElementCatalog,
+    private readonly setElementField: SetElementFieldAction,
     private readonly resizeGeometry: ResizeGeometryResolver,
-    private readonly fontSizeBounds: FontSizeBounds,
+    private readonly controlRange: ElementControlRange,
   ) {}
 
   bind(input: SegmentResizeBindInput): () => void {
@@ -58,7 +64,7 @@ export class SegmentResizeGesture {
     const original = this.originalFontSize ?? 0;
     const { dx, dy } = session.delta(clientX, clientY);
     const scale = this.resizeGeometry.scale(session.anchorRect, target.corner, dx, dy);
-    const fontSize = this.fontSizeBounds.clamp(original * scale);
+    const fontSize = this.controlRange.clamp(this.sizeControl(), original * scale);
     return { kind: 'segment-resize', segmentId: target.segmentId, fontSize, scopedToSegment: this.scopedToSegment };
   }
 
@@ -74,32 +80,27 @@ export class SegmentResizeGesture {
   }
 
   cleanupOnEnd(): void {
-    // `scopedToSegment` and `clearedSegmentOverride` are deliberately NOT
-    // reset here — the host calls `cleanupOnEnd` BEFORE the final
-    // `commit`, and the commit must see the same scope as the move
-    // ticks. Both are re-initialised at the next `tryStart`.
+    // `scopedToSegment`, `clearedSegmentFontSize` and `targetSheetId` are
+    // deliberately NOT reset here — they are latched for the whole
+    // gesture and re-initialised at the next `tryStart`.
     this.originalFontSize = null;
+  }
+
+  private sizeControl(): AuthoredElementControl {
+    return this.styledElementCatalog.requireControl('segment', ElementFieldId.FONT_SIZE);
   }
 
   private writeFontSize(segmentId: string, fontSize: number): void {
     if (this.scopedToSegment) {
-      const previous = this.editorStore.snapshot().segmentOverrides.getStyle(segmentId);
-      this.setSegmentStyleOverride.execute(segmentId, { ...previous, fontSize });
+      this.setElementField.execute(segmentId, 'segment', this.sizeControl(), fontSize);
       return;
     }
-    if (!this.clearedSegmentOverride) {
-      this.clearSegmentFontSizeOverride(segmentId);
-      this.clearedSegmentOverride = true;
+    if (this.targetSheetId === null) return;
+    if (!this.clearedSegmentFontSize) {
+      this.setElementField.clear(segmentId, 'segment', this.sizeControl());
+      this.clearedSegmentFontSize = true;
     }
-    this.updateTypography.execute({ fontSize });
-  }
-
-  private clearSegmentFontSizeOverride(segmentId: string): void {
-    const previous = this.editorStore.snapshot().segmentOverrides.getStyle(segmentId);
-    if (previous.fontSize === undefined) return;
-    const next: Record<string, unknown> = { ...previous };
-    delete next.fontSize;
-    this.setSegmentStyleOverride.execute(segmentId, next as SegmentStyleOverrides);
+    this.updateTypography.execute(this.targetSheetId, { fontSize });
   }
 
   private tryStart(target: SegmentResizeTarget, event: PointerEvent): void {
@@ -109,12 +110,13 @@ export class SegmentResizeGesture {
     if (!scaler) return;
     const segmentBinding = this.segments.get(target.segmentId);
     if (!segmentBinding) return;
-    const activeSheet = this.editorStore.activeSheet();
-    if (!activeSheet) return;
+    const sheet = this.editorStore.sheet(segmentBinding.sheetId);
+    if (!sheet) return;
     event.stopPropagation();
     this.scopedToSegment = event.altKey;
-    this.clearedSegmentOverride = false;
-    this.originalFontSize = this.readBaselineFontSize(target.segmentId, activeSheet.typographyConfig.fontSize);
+    this.clearedSegmentFontSize = false;
+    this.targetSheetId = sheet.id;
+    this.originalFontSize = this.readBaselineFontSize(target.segmentId, sheet.typographyConfig.fontSize);
     const session = new DragSession(
       target,
       segmentBinding.wrapper.getBoundingClientRect(),
@@ -127,12 +129,12 @@ export class SegmentResizeGesture {
     this.host.activateSession(session);
   }
 
-  /** Per-segment override when present (latched user choice), else the
-   *  sheet's typography font-size (the effective baseline the user is
-   *  scaling away from). Result is the size the segment currently
-   *  renders at — the per-tick scale multiplies this. */
+  /** The segment's own size when it has one (latched user choice),
+   *  else the sheet's typography font-size (the effective baseline the
+   *  user is scaling away from). Result is the size the segment
+   *  currently renders at — the per-tick scale multiplies this. */
   private readBaselineFontSize(segmentId: string, sheetFontSize: number): number {
-    const override = this.editorStore.snapshot().segmentOverrides.getStyle(segmentId).fontSize;
-    return override ?? sheetFontSize;
+    const held = this.editorStore.snapshot().elementStyles.fieldNumber(segmentId, ElementFieldId.FONT_SIZE);
+    return held ?? sheetFontSize;
   }
 }

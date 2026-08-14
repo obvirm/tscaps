@@ -1,4 +1,4 @@
-import type { BoxEdges, BehindActorRequirement } from '@tscaps/engine';
+import type { BoxEdges } from '@tscaps/engine';
 
 /**
  * Preview-only switch for templates that consume the video frame.
@@ -27,13 +27,11 @@ export interface VideoFrameRequirement {
 }
 
 /**
- * Template's rendering switches. Web-side counterpart of the
- * engine's `RenderingConfig` — narrowed at the boundary in
- * `ExportVideoAction`.
+ * Template's rendering switches. Web-side counterpart of the engine's
+ * `RenderingConfig` — narrowed at the boundary in `ExportVideoAction`.
  */
 export interface RenderingConfig {
   readonly splitWordsIntoLetters: boolean;
   readonly videoFrame: VideoFrameRequirement;
   readonly padding: BoxEdges | null;
-  readonly behindActor: BehindActorRequirement;
 }

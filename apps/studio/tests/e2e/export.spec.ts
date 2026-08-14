@@ -19,6 +19,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.resolve(__dirname, 'fixtures');
 
 test('export from synthetic video and document', async ({ page }) => {
+  // Answer every API call in-browser so the suite never depends on a
+  // backend behind the preview proxy. 401 is the normal "no cookie"
+  // answer, so the app boots without a signed-in session.
+  await page.route('**/v1/**', (route) => route.fulfill({ status: 401, body: '' }));
+
   await page.goto('http://localhost:4173/?e2e=1');
 
   await page.waitForFunction(() => window.__tscapsE2E?.ready === true, null, { timeout: 30_000 });

@@ -22,9 +22,10 @@ interface ModelOption extends SelectFieldOption {
 }
 
 const MODELS: readonly ModelOption[] = [
-  { value: 'tiny',  label: 'Tiny — ~40 MB' },
-  { value: 'base',  label: 'Base — ~75 MB' },
-  { value: 'small', label: 'Small — ~250 MB' },
+  { value: 'tiny',   label: 'Tiny — ~40 MB' },
+  { value: 'base',   label: 'Base — ~75 MB' },
+  { value: 'small',  label: 'Small — ~250 MB' },
+  { value: 'medium', label: 'Medium — ~940 MB' },
 ];
 
 const TOGGLE_CLS =

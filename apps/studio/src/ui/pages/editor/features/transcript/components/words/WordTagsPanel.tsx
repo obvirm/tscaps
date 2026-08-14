@@ -4,7 +4,6 @@ import type { Word } from '@tscaps/engine';
 import { TAG_METADATA, type UserFacingTagName } from '@core/tagging/domain/TagName';
 import { PopoverHeader } from '@ui/_shared/components/Popover/PopoverHeader';
 import { Tooltip } from '@ui/_shared/components/Tooltip/Tooltip';
-import { useTagging } from '@ui/_shared/contexts/modules/TaggingContext';
 
 interface WordTagsPanelProps {
   word: Word;
@@ -32,24 +31,18 @@ const HELP_BTN =
   'hover:text-fg-secondary hover:bg-surface-3 focus-visible:outline-none focus-visible:text-fg-secondary focus-visible:bg-surface-3 ' +
   'transition-colors duration-quick ease-standard';
 const HELP_WRAPPER = 'shrink-0';
-const EMPTY_HINT = 'text-2xs text-fg-faint px-1 py-2 leading-snug';
+
+const AVAILABLE_TAG_NAMES = Object.keys(TAG_METADATA) as UserFacingTagName[];
 
 /**
- * Word-level semantic-tag screen. Lists every tag the platform can
- * actually attach right now (taken from the live tagger registry, not
- * the canonical vocabulary), with a checkbox toggle per row and a (?)
- * that opens the long-form description on hover or tap. Each toggle
- * commits the whole next set immediately so an undo/redo lands in one
- * step per toggle.
+ * Word-level semantic-tag screen. Lists every user-facing tag from the
+ * canonical vocabulary — tagging by hand is available on every surface,
+ * whether or not an automatic tagger for the name is wired — with a
+ * checkbox toggle per row and a (?) that opens the long-form description
+ * on hover or tap. Each toggle commits the whole next set immediately so
+ * an undo/redo lands in one step per toggle.
  */
 export function WordTagsPanel({ word, onCommit }: WordTagsPanelProps) {
-  const tagging = useTagging();
-  const availableTagNames = useMemo(
-    () => tagging.registry.listActiveTagNames()
-      .filter((name): name is UserFacingTagName => name in TAG_METADATA),
-    [tagging.registry],
-  );
-
   const activeTagNames = useMemo(() => {
     const names = new Set<string>();
     for (const tag of word.semanticTags) names.add(tag.name);
@@ -66,20 +59,14 @@ export function WordTagsPanel({ word, onCommit }: WordTagsPanelProps) {
   return (
     <div className="p-2 flex flex-col gap-1 w-[220px] box-border">
       <PopoverHeader title="Word tags" />
-      {availableTagNames.length === 0 ? (
-        <p className={EMPTY_HINT}>
-          No semantic taggers are wired for this surface, so nothing to assign.
-        </p>
-      ) : (
-        availableTagNames.map((name) => (
-          <TagRow
-            key={name}
-            name={name}
-            checked={activeTagNames.has(name)}
-            onToggle={toggle}
-          />
-        ))
-      )}
+      {AVAILABLE_TAG_NAMES.map((name) => (
+        <TagRow
+          key={name}
+          name={name}
+          checked={activeTagNames.has(name)}
+          onToggle={toggle}
+        />
+      ))}
     </div>
   );
 }

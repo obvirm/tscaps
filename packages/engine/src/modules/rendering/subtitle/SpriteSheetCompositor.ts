@@ -3,8 +3,9 @@ import type { PreparedStyle } from '@modules/rendering/subtitle/PreparedStyle';
 import type { BaselineCssComposer } from '@modules/rendering/styles/BaselineCssComposer';
 import type { SegmentWrapperRenderer } from '@modules/rendering/subtitle/SegmentWrapperRenderer';
 import type { AssetGroup, UniqueTile, TileAssignment } from '@modules/rendering/subtitle/BatchPlan';
+import { profiler } from '@modules/profiling/Profiler';
 
-interface TileRender {
+interface HtmlWithDefs {
   html: string;
   defs: string;
 }
@@ -57,20 +58,34 @@ export class SpriteSheetCompositor {
     const sheetW = isPortrait ? tiles.length * this.width : this.width;
     const sheetH = isPortrait ? this.height : tiles.length * this.height;
 
+    const content = await profiler.time('SpriteSheetCompositor.buildTiles', () =>
+      this.buildTiles(tiles, isPortrait),
+    );
+    const styleBlock = profiler.time('SpriteSheetCompositor.composeStyleSheet', () =>
+      this.composeStyleSheet(tiles),
+    );
+
+    const defsBlock = content.defs ? `<defs>${content.defs}</defs>` : '';
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${sheetW}" height="${sheetH}">${defsBlock}${styleBlock}${content.html}</svg>`;
+    return this.decodeSvg(svg, tiles, sheetW, sheetH);
+  }
+
+  private async buildTiles(tiles: ReadonlyArray<UniqueTile>, isPortrait: boolean): Promise<HtmlWithDefs> {
     let itemUid = 0;
-    const tileResults = await Promise.all(
+    const results = await Promise.all(
       tiles.map((tile, i) => this.buildTileHtml(tile, i, isPortrait, () => itemUid++)),
     );
-    const tilesHtml = tileResults.map((r) => r.html).join('');
-    const filterDefs = tileResults.map((r) => r.defs).filter(Boolean).join('');
+    return {
+      html: results.map((r) => r.html).join(''),
+      defs: results.map((r) => r.defs).filter(Boolean).join(''),
+    };
+  }
 
+  private composeStyleSheet(tiles: ReadonlyArray<UniqueTile>): string {
     const activeKinds = this.collectActiveKinds(tiles);
     const sectionCss = this.joinByKind(activeKinds, (style) => style.scopedCss);
     const baselineCss = this.composeBaselineCssForKinds(activeKinds);
-    const defsBlock = filterDefs ? `<defs>${filterDefs}</defs>` : '';
-    const styleBlock = this.composeStyleBlock(baselineCss + sectionCss);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${sheetW}" height="${sheetH}">${defsBlock}${styleBlock}${tilesHtml}</svg>`;
-    return this.decodeSvg(svg, tiles, sheetW, sheetH);
+    return this.composeStyleBlock(baselineCss + sectionCss);
   }
 
   /**
@@ -90,7 +105,7 @@ export class SpriteSheetCompositor {
     i: number,
     isPortrait: boolean,
     nextUid: () => number,
-  ): Promise<TileRender> {
+  ): Promise<HtmlWithDefs> {
     const tx = isPortrait ? i * this.width : 0;
     const ty = isPortrait ? 0 : i * this.height;
     const wrapperResults = await Promise.all(
@@ -119,12 +134,14 @@ export class SpriteSheetCompositor {
 
   private async decodeSvg(svg: string, tiles: ReadonlyArray<UniqueTile>, sheetW: number, sheetH: number): Promise<HTMLImageElement> {
     const img = new Image();
-    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+    img.src = profiler.time('SpriteSheetCompositor.encodeDataUrl', () =>
+      `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+    );
     // `onload` can fire before custom fonts have finished applying,
     // producing visually-laggy captures with foreignObject + @font-face.
     // `decode()` only resolves once the image is fully paint-ready.
     try {
-      await img.decode();
+      await profiler.time('SpriteSheetCompositor.decodeImage', () => img.decode());
     } catch (e) {
       const kinds = new Set<string>();
       for (const tile of tiles) for (const item of tile.items) kinds.add(item.style.kind);

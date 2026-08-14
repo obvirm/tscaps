@@ -12,10 +12,14 @@ html {
   -webkit-text-size-adjust: 100%;
 }
 
-*, *::before, *::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+/* Same layer as the Tailwind reset in `tokens.css`, for the same reason:
+   a universal reset must not outrank a layered stylesheet. */
+@layer tscaps-app {
+  *, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
 }
 
 body {

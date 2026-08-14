@@ -1,15 +1,15 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronsRightLeft, Pencil, Wand2 } from 'lucide-react';
+import { ChevronsRightLeft, Pencil } from 'lucide-react';
 import type { Document, Segment } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
-import type { WordStyleOverrides } from '@core/captions/domain/WordStyleOverrides';
-import type { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
-import type { SegmentStyleOverrides } from '@core/captions/domain/SegmentStyleOverrides';
-import type { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
+import { HOOK_SHEET_ID, HOOK_SHEET_COLOR } from '@core/sheets/domain/Sheet';
+import type { ElementStyles } from '@core/elements/domain/ElementStyles';
+import type { BehindActorSegmentOverrideRegistry } from '@core/person-segmentation/domain/BehindActorSegmentOverrideRegistry';
+import type { FrozenSegmentSet } from '@core/captions/domain/FrozenSegmentSet';
 import type { DecorationOverrideRegistry } from '@core/captions/domain/DecorationOverrideRegistry';
 import type { CutRegistry } from '@core/cuts/domain/CutRegistry';
 import type { CutAwareDocumentBuilder } from '@core/cuts/services/CutAwareDocumentBuilder';
-import type { SheetMatcher } from '@core/sheet-matchers/domain/SheetMatcher';
+import type { SheetMatcher, SheetMatcherRunResult } from '@core/sheet-matchers/domain/SheetMatcher';
 import { useTranscriptCallbacks } from '@ui/pages/editor/features/transcript/hooks/useTranscriptCallbacks';
 import type { SegmentTextareaFocuser } from '@presentation/editor/services/SegmentTextareaFocuser';
 import {
@@ -24,6 +24,15 @@ import { Tooltip } from '@ui/_shared/components/Tooltip/Tooltip';
 import { FreeTranscriptView } from '@ui/pages/editor/features/transcript/components/FreeTranscriptView';
 import { AdvancedTranscriptView } from '@ui/pages/editor/features/transcript/components/AdvancedTranscriptView';
 import { AutoAssignDialog } from '@ui/pages/editor/features/transcript/components/AutoAssignDialog';
+import { TranscriptActionsPopover } from '@ui/pages/editor/features/transcript/components/TranscriptActionsPopover';
+import { PickModeHeader } from '@ui/pages/editor/features/transcript/components/pick-mode/PickModeHeader';
+import { PickModeBottomBar } from '@ui/pages/editor/features/transcript/components/pick-mode/PickModeBottomBar';
+import { useScenePickController } from '@ui/pages/editor/features/transcript/contexts/ScenePickContext';
+import { useScenePickSnapshot } from '@ui/pages/editor/features/transcript/hooks/useScenePickSnapshot';
+import {
+  AutoAssignResultToast,
+  type AutoAssignResultToastState,
+} from '@ui/pages/editor/features/transcript/components/AutoAssignResultToast';
 import { LocateButton } from '@ui/pages/editor/components/LocateButton';
 import { SearchToggleButton } from '@ui/pages/editor/components/SearchToggleButton';
 import { SegmentSearchInputBar } from '@ui/pages/editor/components/SegmentSearchInputBar';
@@ -47,8 +56,9 @@ export interface TranscriptPanelProps {
   activeSegmentId: string | null;
   sheets: Sheet[];
   activeSheetId: string | null;
-  wordStyleOverrides: WordStyleOverrideRegistry;
-  segmentOverrides: SegmentOverrides;
+  elementStyles: ElementStyles;
+  behindActorOverrides: BehindActorSegmentOverrideRegistry;
+  frozenSegments: FrozenSegmentSet;
   decorationOverrides: DecorationOverrideRegistry;
   videoDuration: number;
   isPlaying: boolean;
@@ -56,7 +66,6 @@ export interface TranscriptPanelProps {
   cutAwareDocumentBuilder: CutAwareDocumentBuilder;
   textareaFocus: SegmentTextareaFocuser;
   onSeek: (time: number) => void;
-  onSetSegmentStyleOverride: (segmentId: string, overrides: SegmentStyleOverrides) => void;
   onDeleteWords: (wordIds: string[]) => void;
   onApplyStructureEdit: (doc: Document) => void;
   onInsertWord: (segIdx: number, lineIdx: number, wordIdx: number) => string;
@@ -64,32 +73,27 @@ export interface TranscriptPanelProps {
   onEditWordText: (wordId: string, text: string) => void;
   onEditWordTime: (wordId: string, start: number, end: number) => void;
   onEditWordTags: (wordId: string, tagNames: ReadonlySet<string>) => void;
-  onSetWordStyleOverride: (wordId: string, overrides: WordStyleOverrides) => void;
   onAssignSegmentSheet: (segment: Segment, sheetId: string) => void;
-  onAutoAssignSegments: <P>(sheetId: string, matcher: SheetMatcher<P>, params: P) => void;
+  onAutoAssignSegments: <P>(sheetId: string, matcher: SheetMatcher<P>, params: P) => SheetMatcherRunResult;
   onCreateSheet: (name: string) => string | null;
   onResetSegmentLayout: (segmentId: string) => void;
 }
+
+const EMPTY_ID_SET: ReadonlySet<string> = new Set();
 
 const MODE_TOGGLE =
   'inline-flex items-center gap-1.5 px-2 py-1 rounded-xs text-xs ' +
   'text-fg-secondary hover:text-fg-primary hover:bg-surface-2 ' +
   'transition-colors duration-quick ease-standard focus-visible:outline-none focus-visible:bg-surface-2';
 
-const ICON_BTN =
-  'inline-flex items-center justify-center w-7 h-7 rounded-xs bg-transparent border-none cursor-pointer ' +
-  'text-fg-secondary hover:text-fg-primary hover:bg-surface-2 ' +
-  'transition-colors duration-quick ease-standard focus-visible:outline-none focus-visible:bg-surface-2 ' +
-  'disabled:text-fg-faint disabled:hover:bg-transparent disabled:cursor-not-allowed';
-
 export const TranscriptPanel = memo(function TranscriptPanel(props: TranscriptPanelProps) {
   const {
     document, activeSegmentId, sheets, activeSheetId,
-    wordStyleOverrides, segmentOverrides, decorationOverrides,
+    elementStyles, behindActorOverrides, frozenSegments, decorationOverrides,
     videoDuration, isPlaying, cuts, cutAwareDocumentBuilder, textareaFocus,
-    onSeek, onSetSegmentStyleOverride, onDeleteWords,
+    onSeek, onDeleteWords,
     onApplyStructureEdit, onInsertWord, onInsertSegment,
-    onEditWordText, onEditWordTime, onEditWordTags, onSetWordStyleOverride,
+    onEditWordText, onEditWordTime, onEditWordTags,
     onAssignSegmentSheet, onAutoAssignSegments, onCreateSheet,
     onResetSegmentLayout,
   } = props;
@@ -102,8 +106,15 @@ export const TranscriptPanel = memo(function TranscriptPanel(props: TranscriptPa
   const locateShortcutLabel = useMemo(() => shortcutLabeler.label(LOCATE_SHORTCUT), [shortcutLabeler]);
   const [mode, setMode] = useState<CaptionsMode>('free');
   const [autoAssignOpen, setAutoAssignOpen] = useState(false);
-  const { matcherRegistry: registry } = useSheets();
+  const [wandMenuOpen, setWandMenuOpen] = useState(false);
+  const [autoAssignToast, setAutoAssignToast] = useState<AutoAssignResultToastState | null>(null);
+  const sheetsModule = useSheets();
+  const registry = sheetsModule.matcherRegistry;
+  const setHookScenes = sheetsModule.actions.sheets.setHookScenes;
   const canAutoAssign = !isMobile && registry.list().length > 0;
+
+  const pickSnapshot = useScenePickSnapshot();
+  const pickActive = pickSnapshot.isActive;
 
   const handleCommitSegmentTime = useCallback((segmentId: string, start: number, end: number) => {
     captions.editSegmentTime({ segmentId, start, end });
@@ -146,6 +157,67 @@ export const TranscriptPanel = memo(function TranscriptPanel(props: TranscriptPa
     return () => shortcuts.stop();
   }, [activeMode, shortcuts]);
 
+  const scenePickController = useScenePickController();
+
+  const currentHookSegmentIds = useMemo<ReadonlySet<string>>(() => {
+    if (!document) return EMPTY_ID_SET;
+    const ids = new Set<string>();
+    for (const section of document.sections) {
+      if (section.kind !== HOOK_SHEET_ID) continue;
+      for (const segment of section.segments) ids.add(segment.id);
+    }
+    return ids;
+  }, [document]);
+
+  const selectionDurationSeconds = useMemo(() => {
+    if (!pickActive) return 0;
+    let total = 0;
+    for (const entry of sorted) {
+      if (pickSnapshot.selection.has(entry.segment.id)) total += entry.segment.time.end - entry.segment.time.start;
+    }
+    return total;
+  }, [pickActive, pickSnapshot.selection, sorted]);
+
+  const handleEnterHookPick = useCallback(() => {
+    setWandMenuOpen(false);
+    scenePickController.enter({
+      constraint: 'contiguous-from-start',
+      initialSelection: currentHookSegmentIds,
+    });
+  }, [scenePickController, currentHookSegmentIds]);
+
+  const handleOpenAutoAssign = useCallback(() => {
+    setWandMenuOpen(false);
+    setAutoAssignOpen(true);
+  }, []);
+
+  const handleConfirmPick = useCallback(() => {
+    setHookScenes.execute(scenePickController.snapshot().selection);
+    scenePickController.exit();
+  }, [scenePickController, setHookScenes]);
+
+  const handleClearPick = useCallback(() => {
+    setHookScenes.execute(EMPTY_ID_SET);
+    scenePickController.exit();
+  }, [scenePickController, setHookScenes]);
+
+  const handleCancelPick = useCallback(() => {
+    scenePickController.exit();
+  }, [scenePickController]);
+
+  useEffect(() => {
+    if (!pickActive) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      scenePickController.exit();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pickActive, scenePickController]);
+
+  useEffect(() => () => scenePickController.exit(), [scenePickController]);
+
   // Desktop only. Mobile sticks to 'free'.
   const effectiveMode: CaptionsMode = isMobile ? 'free' : mode;
   const showTopbar = !isMobile;
@@ -185,61 +257,68 @@ export const TranscriptPanel = memo(function TranscriptPanel(props: TranscriptPa
 
   return (
     <div className="flex flex-col">
-      {showTopbar && (
-        <div ref={topbarRef} className="sticky top-0 z-10 bg-surface-1 border-b border-edge-subtle">
-          <div className="flex items-center justify-between gap-2 px-1 py-1.5">
-            <Tooltip
-              text={effectiveMode === 'free' ? 'Switch to advanced mode (edit each word)' : 'Switch to free mode (edit as text)'}
-              position="bottom"
-            >
-              <button
-                type="button"
-                className={MODE_TOGGLE}
-                onClick={() => setMode(effectiveMode === 'free' ? 'advanced' : 'free')}
-                aria-label={effectiveMode === 'free' ? 'Free mode, click to switch to advanced' : 'Advanced mode, click to switch to free'}
+      {pickActive ? (
+        <PickModeHeader
+          ref={topbarRef}
+          title="Choose your hook scenes"
+          hint="Click a scene to mark where the hook ends."
+          accentColor={HOOK_SHEET_COLOR}
+          cancelLabel="Cancel hook selection"
+          cancelHint="Cancel (Esc)"
+          onCancel={handleCancelPick}
+        />
+      ) : (
+        showTopbar && (
+          <div ref={topbarRef} className="sticky top-0 z-10 bg-surface-1 border-b border-edge-subtle">
+            <div className="flex items-center justify-between gap-2 px-1 py-1.5">
+              <Tooltip
+                text={effectiveMode === 'free' ? 'Switch to advanced mode (edit each word)' : 'Switch to free mode (edit as text)'}
+                position="bottom"
               >
-                {effectiveMode === 'free' ? <Pencil size={12} /> : <ChevronsRightLeft size={12} />}
-                {effectiveMode === 'free' ? 'Free' : 'Advanced'}
-              </button>
-            </Tooltip>
-            <div className="flex items-center gap-0.5">
-              <LocateButton
-                disabled={!search.canLocate}
-                shortcutLabel={locateShortcutLabel}
-                onLocate={search.locate}
-              />
-              <SearchToggleButton
-                open={search.searchOpen}
-                shortcutLabel={findShortcutLabel}
-                onToggle={() => (search.searchOpen ? search.closeSearch() : search.openSearch())}
-              />
-              {canAutoAssign && (
-                <Tooltip text="Auto-group scenes by rule" position="bottom">
-                  <button
-                    type="button"
-                    className={ICON_BTN}
-                    onClick={() => setAutoAssignOpen(true)}
-                    aria-label="Auto-group scenes"
-                  >
-                    <Wand2 size={14} />
-                  </button>
-                </Tooltip>
-              )}
+                <button
+                  type="button"
+                  className={MODE_TOGGLE}
+                  onClick={() => setMode(effectiveMode === 'free' ? 'advanced' : 'free')}
+                  aria-label={effectiveMode === 'free' ? 'Free mode, click to switch to advanced' : 'Advanced mode, click to switch to free'}
+                >
+                  {effectiveMode === 'free' ? <Pencil size={12} /> : <ChevronsRightLeft size={12} />}
+                  {effectiveMode === 'free' ? 'Free' : 'Advanced'}
+                </button>
+              </Tooltip>
+              <div className="flex items-center gap-0.5">
+                <LocateButton
+                  disabled={!search.canLocate}
+                  shortcutLabel={locateShortcutLabel}
+                  onLocate={search.locate}
+                />
+                <SearchToggleButton
+                  open={search.searchOpen}
+                  shortcutLabel={findShortcutLabel}
+                  onToggle={() => (search.searchOpen ? search.closeSearch() : search.openSearch())}
+                />
+                <TranscriptActionsPopover
+                  open={wandMenuOpen}
+                  onOpenChange={setWandMenuOpen}
+                  canAutoAssign={canAutoAssign}
+                  onSetHookScenes={handleEnterHookPick}
+                  onOpenAutoAssign={handleOpenAutoAssign}
+                />
+              </div>
             </div>
+            {search.searchOpen && (
+              <SegmentSearchInputBar
+                inputRef={search.searchInputRef}
+                query={search.searchQuery}
+                matchCount={search.matchCount}
+                currentMatchOrdinal={search.currentMatchOrdinal}
+                onQueryChange={search.setSearchQuery}
+                onNext={search.nextMatch}
+                onPrev={search.prevMatch}
+                onClose={search.closeSearch}
+              />
+            )}
           </div>
-          {search.searchOpen && (
-            <SegmentSearchInputBar
-              inputRef={search.searchInputRef}
-              query={search.searchQuery}
-              matchCount={search.matchCount}
-              currentMatchOrdinal={search.currentMatchOrdinal}
-              onQueryChange={search.setSearchQuery}
-              onNext={search.nextMatch}
-              onPrev={search.prevMatch}
-              onClose={search.closeSearch}
-            />
-          )}
-        </div>
+        )
       )}
       <AutoAssignDialog
         open={autoAssignOpen}
@@ -247,10 +326,16 @@ export const TranscriptPanel = memo(function TranscriptPanel(props: TranscriptPa
         sheets={sheets}
         initialSheetId={activeSheetId}
         onApply={(sheetId, matcher, params) => {
-          onAutoAssignSegments(sheetId, matcher, params);
+          const result = onAutoAssignSegments(sheetId, matcher, params);
+          const sheetName = sheets.find((s) => s.id === sheetId)?.name ?? 'the sheet';
+          setAutoAssignToast({ key: Date.now(), result, sheetName });
           setAutoAssignOpen(false);
         }}
         onCancel={() => setAutoAssignOpen(false)}
+      />
+      <AutoAssignResultToast
+        state={autoAssignToast}
+        onDismiss={() => setAutoAssignToast(null)}
       />
 
       {effectiveMode === 'advanced' ? (
@@ -262,8 +347,9 @@ export const TranscriptPanel = memo(function TranscriptPanel(props: TranscriptPa
           scrollRequest={search.scrollRequest}
           highlightedSegmentId={search.highlightedSegmentId}
           sheets={sheets}
-          wordStyleOverrides={wordStyleOverrides}
-          segmentOverrides={segmentOverrides}
+          elementStyles={elementStyles}
+          behindActorOverrides={behindActorOverrides}
+          frozenSegments={frozenSegments}
           decorationOverrides={decorationOverrides}
           videoDuration={videoDuration}
           cuts={cuts}
@@ -271,8 +357,6 @@ export const TranscriptPanel = memo(function TranscriptPanel(props: TranscriptPa
           onEditWordText={onEditWordText}
           onEditWordTime={onEditWordTime}
           onEditWordTags={onEditWordTags}
-          onSetWordStyleOverride={onSetWordStyleOverride}
-          onSetSegmentStyleOverride={onSetSegmentStyleOverride}
           onDeleteWords={onDeleteWords}
           onApplyStructureEdit={onApplyStructureEdit}
           onInsertWord={onInsertWord}
@@ -292,8 +376,9 @@ export const TranscriptPanel = memo(function TranscriptPanel(props: TranscriptPa
           scrollRequest={search.scrollRequest}
           highlightedSegmentId={search.highlightedSegmentId}
           sheets={sheets}
-          wordStyleOverrides={wordStyleOverrides}
-          segmentOverrides={segmentOverrides}
+          elementStyles={elementStyles}
+          behindActorOverrides={behindActorOverrides}
+          frozenSegments={frozenSegments}
           decorationOverrides={decorationOverrides}
           videoDuration={videoDuration}
           cuts={cuts}
@@ -304,9 +389,21 @@ export const TranscriptPanel = memo(function TranscriptPanel(props: TranscriptPa
           onDeleteWords={onDeleteWords}
           onAssignSegmentSheet={onAssignSegmentSheet}
           onCreateSheet={onCreateSheet}
-          onSetSegmentStyleOverride={onSetSegmentStyleOverride}
           onInsertSegment={onInsertSegment}
           onResetSegmentLayout={onResetSegmentLayout}
+        />
+      )}
+      {pickActive && (
+        <PickModeBottomBar
+          selectionCount={pickSnapshot.selection.size}
+          selectionDurationSeconds={selectionDurationSeconds}
+          accentColor={HOOK_SHEET_COLOR}
+          confirmLabel="Confirm as hook"
+          clearLabel="Clear hook"
+          canConfirm={pickSnapshot.selection.size > 0}
+          showClear={pickSnapshot.initialSelection.size > 0}
+          onConfirm={handleConfirmPick}
+          onClear={handleClearPick}
         />
       )}
     </div>

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import type { Document, Segment } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
+import type { ElementStyles } from '@core/elements/domain/ElementStyles';
 import { useSheetOverlayArtifactsBuilder } from '@ui/pages/editor/contexts/SheetOverlayArtifactsContext';
 import type { SegmentPositionsBySheet } from '@presentation/editor/services/SegmentPositionsBySheet';
 
@@ -36,11 +37,12 @@ export function useSheetArtifacts(
   doc: Document,
   sheets: ReadonlyArray<Sheet>,
   activeSegments: ReadonlyArray<Segment>,
+  elementStyles: ElementStyles,
 ): SheetOverlayArtifacts {
   const builder = useSheetOverlayArtifactsBuilder();
   const cssBySheet = useMemo(
-    () => mapSheetsToRecord(sheets, (sheet) => builder.buildScopedCss(sheet)),
-    [sheets, builder],
+    () => mapSheetsToRecord(sheets, (sheet) => builder.buildScopedCss(sheet, elementStyles)),
+    [sheets, builder, elementStyles],
   );
   const wrapperVarsBySheet = useMemo(
     () => mapSheetsToRecord(sheets, (sheet) => builder.buildWrapperVars(sheet)),

@@ -1,22 +1,51 @@
-import { Document, DocumentEditor, Section } from '@tscaps/engine';
+import {
+  Document,
+  DocumentEditor,
+  Line,
+  Section,
+  Segment,
+  Word,
+  type SegmentReplacementPart,
+} from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { DocumentDeriver, DocumentDeriverContext } from '@core/editor/services/DocumentDeriver';
-import type { SheetMatcher } from '@core/sheet-matchers/domain/SheetMatcher';
+import type {
+  SegmentSheetMatcher,
+  SheetMatcher,
+  SheetMatcherRunResult,
+  WordSheetMatcher,
+} from '@core/sheet-matchers/domain/SheetMatcher';
 
 const docEditor = new DocumentEditor();
 
 /**
- * Bulk-assigns every segment that the matcher says yes to into the
- * target sheet, in a single undoable step. Segments that already belong
- * to the target are skipped. After the moves, each section that ended
- * up under the target kind is re-piped under the target sheet's rules
- * (unless the sheet is structure-locked) so adjacent moved segments
- * flow together as one input.
+ * A maximal run of consecutive words within one segment that all share
+ * the same match verdict.
+ */
+interface WordRun {
+  readonly matches: boolean;
+  readonly words: Word[];
+}
+
+/**
+ * Runs a matcher against the whole document and moves what it says yes
+ * to into the target sheet, in a single undoable step.
  *
- * Non-matching segments are never touched — including segments currently
- * assigned to the target sheet that no longer match. This is a positive
- * batch-assignment; it has no concept of "removing" ownership.
+ * Segment-granularity matchers move whole segments. Word-granularity
+ * matchers carve contiguous runs of matching words out of their
+ * segments: each run is piped under the target sheet's rules and lifted
+ * in place, while the surrounding words stay behind under their
+ * original sheet, keeping their line grouping. After the moves, each
+ * section that ended up under the target kind is re-piped under the
+ * target sheet's rules so adjacent moved content flows together as one
+ * input.
+ *
+ * This is a positive batch-assignment; it has no concept of "removing"
+ * ownership. Content already on the target sheet is never touched, and
+ * neither is non-matching content.
+ *
+ * Returns how much moved so the caller can surface the outcome.
  */
 export class RunSheetMatcherAction {
   constructor(
@@ -24,46 +53,177 @@ export class RunSheetMatcherAction {
     private readonly deriver: DocumentDeriver,
   ) {}
 
-  execute<TParams>(sheetId: string, matcher: SheetMatcher<TParams>, params: TParams): void {
-    const { sheets, document, video, segmentOverrides, decorationOverrides } = this.store.snapshot();
-    if (!document) return;
-    if (!video.layout) return;
+  execute<TParams>(sheetId: string, matcher: SheetMatcher<TParams>, params: TParams): SheetMatcherRunResult {
+    const nothingMoved: SheetMatcherRunResult = { granularity: matcher.granularity, movedCount: 0 };
+    const { sheets, document, video, frozenSegments, decorationOverrides } = this.store.snapshot();
+    if (!document) return nothingMoved;
+    if (!video.layout) return nothingMoved;
 
     const targetSheet = sheets.find((s) => s.id === sheetId);
-    if (!targetSheet) return;
+    if (!targetSheet) return nothingMoved;
 
     const ctx: DocumentDeriverContext = {
       videoWidth: video.layout.width,
       videoHeight: video.layout.height,
       videoDurationSeconds: video.duration,
-      segmentOverrides,
+      frozenSegments,
       decorationOverrides,
     };
 
+    return matcher.granularity === 'word'
+      ? this._runWordMatcher(document, sheetId, targetSheet, matcher, params, ctx)
+      : this._runSegmentMatcher(document, sheetId, targetSheet, matcher, params, ctx);
+  }
+
+  private _runSegmentMatcher<TParams>(
+    document: Document,
+    sheetId: string,
+    targetSheet: Sheet,
+    matcher: SegmentSheetMatcher<TParams>,
+    params: TParams,
+    ctx: DocumentDeriverContext,
+  ): SheetMatcherRunResult {
     // Snapshot ids first; the doc mutates as we move segments.
     const movingIds: string[] = [];
     for (const section of document.sections) {
       if (section.kind === sheetId) continue;
       for (const seg of section.segments) {
-        if (!matcher.matches(seg, params)) continue;
+        if (!matcher.matchesSegment(seg, params)) continue;
         movingIds.push(seg.id);
       }
     }
-    if (movingIds.length === 0) return;
+    if (movingIds.length === 0) return { granularity: 'segment', movedCount: 0 };
 
     this.store.commit();
 
     let doc = document;
+    let movedCount = 0;
     for (const segId of movingIds) {
       const seg = doc.getSegments().find((s) => s.id === segId);
       if (!seg) continue;
       const piped = this.deriver.runSheetPipeline([seg], targetSheet, ctx);
       if (piped.length === 0) continue;
       doc = docEditor.replaceSegmentWithKind(doc, segId, piped, sheetId);
+      movedCount++;
     }
 
     doc = this._reflowTargetSections(doc, sheetId, targetSheet, ctx);
     this.store.patch({ document: this.deriver.retag(doc) });
+    return { granularity: 'segment', movedCount };
+  }
+
+  private _runWordMatcher<TParams>(
+    document: Document,
+    sheetId: string,
+    targetSheet: Sheet,
+    matcher: WordSheetMatcher<TParams>,
+    params: TParams,
+    ctx: DocumentDeriverContext,
+  ): SheetMatcherRunResult {
+    // Snapshot ids first; the doc mutates as we carve segments apart.
+    const movingIds: string[] = [];
+    for (const section of document.sections) {
+      if (section.kind === sheetId) continue;
+      for (const seg of section.segments) {
+        if (!seg.getWords().some((w) => matcher.matchesWord(w, params))) continue;
+        movingIds.push(seg.id);
+      }
+    }
+    if (movingIds.length === 0) return { granularity: 'word', movedCount: 0 };
+
+    this.store.commit();
+
+    let doc = document;
+    let movedCount = 0;
+    for (const segId of movingIds) {
+      const seg = doc.getSegments().find((s) => s.id === segId);
+      if (!seg) continue;
+      const originalKind = this._sectionKindOf(doc, segId);
+      if (originalKind === null) continue;
+      const runs = this._collectWordRuns(seg, matcher, params);
+      const { parts, movedWords } = this._buildReplacementParts(seg, runs, originalKind, sheetId, targetSheet, ctx);
+      if (movedWords === 0) continue;
+      doc = docEditor.replaceSegmentWithSections(doc, segId, parts);
+      movedCount += movedWords;
+    }
+
+    doc = this._reflowTargetSections(doc, sheetId, targetSheet, ctx);
+    this.store.patch({ document: this.deriver.retag(doc) });
+    return { granularity: 'word', movedCount };
+  }
+
+  private _collectWordRuns<TParams>(
+    segment: Segment,
+    matcher: WordSheetMatcher<TParams>,
+    params: TParams,
+  ): WordRun[] {
+    const runs: WordRun[] = [];
+    for (const word of segment.getWords()) {
+      const matches = matcher.matchesWord(word, params);
+      const last = runs[runs.length - 1];
+      if (last && last.matches === matches) {
+        last.words.push(word);
+      } else {
+        runs.push({ matches, words: [word] });
+      }
+    }
+    return runs;
+  }
+
+  /**
+   * Turns a segment's word runs into an ordered replacement: matching
+   * runs are piped under the target sheet and routed to the target
+   * kind; non-matching runs stay under the original kind, keeping the
+   * original line grouping. A matching run whose pipeline yields
+   * nothing falls back to staying behind, so no word is ever dropped.
+   */
+  private _buildReplacementParts(
+    segment: Segment,
+    runs: ReadonlyArray<WordRun>,
+    originalKind: string,
+    targetKind: string,
+    targetSheet: Sheet,
+    ctx: DocumentDeriverContext,
+  ): { parts: SegmentReplacementPart[]; movedWords: number } {
+    const parts: SegmentReplacementPart[] = [];
+    let movedWords = 0;
+    for (const run of runs) {
+      if (run.matches) {
+        const wrapped = new Segment({ lines: [new Line({ words: run.words })] });
+        const piped = this.deriver.runSheetPipeline([wrapped], targetSheet, ctx);
+        if (piped.length > 0) {
+          parts.push({ segments: piped, kind: targetKind });
+          movedWords += run.words.length;
+          continue;
+        }
+      }
+      parts.push({ segments: [this._remnantSegment(segment, run.words)], kind: originalKind });
+    }
+    return { parts, movedWords };
+  }
+
+  /**
+   * Rebuilds the part of a segment that stays behind: the original
+   * lines filtered down to the given words, empty lines dropped. Word
+   * identities are preserved; line and segment identities are not.
+   */
+  private _remnantSegment(original: Segment, words: ReadonlyArray<Word>): Segment {
+    const keptIds = new Set(words.map((w) => w.id));
+    const lines: Line[] = [];
+    for (const line of original.lines) {
+      const kept = line.words.filter((w) => keptIds.has(w.id));
+      if (kept.length > 0) lines.push(new Line({ words: kept }));
+    }
+    return new Segment({ lines });
+  }
+
+  private _sectionKindOf(document: Document, segmentId: string): string | null {
+    for (const section of document.sections) {
+      for (const segment of section.segments) {
+        if (segment.id === segmentId) return section.kind;
+      }
+    }
+    return null;
   }
 
   /**
@@ -84,6 +244,6 @@ export class RunSheetMatcherAction {
       if (piped.length === 0) return sec;
       return sec.with({ segments: piped });
     });
-    return new Document({ sections: next });
+    return doc.with({ sections: next });
   }
 }

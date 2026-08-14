@@ -1,8 +1,9 @@
 import { TimeFragment } from '@modules/document/TimeFragment';
-import { Tag } from '@modules/document/Tag';
+import { Tag } from '@modules/tags/Tag';
 import { WordState } from '@modules/document/WordState';
 import { CssVariable } from '@modules/document/CssVariable';
 import { Decoration } from '@modules/document/Decoration';
+import { DocumentNodeId } from '@modules/document/DocumentNodeId';
 
 export interface WordProps<M = unknown> {
   readonly text: string;
@@ -50,7 +51,7 @@ export class Word<M = unknown> {
     this.time = props.time;
     this.structureTags = props.structureTags ?? new Set();
     this.semanticTags = props.semanticTags ?? new Set();
-    this.id = props.id ?? crypto.randomUUID();
+    this.id = props.id ?? DocumentNodeId.generate();
     this.displayText = props.displayText ?? props.text;
     this.speakerId = props.speakerId ?? null;
     this.decoration = props.decoration ?? null;

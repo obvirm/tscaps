@@ -1,5 +1,3 @@
-import type { Document } from '@modules/document/Document';
-import type { SubtitleStyle } from '@modules/rendering/SubtitleFrameRenderer';
 import type { OverlayFrame } from '@modules/rendering/OverlayFrameRenderer';
 import type { DecodedVideoFrame } from '@modules/video/mediabunny/frame/VideoFrameDecoder';
 
@@ -10,22 +8,17 @@ import type { DecodedVideoFrame } from '@modules/video/mediabunny/frame/VideoFra
  * frame-locked decoration) whose pixels depend on the source frame.
  *
  * Lifecycle mirrors {@link SubtitleLayerSource}: {@link open} prepares
- * the source for a render, {@link frameAt} services each video frame
- * in monotonically advancing `time` order, and {@link close} releases
- * resources. Open/close pairs may repeat against the same instance,
- * but a source cannot serve two renders concurrently.
+ * the source for a render at the given output dimensions,
+ * {@link frameAt} services each video frame in monotonically advancing
+ * `time` order, and {@link close} releases resources. Open/close pairs
+ * may repeat against the same instance, but a source cannot serve two
+ * renders concurrently.
  *
  * `frameAt` returns `null` when this frame has no on-top layer to
  * paint; the compositor then skips the layer entirely for that frame.
  */
 export interface TopLayerSource {
-  open(
-    doc: Document,
-    styles: Readonly<Record<string, SubtitleStyle>>,
-    width: number,
-    height: number,
-    tickInterval: number,
-  ): Promise<void>;
+  open(width: number, height: number): Promise<void>;
 
   frameAt(time: number, videoFrame: DecodedVideoFrame): Promise<OverlayFrame | null>;
 

@@ -1,19 +1,24 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { Document, Segment } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
-import type { WordStyleOverrides } from '@core/captions/domain/WordStyleOverrides';
-import type { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
-import type { SegmentStyleOverrides } from '@core/captions/domain/SegmentStyleOverrides';
-import type { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
+import type { ElementStyles } from '@core/elements/domain/ElementStyles';
+import type { BehindActorSegmentOverrideRegistry } from '@core/person-segmentation/domain/BehindActorSegmentOverrideRegistry';
+import type { FrozenSegmentSet } from '@core/captions/domain/FrozenSegmentSet';
 import type { DecorationOverrideRegistry } from '@core/captions/domain/DecorationOverrideRegistry';
 import type { CutRegistry } from '@core/cuts/domain/CutRegistry';
+import { HOOK_SHEET_COLOR } from '@core/sheets/domain/Sheet';
 import { useScrollParent } from '@ui/_shared/hooks/useScrollParent';
 import type { SortedEntry } from "@ui/pages/editor/features/transcript/components/TranscriptPanel";
 import { SegmentEditItem } from '@ui/pages/editor/features/transcript/components/segments/SegmentEditItem';
 import { AddSceneButton } from '@ui/pages/editor/features/transcript/components/scenes/AddSceneButton';
+import { ScenePickOverlay } from '@ui/pages/editor/features/transcript/components/pick-mode/ScenePickOverlay';
 import { useTranscriptAutoScroll } from '@ui/pages/editor/features/transcript/hooks/useTranscriptAutoScroll';
 import type { ScrollRequest } from '@ui/pages/editor/hooks/useSegmentSearchControls';
+import { useScenePickController } from '@ui/pages/editor/features/transcript/contexts/ScenePickContext';
+import { useCaptions } from '@ui/_shared/contexts/modules/CaptionsContext';
+import { useScenePickSnapshot } from '@ui/pages/editor/features/transcript/hooks/useScenePickSnapshot';
+import { useEffectivePickSelection } from '@ui/pages/editor/features/transcript/hooks/useEffectivePickSelection';
 
 interface AdvancedTranscriptViewProps {
   document: Document;
@@ -23,8 +28,9 @@ interface AdvancedTranscriptViewProps {
   scrollRequest: ScrollRequest | null;
   highlightedSegmentId: string | null;
   sheets: Sheet[];
-  wordStyleOverrides: WordStyleOverrideRegistry;
-  segmentOverrides: SegmentOverrides;
+  elementStyles: ElementStyles;
+  behindActorOverrides: BehindActorSegmentOverrideRegistry;
+  frozenSegments: FrozenSegmentSet;
   decorationOverrides: DecorationOverrideRegistry;
   videoDuration: number;
   cuts: CutRegistry;
@@ -32,8 +38,6 @@ interface AdvancedTranscriptViewProps {
   onEditWordText: (wordId: string, text: string) => void;
   onEditWordTime: (wordId: string, start: number, end: number) => void;
   onEditWordTags: (wordId: string, tagNames: ReadonlySet<string>) => void;
-  onSetWordStyleOverride: (wordId: string, overrides: WordStyleOverrides) => void;
-  onSetSegmentStyleOverride: (segmentId: string, overrides: SegmentStyleOverrides) => void;
   onDeleteWords: (wordIds: string[]) => void;
   onApplyStructureEdit: (doc: Document) => void;
   onInsertWord: (segIdx: number, lineIdx: number, wordIdx: number) => string;
@@ -53,8 +57,9 @@ export const AdvancedTranscriptView = memo(function AdvancedTranscriptView({
   scrollRequest,
   highlightedSegmentId,
   sheets,
-  wordStyleOverrides,
-  segmentOverrides,
+  elementStyles,
+  behindActorOverrides,
+  frozenSegments,
   decorationOverrides,
   videoDuration,
   cuts,
@@ -62,8 +67,6 @@ export const AdvancedTranscriptView = memo(function AdvancedTranscriptView({
   onEditWordText,
   onEditWordTime,
   onEditWordTags,
-  onSetWordStyleOverride,
-  onSetSegmentStyleOverride,
   onDeleteWords,
   onApplyStructureEdit,
   onInsertWord,
@@ -104,6 +107,24 @@ export const AdvancedTranscriptView = memo(function AdvancedTranscriptView({
     }
   }, [onInsertSegment]);
 
+  const scenePickController = useScenePickController();
+  const pickSnapshot = useScenePickSnapshot();
+  // The slider's stops, from the same rule the write is clamped to: the
+  // hard time of the neighbours **on this segment's own sheet**. Reading
+  // the neighbours off the flat list instead stopped at whichever segment
+  // happened to sit next in the document, and at its padded window rather
+  // than the part of it that is defended.
+  const { segmentTimeBounds } = useCaptions().services;
+  const segmentLimits = useMemo(
+    () => segmentTimeBounds.allLimits(document, videoDuration),
+    [segmentTimeBounds, document, videoDuration],
+  );
+  const orderedSceneIds = useMemo<ReadonlyArray<string>>(
+    () => sorted.map((e) => e.segment.id),
+    [sorted],
+  );
+  const pickSelection = useEffectivePickSelection(pickSnapshot, orderedSceneIds);
+
   const [parentRef, scrollEl] = useScrollParent();
   // eslint-disable-next-line react-hooks/incompatible-library -- @tanstack/react-virtual is not analyzable by the React Compiler.
   const virtualizer = useVirtualizer({
@@ -122,6 +143,18 @@ export const AdvancedTranscriptView = memo(function AdvancedTranscriptView({
 
   const items = virtualizer.getVirtualItems();
 
+  if (sorted.length === 0) {
+    return (
+      <div className="flex flex-col gap-2 py-4 pl-1">
+        <p className="text-sm text-fg-muted text-center m-0">No captions yet.</p>
+        <AddSceneButton
+          onClick={() => handleInsertSegment(0, 'before')}
+          label="Add first scene"
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       ref={rootRef}
@@ -139,8 +172,11 @@ export const AdvancedTranscriptView = memo(function AdvancedTranscriptView({
             const isFirstFlat = flatIdx === 0;
             const prev = sorted[vi.index - 1]?.segment;
             const next = sorted[vi.index + 1]?.segment;
-            const prevEnd = prev ? prev.time.end : 0;
-            const nextStart = next ? next.time.start : (videoDuration > 0 ? videoDuration : segment.time.end);
+            const limits = segmentLimits.get(segment.id);
+            const prevEnd = limits?.earliestStartSec ?? (prev ? prev.time.end : 0);
+            const nextStart = Number.isFinite(limits?.latestEndSec ?? Infinity)
+              ? limits!.latestEndSec
+              : (next ? next.time.start : (videoDuration > 0 ? videoDuration : segment.time.end));
             const isFirstInList = vi.index === 0;
             const isLastInList = vi.index === sorted.length - 1;
             return (
@@ -157,7 +193,7 @@ export const AdvancedTranscriptView = memo(function AdvancedTranscriptView({
                     label="Add scene at start"
                   />
                 )}
-                <div className={highlightedSegmentId === segment.id ? 'rounded-sm ring-2 ring-accent ring-offset-2 ring-offset-surface-1' : undefined}>
+                <div className={`relative ${highlightedSegmentId === segment.id ? 'rounded-sm ring-2 ring-accent ring-offset-2 ring-offset-surface-1' : ''}`}>
                   <SegmentEditItem
                     doc={document}
                     segment={segment}
@@ -169,8 +205,9 @@ export const AdvancedTranscriptView = memo(function AdvancedTranscriptView({
                     activePopoverId={activePopoverId}
                     sheet={sheet}
                     sheets={sheets}
-                    wordStyleOverrides={wordStyleOverrides}
-                    segmentOverrides={segmentOverrides}
+                    elementStyles={elementStyles}
+                    behindActorOverrides={behindActorOverrides}
+                    isFrozen={frozenSegments.has(segment.id)}
                     decorationOverrides={decorationOverrides}
                     cuts={cuts}
                     prevSegmentEnd={prevEnd}
@@ -182,8 +219,6 @@ export const AdvancedTranscriptView = memo(function AdvancedTranscriptView({
                     onEditWordText={onEditWordText}
                     onEditWordTime={onEditWordTime}
                     onEditWordTags={onEditWordTags}
-                    onSetWordStyleOverride={onSetWordStyleOverride}
-                    onSetSegmentStyleOverride={onSetSegmentStyleOverride}
                     onDeleteWords={onDeleteWords}
                     onApplyStructureEdit={onApplyStructureEdit}
                     onInsertWord={onInsertWord}
@@ -193,6 +228,16 @@ export const AdvancedTranscriptView = memo(function AdvancedTranscriptView({
                     onRedistributeWords={onRedistributeWords}
                     onResetSegmentLayout={onResetSegmentLayout}
                   />
+                  {pickSnapshot.isActive && (
+                    <ScenePickOverlay
+                      selected={pickSelection.committed.has(segment.id)}
+                      preview={pickSelection.preview.has(segment.id)}
+                      accentColor={HOOK_SHEET_COLOR}
+                      onClick={() => scenePickController.selectAt(segment.id, orderedSceneIds)}
+                      onHoverEnter={() => scenePickController.hoverBoundary(segment.id)}
+                      onHoverLeave={() => scenePickController.hoverBoundary(null)}
+                    />
+                  )}
                 </div>
                 <AddSceneButton
                   onClick={() => handleInsertSegment(flatIdx, 'after')}

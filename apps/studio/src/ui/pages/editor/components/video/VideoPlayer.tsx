@@ -2,7 +2,6 @@ import { memo, type Ref } from 'react';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import type { VideoState } from '@core/editor/domain/VideoState';
 import { StatusPill } from '@ui/_shared/components/StatusPill/StatusPill';
-import { usePreview } from '@ui/_shared/contexts/modules/PreviewContext';
 
 interface VideoPlayerProps {
   containerRef: Ref<HTMLDivElement>;
@@ -25,8 +24,7 @@ interface VideoPlayerProps {
  * does not need to know which surface is active.
  */
 export const VideoPlayer = memo(function VideoPlayer({ containerRef, video, onClick }: VideoPlayerProps) {
-  const { proxyPipelineEnabled } = usePreview();
-  const showLowResBadge = proxyPipelineEnabled && video.previewFile !== null;
+  const showLowResBadge = video.previewIsProxy;
   return (
     <>
       <div
@@ -38,7 +36,7 @@ export const VideoPlayer = memo(function VideoPlayer({ containerRef, video, onCl
         <StatusPill
           label="Low res preview"
           tone="subtle"
-          className="absolute top-2 right-2 z-10 pointer-events-none"
+          className="absolute top-2 right-2 z-10 pointer-events-none max-lg:hidden"
         />
       )}
       {video.url && video.loadError && (

@@ -1,7 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { EditorStore } from '@core/editor/store/EditorStore';
-import type { EditorState } from '@core/editor/domain/EditorState';
-import type { ExportVideoOptions } from '@core/export/actions/ExportVideoAction';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ExportStore } from '@core/export/store/ExportStore';
 import type { ExportRun } from '@core/export/domain/ExportRun';
 import type { ExportNotice } from '@core/export/domain/ExportNotice';
@@ -9,25 +6,16 @@ import { ExportResolutionPresets } from '@presentation/export/services/ExportRes
 import { FallbackDecoderAdvisor } from '@presentation/export/services/FallbackDecoderAdvisor';
 import { ExportFlow } from '@ui/pages/editor/features/export/components/ExportFlow';
 import type { FallbackDecoderWarning } from '@ui/pages/editor/features/export/components/ExportDialog';
-import type { ResolutionView } from '@ui/pages/editor/features/export/components/ExportSettingsForm';
+import type { ExportVideoOptions } from '@core/export/actions/ExportVideoAction';
+import type { ExportSubtitlesOptions } from '@core/export/actions/ExportSubtitlesAction';
+import type { ResolutionView } from '@ui/pages/editor/features/export/components/VideoExportSettings';
 import { useExport } from '@ui/_shared/contexts/modules/ExportContext';
-import { useEditor } from '@ui/_shared/contexts/modules/EditorContext';
 import { useUtils } from '@ui/_shared/contexts/modules/UtilsContext';
+import { useEditorState } from '@ui/_shared/hooks/useEditorState';
 
 interface ExportFlowHostProps {
   settingsOpen: boolean;
   onSettingsOpenChange: (open: boolean) => void;
-}
-
-function useEditorSnapshot(store: EditorStore): EditorState {
-  const [state, setState] = useState(() => store.snapshot());
-  useEffect(() => {
-    const update = () => setState(store.snapshot());
-    store.addEventListener('change', update);
-    update();
-    return () => store.removeEventListener('change', update);
-  }, [store]);
-  return state;
 }
 
 interface ExportLifecycleSnapshot {
@@ -65,10 +53,9 @@ export function ExportFlowHost({
   settingsOpen,
   onSettingsOpenChange,
 }: ExportFlowHostProps) {
-  const editor = useEditor();
   const exports = useExport();
   const { userAgentInspector } = useUtils();
-  const state = useEditorSnapshot(editor.store);
+  const state = useEditorState();
   const { run, notice } = useExportLifecycle(exports.runStore);
   const extraNotice = null;
   const environment = useMemo(() => userAgentInspector.detect(), [userAgentInspector]);
@@ -98,8 +85,15 @@ export function ExportFlowHost({
     };
   }, [resolutionPresets, videoLayout]);
 
-  const handleExport = (options: ExportVideoOptions): Promise<void> =>
-    exports.actions.run.execute(options);
+  const handleExportVideo = useCallback((options: ExportVideoOptions): Promise<void> =>
+    exports.actions.run.execute(options), [exports]);
+
+  // A subtitle file is written in one turn and raises no run, so nothing
+  // downstream will ever close the dialog for it.
+  const handleExportSubtitles = useCallback((options: ExportSubtitlesOptions): void => {
+    exports.actions.runSubtitles.execute(options);
+    onSettingsOpenChange(false);
+  }, [exports, onSettingsOpenChange]);
 
   return (
     <ExportFlow
@@ -112,7 +106,8 @@ export function ExportFlowHost({
       extraNotice={extraNotice}
       fallbackWarning={fallbackWarning}
       resolutionView={resolutionView}
-      onExport={handleExport}
+      onExportVideo={handleExportVideo}
+      onExportSubtitles={handleExportSubtitles}
       onAcceptExportPause={() => exports.actions.acceptPause.execute()}
       onRejectExportPause={() => exports.actions.rejectPause.execute()}
       onDismissExportNotice={() => exports.actions.dismissNotice.execute()}

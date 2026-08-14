@@ -1,5 +1,6 @@
 import { memo, type ReactNode } from 'react';
 import type { ControlField, ControlValue } from '@core/templates/domain/definition/ControlField';
+import { CustomizedFieldOverlay } from '@ui/_shared/components/controls/fields/CustomizedFieldOverlay';
 import { Slider } from '@ui/_shared/components/controls/fields/Slider';
 import { Toggle } from '@ui/_shared/components/controls/fields/Toggle';
 import { Select } from '@ui/_shared/components/controls/fields/Select';
@@ -13,6 +14,8 @@ interface FieldViewProps {
   value: ControlValue;
   onChange: (field: ControlField, value: ControlValue) => void;
   disabled?: boolean;
+  /** Whether the sheet's own CSS stopped reading this control's variable. */
+  customized?: boolean;
 }
 
 
@@ -39,6 +42,7 @@ export const FieldView = memo(function FieldView({
   value,
   onChange,
   disabled,
+  customized,
 }: FieldViewProps) {
 
   let control: ReactNode = null;
@@ -116,5 +120,10 @@ export const FieldView = memo(function FieldView({
   }
 
   if (control === null) return null;
-  return withLegend(control, field.legend);
+  return withLegend(
+    <CustomizedFieldOverlay customized={customized === true} label={field.label} controlIds={[field.id]}>
+      {control}
+    </CustomizedFieldOverlay>,
+    field.legend,
+  );
 });

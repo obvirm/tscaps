@@ -15,6 +15,13 @@ import type { PreviewProxyRepository } from '@core/preview/domain/PreviewProxyRe
 import { PreviewProxyResolver } from '@core/preview/services/PreviewProxyResolver';
 import { PreviewResolutionCap } from '@core/preview/services/PreviewResolutionCap';
 import { EditorStorePreviewCutsSource } from '@bootstrap/wiring/EditorStorePreviewCutsSource';
+import type { WorkerErrorMonitor } from '@core/_shared/workers/WorkerErrorMonitor';
+import type { AppErrorClassifier } from '@core/errors/services/AppErrorClassifier';
+import type { AppErrorTelemetryDescriber } from '@core/errors/services/AppErrorTelemetryDescriber';
+import type { StorageFootprintProbe } from '@core/_shared/infrastructure/StorageFootprintProbe';
+import { NonBlockingFailureReporter } from '@core/errors/services/NonBlockingFailureReporter';
+import type { AppNoticeChannel } from '@core/errors/services/AppNoticeChannel';
+import type { TelemetryModule } from '@bootstrap/wiring/telemetry';
 
 const PREVIEW_MAX_LONGEST_SIDE_PX = 1280;
 
@@ -24,6 +31,12 @@ export interface PreviewDependencies {
   readonly previewProxyEnabled: boolean;
   readonly previewSurfaceVariant: PreviewSurfaceVariant;
   readonly transcodeCoordinator: MediaBunnyTranscodeCoordinator;
+  readonly workerErrorMonitor: WorkerErrorMonitor;
+  readonly telemetry: TelemetryModule;
+  readonly appNoticeChannel: AppNoticeChannel;
+  readonly errorClassifier: AppErrorClassifier;
+  readonly errorTelemetryDescriber: AppErrorTelemetryDescriber;
+  readonly storageFootprintProbe: StorageFootprintProbe;
 }
 
 export interface PreviewModule {
@@ -65,15 +78,28 @@ export function bootPreview(deps: PreviewDependencies): PreviewModule {
   const proxyRepository: PreviewProxyRepository = localProxyRepository;
 
   const cutsSource = new EditorStorePreviewCutsSource(deps.store);
-  const surface = buildVideoPreviewSurface(deps.previewSurfaceVariant, cutsSource);
+  const surface = buildVideoPreviewSurface(deps.previewSurfaceVariant, cutsSource, deps.workerErrorMonitor);
   const hiddenTabPauser = new DocumentHiddenPlaybackPauser(surface);
   hiddenTabPauser.install();
   const proxyGenerator = new MediaBunnyPreviewProxyGenerator(
-    new DefaultPreviewProxyOutputStrategyFactory(),
+    new DefaultPreviewProxyOutputStrategyFactory(deps.workerErrorMonitor),
     deps.transcodeCoordinator,
     new FixedPreviewProxyCodecPolicy(),
   );
-  const proxyResolver = new PreviewProxyResolver(proxyRepository, proxyGenerator, deps.previewProxyEnabled);
+  const proxyFallbackReporter = new NonBlockingFailureReporter(
+    deps.telemetry.telemetry,
+    deps.appNoticeChannel,
+    deps.errorClassifier,
+    deps.errorTelemetryDescriber,
+    deps.storageFootprintProbe,
+    'preview_proxy_fallback',
+  );
+  const proxyResolver = new PreviewProxyResolver(
+    proxyRepository,
+    proxyGenerator,
+    proxyFallbackReporter,
+    deps.previewProxyEnabled,
+  );
   return {
     surface,
     proxyRepository,
@@ -86,12 +112,13 @@ export function bootPreview(deps: PreviewDependencies): PreviewModule {
 function buildVideoPreviewSurface(
   variant: PreviewSurfaceVariant,
   cutsSource: EditorStorePreviewCutsSource,
+  workerErrorMonitor: WorkerErrorMonitor,
 ): VideoPreviewSurface {
   if (variant === 'native') {
     return new NativeVideoPreviewSurface(cutsSource);
   }
   const resolutionCap = new PreviewResolutionCap(PREVIEW_MAX_LONGEST_SIDE_PX);
-  const loader = new MediaBunnyPreviewSourceLoader(resolutionCap);
+  const loader = new MediaBunnyPreviewSourceLoader(resolutionCap, workerErrorMonitor);
   return new CanvasVideoPreviewSurface(loader, cutsSource, resolutionCap);
 }
 

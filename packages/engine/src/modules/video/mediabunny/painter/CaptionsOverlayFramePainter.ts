@@ -50,7 +50,7 @@ export class CaptionsOverlayFramePainter implements FramePainter {
       this.overlay = await this.overlayRenderer.render(this.overlayHtml, width, height);
     }
     if (this.topLayer !== null) {
-      await this.topLayer.open(this.document, this.styles, width, height, captionInterval);
+      await this.topLayer.open(width, height);
     }
   }
 

@@ -2,9 +2,8 @@ import { memo, useCallback } from 'react';
 import { MoreHorizontal } from 'lucide-react';
 import type { Document, Line, Segment } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
-import type { WordStyleOverrides } from '@core/captions/domain/WordStyleOverrides';
-import type { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
-import type { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
+import type { ElementStyles } from '@core/elements/domain/ElementStyles';
+import type { BehindActorSegmentOverrideRegistry } from '@core/person-segmentation/domain/BehindActorSegmentOverrideRegistry';
 import type { CutRegistry } from '@core/cuts/domain/CutRegistry';
 import { WordPopover } from '@ui/pages/editor/features/transcript/components/words/WordPopover';
 import { WordChip } from '@ui/pages/editor/features/transcript/components/words/WordChip';
@@ -13,6 +12,7 @@ import { Tooltip } from '@ui/_shared/components/Tooltip/Tooltip';
 import { settingsBtnClass } from '@ui/pages/editor/features/transcript/transcript-classes';
 import { wordTimeBoundsInSegment } from '@ui/pages/editor/features/transcript/utils';
 import { useEngine } from '@ui/_shared/contexts/modules/EngineContext';
+import { useCaptions } from '@ui/_shared/contexts/modules/CaptionsContext';
 
 export interface LineEditItemProps {
   doc: Document;
@@ -27,15 +27,14 @@ export interface LineEditItemProps {
   activeWordId: string | null;
   activePopoverId: string | null;
   sheet: Sheet | null;
-  wordStyleOverrides: WordStyleOverrideRegistry;
-  segmentOverrides: SegmentOverrides;
+  elementStyles: ElementStyles;
+  behindActorOverrides: BehindActorSegmentOverrideRegistry;
   cuts: CutRegistry;
   onActivateWord: (id: string | null) => void;
   onActivatePopover: (id: string | null) => void;
   onEditWordText: (wordId: string, text: string) => void;
   onEditWordTime: (wordId: string, start: number, end: number) => void;
   onEditWordTags: (wordId: string, tagNames: ReadonlySet<string>) => void;
-  onSetWordStyleOverride: (wordId: string, overrides: WordStyleOverrides) => void;
   onDeleteWords: (wordIds: string[]) => void;
   onApplyStructureEdit: (doc: Document) => void;
   onInsertWord: (segIdx: number, lineIdx: number, wordIdx: number) => string;
@@ -48,8 +47,9 @@ export interface LineEditItemProps {
  * reference for words whose overrides did not change, so iterating this
  * line's words is enough to decide.
  */
-function LineEditItemImpl({ doc, segment, line, lineIdx, segIdx, isLastLine, isFirstSegment, isLastSegment, videoDuration, activeWordId, activePopoverId, sheet, wordStyleOverrides, segmentOverrides, cuts, onActivateWord, onActivatePopover, onEditWordText, onEditWordTime, onEditWordTags, onSetWordStyleOverride, onDeleteWords, onApplyStructureEdit, onInsertWord }: LineEditItemProps) {
+function LineEditItemImpl({ doc, segment, line, lineIdx, segIdx, isLastLine, isFirstSegment, isLastSegment, videoDuration, activeWordId, activePopoverId, sheet, elementStyles, behindActorOverrides, cuts, onActivateWord, onActivatePopover, onEditWordText, onEditWordTime, onEditWordTags, onDeleteWords, onApplyStructureEdit, onInsertWord }: LineEditItemProps) {
   const { documentEditor } = useEngine();
+  const { segmentTimeBounds } = useCaptions().services;
   const settingsId = `line:${line.id}`;
   const isSettingsOpen = activePopoverId === settingsId;
 
@@ -82,7 +82,7 @@ function LineEditItemImpl({ doc, segment, line, lineIdx, segIdx, isLastLine, isF
               wordId={word.id}
               text={word.text}
               isActive={isActive}
-              hasOverride={wordStyleOverrides.hasAnyFor(word.id)}
+              hasOverride={elementStyles.has(word.id)}
               onActivate={handleActivateWord}
             />
           );
@@ -94,7 +94,13 @@ function LineEditItemImpl({ doc, segment, line, lineIdx, segIdx, isLastLine, isF
               </span>
             );
           }
-          const bounds = wordTimeBoundsInSegment(doc, segment, word.id, videoDuration);
+          // Only ever reached for the active word, so the lookup runs
+          // once per render rather than once per word on screen.
+          const bounds = wordTimeBoundsInSegment(
+            segment,
+            word.id,
+            segmentTimeBounds.limitsFor(doc, segment.id, videoDuration),
+          );
           return (
             <WordPopover
               key={word.id}
@@ -105,14 +111,12 @@ function LineEditItemImpl({ doc, segment, line, lineIdx, segIdx, isLastLine, isF
               isLastWordInLine={wordIdx === line.words.length - 1}
               sheet={sheet}
               segment={segment}
-              segmentOverrides={segmentOverrides}
-              currentOverrides={wordStyleOverrides.get(word.id)}
+              behindActorOverrides={behindActorOverrides}
               prevWordEnd={bounds.prevEnd}
               nextWordStart={bounds.nextStart}
               onCommitText={(text) => onEditWordText(word.id, text)}
               onCommitTime={(start, end) => onEditWordTime(word.id, start, end)}
               onCommitTags={(names) => onEditWordTags(word.id, names)}
-              onCommitStyleOverrides={(o) => onSetWordStyleOverride(word.id, o)}
               onAddLineBreakAfter={() => onApplyStructureEdit(documentEditor.splitLineAfterWord(doc, segIdx, lineIdx, wordIdx))}
               onJoinWithNextLine={wordIdx === line.words.length - 1 && !isLastLine
                 ? () => onApplyStructureEdit(documentEditor.mergeLineWithNext(doc, segIdx, lineIdx))
@@ -198,22 +202,19 @@ function lineEditItemPropsEqual(prev: LineEditItemProps, next: LineEditItemProps
   if (prev.onEditWordText !== next.onEditWordText) return false;
   if (prev.onEditWordTime !== next.onEditWordTime) return false;
   if (prev.onEditWordTags !== next.onEditWordTags) return false;
-  if (prev.onSetWordStyleOverride !== next.onSetWordStyleOverride) return false;
   if (prev.onDeleteWords !== next.onDeleteWords) return false;
   if (prev.onApplyStructureEdit !== next.onApplyStructureEdit) return false;
   if (prev.onInsertWord !== next.onInsertWord) return false;
-  if (prev.wordStyleOverrides !== next.wordStyleOverrides) {
+  if (prev.elementStyles !== next.elementStyles) {
     for (const word of next.line.words) {
-      if (prev.wordStyleOverrides.get(word.id) !== next.wordStyleOverrides.get(word.id)) return false;
+      if (prev.elementStyles.get(word.id) !== next.elementStyles.get(word.id)) return false;
+      if (word.decoration && prev.elementStyles.get(word.decoration.id) !== next.elementStyles.get(word.decoration.id)) return false;
     }
   }
-  // Only re-render when this segment's overrides change — the
-  // WordPopover's baseline derives from them, so a per-segment edit
-  // elsewhere in the doc must not invalidate this line.
-  if (prev.segmentOverrides !== next.segmentOverrides
-    && prev.segmentOverrides.getStyle(next.segment.id) !== next.segmentOverrides.getStyle(next.segment.id)) {
-    return false;
-  }
+  // Only re-render when this segment's own placement changes — the
+  // word popover's position baseline derives from it, so a segment
+  // placed elsewhere in the doc must not invalidate this line.
+  if (prev.elementStyles.placementOf(next.segment.id) !== next.elementStyles.placementOf(next.segment.id)) return false;
   return true;
 }
 

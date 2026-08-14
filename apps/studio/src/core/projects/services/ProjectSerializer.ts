@@ -1,4 +1,4 @@
-import { Document, NarrationPace, Section, Segment, Line, Word, Tag, TimeFragment, Decoration, type AlignmentConfig } from '@tscaps/engine';
+import { Document, NarrationPace, Section, Segment, Line, Word, Tag, TimeFragment, Decoration, type AlignmentConfig, type TextDirection, type TextDirectionDetector } from '@tscaps/engine';
 import type { TemplateReferenceResolver } from '@core/templates/domain/TemplateReferenceResolver';
 import type { ControlValue } from '@core/templates/domain/definition/ControlField';
 import type { SegmentSplitterConfig } from '@core/segment-splitter/domain/SegmentSplitterConfig';
@@ -7,12 +7,17 @@ import type { EffectConfig } from '@core/effect/domain/EffectConfig';
 import type { TypographyConfig } from '@core/sheets/domain/TypographyConfig';
 import type { RotationConfig } from '@core/sheets/domain/RotationConfig';
 import { ROTATION_DEFAULTS } from '@core/sheets/domain/RotationConfig';
-import { WordStyleOverrideRegistry, type WordStyleOverridesSnapshot } from '@core/captions/domain/WordStyleOverrideRegistry';
-import { SegmentOverrides, type SegmentOverridesSnapshot } from '@core/captions/domain/SegmentOverrides';
+import { TYPOGRAPHY_DEFAULTS } from '@core/sheets/domain/TypographyConfig';
+import { SheetAnimationSet, type SheetAnimationSetSnapshot } from '@core/sheets/domain/SheetAnimationSet';
+import { BehindActorSegmentOverrideRegistry, type BehindActorSegmentOverridesSnapshot } from '@core/person-segmentation/domain/BehindActorSegmentOverrideRegistry';
+import { FrozenSegmentSet, type FrozenSegmentSetSnapshot } from '@core/captions/domain/FrozenSegmentSet';
+import { ElementStyles, type ElementStylesSnapshot } from '@core/elements/domain/ElementStyles';
+import { DocumentElementIdCollector } from '@core/captions/services/DocumentElementIdCollector';
 import { DecorationOverrideRegistry, type DecorationOverridesSnapshot } from '@core/captions/domain/DecorationOverrideRegistry';
 import { CutRegistry, type CutsSnapshot } from '@core/cuts/domain/CutRegistry';
 import type { VideoLayout } from '@core/editor/domain/VideoState';
-import { Sheet } from '@core/sheets/domain/Sheet';
+import { Sheet, HOOK_SHEET_ID } from '@core/sheets/domain/Sheet';
+import type { SheetRole } from '@core/sheets/domain/SheetRole';
 import { StyleValues } from '@core/sheets/domain/StyleValues';
 import type { Template } from '@core/templates/domain/Template';
 import { Project } from '@core/projects/domain/Project';
@@ -26,7 +31,7 @@ import type { ProjectMigrator } from '@core/projects/services/migrations/Project
  * migration step will cause old projects to fail to load with an explicit
  * error.
  */
-export const PROJECT_SCHEMA_VERSION = 10;
+export const PROJECT_SCHEMA_VERSION = 17;
 
 export interface SerializedProject {
   readonly version: number;
@@ -39,8 +44,9 @@ export interface SerializedProject {
   readonly document: SerializedDocument | null;
   readonly sheets: ReadonlyArray<SerializedSheet>;
   readonly activeSheetId: string | null;
-  readonly wordStyleOverrides?: WordStyleOverridesSnapshot;
-  readonly segmentOverrides?: SegmentOverridesSnapshot;
+  readonly behindActorOverrides?: BehindActorSegmentOverridesSnapshot;
+  readonly structurallyEditedSegmentIds?: FrozenSegmentSetSnapshot;
+  readonly elementStyles?: ElementStylesSnapshot;
   readonly decorationOverrides?: DecorationOverridesSnapshot;
   readonly cuts?: CutsSnapshot;
 }
@@ -62,6 +68,8 @@ interface SerializedSegment {
   readonly structureTags: ReadonlyArray<string>;
   readonly lines: ReadonlyArray<SerializedLine>;
   readonly customTime?: { readonly start: number; readonly end: number };
+  /** Absent on payloads written while an Effect's padding still lived in `customTime`. */
+  readonly effectTime?: { readonly start: number; readonly end: number };
 }
 
 interface SerializedLine {
@@ -100,8 +108,12 @@ interface SerializedSheet {
   readonly lineSplitterConfig: LineSplitterConfig;
   readonly alignmentConfig: AlignmentConfig;
   readonly effectConfigs: ReadonlyArray<EffectConfig>;
+  readonly animations?: SheetAnimationSetSnapshot;
   readonly cssOverride: string | null;
   readonly filtersSvgOverride: string | null;
+  readonly linkGroupId?: string | null;
+  readonly role?: SheetRole | null;
+  readonly textDirection?: TextDirection;
 }
 
 /**
@@ -118,11 +130,19 @@ export class ProjectSerializer {
   constructor(
     private readonly templateReferenceResolver: TemplateReferenceResolver,
     private readonly migrator: ProjectMigrator,
+    private readonly textDirectionDetector: TextDirectionDetector,
+    private readonly documentElementIdCollector: DocumentElementIdCollector,
   ) {}
 
   serialize(project: Project): SerializedProject {
-    const wordOverrides = project.wordStyleOverrides.toRecord();
-    const segmentOverrides = project.segmentOverrides.toSnapshot();
+    const behindActorOverrides = project.behindActorOverrides.toSnapshot();
+    const structurallyEditedSegmentIds = project.frozenSegments.toSnapshot();
+    // Deleting a word leaves its fragment behind — nothing else is keyed
+    // to that id — so it would ride every save from here on, addressing
+    // an element that no longer exists.
+    const elementStyles = project.document
+      ? project.elementStyles.restrictedTo(this.documentElementIdCollector.collect(project.document))
+      : project.elementStyles;
     const decorationOverrides = project.decorationOverrides.toRecord();
     const cuts = project.cuts.toSnapshot();
     return {
@@ -136,8 +156,9 @@ export class ProjectSerializer {
       document: project.document ? this.serializeDocument(project.document) : null,
       sheets: project.sheets.map(s => this.serializeSheet(s)),
       activeSheetId: project.activeSheetId,
-      ...(Object.keys(wordOverrides).length > 0 ? { wordStyleOverrides: wordOverrides } : {}),
-      ...(!project.segmentOverrides.isEmpty() ? { segmentOverrides } : {}),
+      ...(!project.behindActorOverrides.isEmpty() ? { behindActorOverrides } : {}),
+      ...(structurallyEditedSegmentIds.length > 0 ? { structurallyEditedSegmentIds } : {}),
+      ...(!elementStyles.isEmpty() ? { elementStyles: elementStyles.toSnapshot() } : {}),
       ...(Object.keys(decorationOverrides).length > 0 ? { decorationOverrides } : {}),
       ...(cuts.length > 0 ? { cuts } : {}),
     };
@@ -157,13 +178,21 @@ export class ProjectSerializer {
       data as Record<string, unknown>,
       PROJECT_SCHEMA_VERSION,
     ) as unknown as SerializedProject;
-    const sheets = await Promise.all(migrated.sheets.map(s => this.deserializeSheet(s)));
-    const wordOverrides = migrated.wordStyleOverrides
-      ? WordStyleOverrideRegistry.fromRecord(migrated.wordStyleOverrides)
-      : WordStyleOverrideRegistry.empty();
-    const segmentOverrides = migrated.segmentOverrides
-      ? SegmentOverrides.fromSnapshot(migrated.segmentOverrides)
-      : SegmentOverrides.empty();
+    const document = migrated.document ? this.deserializeDocument(migrated.document) : null;
+    const fallbackDirection = this.resolveFallbackDirection(migrated, document);
+    const sheets = await Promise.all(
+      migrated.sheets.map(s => this.deserializeSheet(s, fallbackDirection)),
+    );
+    const behindActorOverrides = migrated.behindActorOverrides
+      ? BehindActorSegmentOverrideRegistry.fromSnapshot(migrated.behindActorOverrides)
+      : BehindActorSegmentOverrideRegistry.empty();
+    const elementStyles = migrated.elementStyles
+      ? ElementStyles.fromSnapshot(migrated.elementStyles)
+      : ElementStyles.empty();
+    const frozenSegments = (migrated.structurallyEditedSegmentIds
+      ? FrozenSegmentSet.fromSnapshot(migrated.structurallyEditedSegmentIds)
+      : FrozenSegmentSet.empty())
+      .replacingStyled(elementStyles.segmentIds());
     const decorationOverrides = migrated.decorationOverrides
       ? DecorationOverrideRegistry.fromRecord(migrated.decorationOverrides)
       : DecorationOverrideRegistry.empty();
@@ -177,11 +206,12 @@ export class ProjectSerializer {
       new Date(migrated.updatedAt),
       migrated.video,
       migrated.videoLayout,
-      migrated.document ? this.deserializeDocument(migrated.document) : null,
+      document,
       sheets,
       migrated.activeSheetId,
-      wordOverrides,
-      segmentOverrides,
+      behindActorOverrides,
+      frozenSegments,
+      elementStyles,
       decorationOverrides,
       cuts,
       thumbnail,
@@ -227,6 +257,9 @@ export class ProjectSerializer {
       ...(segment.customTime
         ? { customTime: { start: segment.customTime.start, end: segment.customTime.end } }
         : {}),
+      ...(segment.effectTime
+        ? { effectTime: { start: segment.effectTime.start, end: segment.effectTime.end } }
+        : {}),
     };
   }
 
@@ -235,8 +268,13 @@ export class ProjectSerializer {
       lines: data.lines.map(line => this.deserializeLine(line)),
       structureTags: this.tagsFromArray(data.structureTags),
       id: data.id,
-      customTime: data.customTime ? new TimeFragment(data.customTime.start, data.customTime.end) : null,
+      customTime: this.timeFrom(data.customTime),
+      effectTime: this.timeFrom(data.effectTime),
     });
+  }
+
+  private timeFrom(data: { readonly start: number; readonly end: number } | undefined): TimeFragment | null {
+    return data ? new TimeFragment(data.start, data.end) : null;
   }
 
   private serializeLine(line: Line): SerializedLine {
@@ -314,10 +352,28 @@ export class ProjectSerializer {
       effectConfigs: sheet.effectConfigs,
       cssOverride: sheet.cssOverride,
       filtersSvgOverride: sheet.filtersSvgOverride,
+      textDirection: sheet.textDirection,
+      ...(sheet.animations.isEmpty() ? {} : { animations: sheet.animations.toSnapshot() }),
+      ...(sheet.linkGroupId !== null ? { linkGroupId: sheet.linkGroupId } : {}),
+      ...(sheet.role !== null ? { role: sheet.role } : {}),
     };
   }
 
-  private async deserializeSheet(data: SerializedSheet): Promise<Sheet> {
+  /**
+   * Direction to fall back on for a sheet that carries none. A payload
+   * written before the field existed holds no decision to respect, so
+   * the transcript answers for it; anything newer already stores one.
+   */
+  private resolveFallbackDirection(
+    project: SerializedProject,
+    document: Document | null,
+  ): TextDirection {
+    const anySheetMissesIt = project.sheets.some(sheet => sheet.textDirection === undefined);
+    if (!anySheetMissesIt || !document) return 'ltr';
+    return this.textDirectionDetector.detect(document.getText());
+  }
+
+  private async deserializeSheet(data: SerializedSheet, fallbackDirection: TextDirection): Promise<Sheet> {
     const template = await this.templateReferenceResolver.resolve(data.templateId);
     const styleValues = this.buildSheetStyleValues(template, data);
     const variantIndex = this.resolveVariantIndex(template, data);
@@ -328,14 +384,23 @@ export class ProjectSerializer {
       template,
       variantIndex,
       styleValues,
-      typographyConfig: data.typographyConfig,
+      // Layered over the defaults rather than taken whole: a payload written
+      // before a typography field existed carries no value for it, and the
+      // sheet would otherwise hold `undefined` behind a non-optional type.
+      typographyConfig: { ...TYPOGRAPHY_DEFAULTS, ...data.typographyConfig },
       rotationConfig: data.rotationConfig ?? ROTATION_DEFAULTS,
       segmentSplitterConfigs: data.segmentSplitterConfigs,
       lineSplitterConfig: data.lineSplitterConfig,
       alignmentConfig: data.alignmentConfig,
       effectConfigs: data.effectConfigs,
+      animations: SheetAnimationSet.fromSnapshot(data.animations),
       cssOverride: data.cssOverride,
       filtersSvgOverride: data.filtersSvgOverride,
+      linkGroupId: data.linkGroupId ?? null,
+      // Payloads written before roles existed still identify the
+      // auto-created hook sheet by its fixed id.
+      role: data.role ?? (data.id === HOOK_SHEET_ID ? 'hook' : null),
+      textDirection: data.textDirection ?? fallbackDirection,
     });
   }
 

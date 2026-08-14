@@ -1,9 +1,7 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import type { EditorStore } from '@core/editor/store/EditorStore';
-import type { EditorState } from '@core/editor/domain/EditorState';
 import type { OriginalVideoDownloadStatus } from '@core/projects/domain/OriginalVideoDownloadStatus';
 import type { OriginalVideoDownloadStore } from '@core/projects/store/OriginalVideoDownloadStore';
-import { ProjectSaveFailedError } from '@core/projects/domain/errors/ProjectSaveFailedError';
+import { PreviewLoadFailedError } from '@core/preview/domain/errors/PreviewLoadFailedError';
 import { OriginalVideoDownloadBanner } from '@ui/pages/editor/components/OriginalVideoDownloadBanner';
 import type { PlaybackActions } from '@ui/pages/editor/contexts/PlaybackContext';
 import type { TemplateLibraryStore, TemplateLibraryView } from '@core/templates/store/TemplateLibraryStore';
@@ -15,24 +13,34 @@ import { usePreview } from '@ui/_shared/contexts/modules/PreviewContext';
 import { SubtitleOverlayController } from '@presentation/editor/controllers/SubtitleOverlayController';
 import { OverlayManipulationController } from '@presentation/editor/controllers/OverlayManipulationController';
 import { OverlaySelectionController } from '@presentation/editor/controllers/OverlaySelectionController';
+import { ElementInspectorSelectionController } from '@presentation/editor/controllers/ElementInspectorSelectionController';
 import { PlaybackTimeBinder } from '@presentation/editor/controllers/PlaybackTimeBinder';
+import { EditorErrorReporter } from '@presentation/editor/controllers/EditorErrorReporter';
+import { VideoDurationMissingCheck } from '@presentation/editor/services/error-checks/VideoDurationMissingCheck';
 import { PlaybackScreenWakeLockController } from '@presentation/editor/controllers/PlaybackScreenWakeLockController';
 import { ScreenWakeLock } from '@presentation/editor/controllers/ScreenWakeLock';
 import { MainVideoStreamCaptureController } from '@presentation/editor/controllers/MainVideoStreamCaptureController';
-import { WordStyleBaselineResolver } from '@presentation/editor/services/WordStyleBaselineResolver';
+import { ElementAlignmentResolver } from '@presentation/editor/services/ElementAlignmentResolver';
 import { KeyboardShortcutLabeler } from '@presentation/editor/services/KeyboardShortcutLabeler';
 import { SnapZoneResolver } from '@presentation/editor/services/SnapZoneResolver';
 import { DragGeometryResolver } from '@presentation/editor/services/DragGeometryResolver';
+import { AlignmentGeometryResolver } from '@presentation/editor/services/AlignmentGeometryResolver';
+import { CaptionContentBoxMeasurer } from '@presentation/editor/services/CaptionContentBoxMeasurer';
+import { OverlayChromeRepositioner } from '@presentation/editor/services/OverlayChromeRepositioner';
+import { OverlayChromeRepositionerProvider } from '@ui/pages/editor/features/overlay/contexts/OverlayChromeRepositionerContext';
 import { ResizeGeometryResolver } from '@presentation/editor/services/ResizeGeometryResolver';
 import { RotationGeometryResolver } from '@presentation/editor/services/RotationGeometryResolver';
-import { FontSizeBounds } from '@presentation/editor/services/FontSizeBounds';
+import { ElementControlRange } from '@presentation/editor/services/ElementControlRange';
 import { DragTransformPainter } from '@presentation/editor/services/DragTransformPainter';
 import { NextClickSuppressor } from '@presentation/editor/services/NextClickSuppressor';
 import { EditorPage } from '@ui/pages/editor/components/EditorPage';
 import { ProjectLoadingIndicator } from '@ui/pages/editor/components/ProjectLoadingIndicator';
+import { PreviewLoadFailedDialog } from '@ui/pages/editor/components/PreviewLoadFailedDialog';
 import { LeaveWithUnsavedChangesDialog } from '@ui/pages/editor/components/dialogs/LeaveWithUnsavedChangesDialog';
+import { useEditorState } from '@ui/_shared/hooks/useEditorState';
 import { EditorStoreProvider } from '@ui/_shared/contexts/EditorStoreContext';
-import { WordStyleBaselineProvider } from '@ui/pages/editor/contexts/WordStyleBaselineContext';
+import { useEditorWorkspaceStore } from '@ui/pages/editor/contexts/EditorWorkspaceContext';
+import { ElementAlignmentProvider } from '@ui/pages/editor/contexts/ElementAlignmentContext';
 import { KeyboardShortcutLabelerProvider } from '@ui/pages/editor/contexts/KeyboardShortcutLabelerContext';
 import { SheetOverlayArtifactsProvider } from '@ui/pages/editor/contexts/SheetOverlayArtifactsContext';
 import { TemplatePreviewArtifactsProvider } from '@ui/pages/editor/contexts/TemplatePreviewArtifactsContext';
@@ -44,7 +52,9 @@ import { useProjects } from '@ui/_shared/contexts/modules/ProjectsContext';
 import { useTemplates } from '@ui/_shared/contexts/modules/TemplatesContext';
 import { useExport } from '@ui/_shared/contexts/modules/ExportContext';
 import { useEditor } from '@ui/_shared/contexts/modules/EditorContext';
-import { useCaptions } from '@ui/_shared/contexts/modules/CaptionsContext';
+import { useErrors } from '@ui/_shared/contexts/modules/ErrorsContext';
+import { useTelemetry } from '@ui/_shared/contexts/modules/TelemetryContext';
+import { useElements } from '@ui/_shared/contexts/modules/ElementsContext';
 import { useCuts } from '@ui/_shared/contexts/modules/CutsContext';
 import { useSheets } from '@ui/_shared/contexts/modules/SheetsContext';
 import { useRendering } from '@ui/_shared/contexts/modules/RenderingContext';
@@ -67,17 +77,6 @@ function useSavedStatusAutoReset(
     const handle = setTimeout(() => setStatus('idle'), SAVED_PILL_VISIBLE_MS);
     return () => clearTimeout(handle);
   }, [status, setStatus]);
-}
-
-function useEditorSnapshot(store: EditorStore): EditorState {
-  const [state, setState] = useState(() => store.snapshot());
-  useEffect(() => {
-    const update = () => setState(store.snapshot());
-    store.addEventListener('change', update);
-    update();
-    return () => store.removeEventListener('change', update);
-  }, [store]);
-  return state;
 }
 
 function useTemplateLibraryView(
@@ -141,16 +140,16 @@ export function EditorHost({
   onBack,
 }: EditorHostProps) {
   const editor = useEditor();
-  const captions = useCaptions();
+  const elements = useElements();
   const cuts = useCuts();
   const sheets = useSheets();
   const projects = useProjects();
   const templates = useTemplates();
   const exports = useExport();
   const exportFeedback = useExportFeedback();
-  const { svgFilterDefinitionsResolver, sheetCssVarsBuilder, segmentPaddingCssRuleBuilder, typographyCssVarBuilder, rotationCssVarBuilder, styleValuesCssVarsBuilder } = useRendering();
+  const { svgFilterDefinitionsResolver, sheetCssVarsBuilder, segmentPaddingCssRuleBuilder, layeredCaptionCssBuilder, typographyCssVarBuilder, rotationCssVarBuilder, styleValuesCssVarsBuilder, horizontalPlacementResolver } = useRendering();
   const store = editor.store;
-  const state = useEditorSnapshot(store);
+  const state = useEditorState();
   const toggleTemplateFavorite = useCallback(
     (id: string) => {
       templates.actions.toggleFavorite.execute(id).catch((err) => {
@@ -173,40 +172,62 @@ export function EditorHost({
     overlayController.start();
     return () => overlayController.stop();
   }, [overlayController]);
+  const chromeRepositioner = useMemo(() => new OverlayChromeRepositioner(store), [store]);
+  useEffect(() => {
+    chromeRepositioner.start();
+    return () => chromeRepositioner.stop();
+  }, [chromeRepositioner]);
   const selectionController = useMemo(() => new OverlaySelectionController(), []);
   useEffect(() => {
     selectionController.start();
     return () => selectionController.stop();
   }, [selectionController]);
+  const workspaceStore = useEditorWorkspaceStore();
+  const inspectorSelectionController = useMemo(
+    () => new ElementInspectorSelectionController(selectionController, workspaceStore),
+    [selectionController, workspaceStore],
+  );
+  useEffect(() => {
+    inspectorSelectionController.start();
+    return () => inspectorSelectionController.stop();
+  }, [inspectorSelectionController]);
+  const elementAlignmentResolver = useMemo(
+    () => new ElementAlignmentResolver(horizontalPlacementResolver),
+    [horizontalPlacementResolver],
+  );
   const manipulationController = useMemo(
     () => new OverlayManipulationController(
       store,
       sheets.actions.style.updateAlignment,
       sheets.actions.style.updateTypography,
       sheets.actions.style.updateRotation,
-      captions.actions.words.setStyleOverride,
-      captions.actions.words.clearAlignmentOverride,
-      captions.actions.segments.setStyleOverride,
+      elements.actions.setPlacement,
+      elements.services.styledElementCatalog,
+      elements.actions.setField,
       new SnapZoneResolver(),
+      horizontalPlacementResolver,
       new DragGeometryResolver(),
+      new AlignmentGeometryResolver(horizontalPlacementResolver),
+      elementAlignmentResolver,
+      sheets.linkedSheetsSync,
+      new CaptionContentBoxMeasurer(),
       new ResizeGeometryResolver(),
       new RotationGeometryResolver(),
-      new FontSizeBounds(),
+      new ElementControlRange(),
       new DragTransformPainter(),
       new NextClickSuppressor(),
       selectionController,
     ),
-    [store, sheets, captions, selectionController],
+    [store, sheets, elements, selectionController, horizontalPlacementResolver, elementAlignmentResolver],
   );
   useEffect(() => {
     manipulationController.start();
     return () => manipulationController.stop();
   }, [manipulationController]);
-  const wordStyleBaselineResolver = useMemo(() => new WordStyleBaselineResolver(), []);
   const keyboardShortcutLabeler = useMemo(() => new KeyboardShortcutLabeler(), []);
   const sheetOverlayArtifactsBuilder = useMemo(
-    () => new SheetOverlayArtifactsBuilder(sheetCssVarsBuilder, svgFilterDefinitionsResolver, segmentPaddingCssRuleBuilder),
-    [sheetCssVarsBuilder, svgFilterDefinitionsResolver, segmentPaddingCssRuleBuilder],
+    () => new SheetOverlayArtifactsBuilder(sheetCssVarsBuilder, svgFilterDefinitionsResolver, segmentPaddingCssRuleBuilder, layeredCaptionCssBuilder),
+    [sheetCssVarsBuilder, svgFilterDefinitionsResolver, segmentPaddingCssRuleBuilder, layeredCaptionCssBuilder],
   );
   const templatePreviewArtifactsBuilder = useMemo(
     () => new TemplatePreviewArtifactsBuilder(typographyCssVarBuilder, rotationCssVarBuilder, styleValuesCssVarsBuilder),
@@ -217,6 +238,17 @@ export function EditorHost({
     playbackTimeBinder.start();
     return () => playbackTimeBinder.stop();
   }, [playbackTimeBinder]);
+  const telemetry = useTelemetry();
+  const appNoticeChannel = useErrors().appNoticeChannel;
+  const editorErrorChecks = useMemo(() => [new VideoDurationMissingCheck()], []);
+  const editorErrorReporter = useMemo(
+    () => new EditorErrorReporter(store, editorErrorChecks, telemetry, appNoticeChannel),
+    [store, editorErrorChecks, telemetry, appNoticeChannel],
+  );
+  useEffect(() => {
+    editorErrorReporter.start();
+    return () => editorErrorReporter.stop();
+  }, [editorErrorReporter]);
   const playbackWakeLock = useMemo(
     () => new PlaybackScreenWakeLockController(store, new ScreenWakeLock()),
     [store],
@@ -282,6 +314,7 @@ export function EditorHost({
       } catch (err) {
         if (cancelled) return;
         console.error('Failed to load video into preview surface', err);
+        store.patch({ error: new PreviewLoadFailedError({ cause: err }) });
       }
     })();
     return () => { cancelled = true; };
@@ -325,6 +358,8 @@ export function EditorHost({
     nextSegment: () => controllerRef.current?.nextSegment(),
     scheduleAudioMuteAt: (sourceSec: number) => controllerRef.current?.scheduleAudioMuteAt(sourceSec),
     cancelScheduledAudioMute: () => controllerRef.current?.cancelScheduledAudioMute(),
+    scheduleStopAt: (sourceSec: number) => controllerRef.current?.scheduleStopAt(sourceSec),
+    cancelScheduledStop: () => controllerRef.current?.cancelScheduledStop(),
   }), []);
 
   const dismissToast = useCallback(() => exportFeedback.dismissToast(), [exportFeedback]);
@@ -348,9 +383,9 @@ export function EditorHost({
     } catch (cause) {
       console.error('Save failed', cause);
       setSaveStatus('error');
-      store.patch({ error: new ProjectSaveFailedError({ cause }) });
+      projects.saveFailureReporter.report(cause);
     }
-  }, [projects, store]);
+  }, [projects]);
 
   const hasVideoLoaded = state.video.fileName !== null;
   const canSave = state.projectId !== null && hasVideoLoaded;
@@ -398,9 +433,10 @@ export function EditorHost({
       <PlaybackProvider value={playback}>
         <MainVideoStreamProvider value={mainVideoStream}>
          <KeyboardShortcutLabelerProvider value={keyboardShortcutLabeler}>
-          <WordStyleBaselineProvider value={wordStyleBaselineResolver}>
+          <ElementAlignmentProvider value={elementAlignmentResolver}>
            <SheetOverlayArtifactsProvider value={sheetOverlayArtifactsBuilder}>
             <TemplatePreviewArtifactsProvider value={templatePreviewArtifactsBuilder}>
+            <OverlayChromeRepositionerProvider value={chromeRepositioner}>
             <EditorPage
               state={state}
               containerRef={videoRef}
@@ -409,6 +445,7 @@ export function EditorHost({
               manipulationController={manipulationController}
               selectionController={selectionController}
               playbackTimeBinder={playbackTimeBinder}
+              appNoticeChannel={appNoticeChannel}
               toastOpen={toastOpen}
               postExportPrompt={postExportPrompt}
               exportDisabled={exportRunning || originalVideoDownloadFailed}
@@ -429,9 +466,10 @@ export function EditorHost({
               onLeaveWithoutSaving={leaveWithoutSaving}
               onSaveAndLeave={saveAndLeave}
             />
+            </OverlayChromeRepositionerProvider>
             </TemplatePreviewArtifactsProvider>
            </SheetOverlayArtifactsProvider>
-          </WordStyleBaselineProvider>
+          </ElementAlignmentProvider>
          </KeyboardShortcutLabelerProvider>
         </MainVideoStreamProvider>
       </PlaybackProvider>
@@ -439,6 +477,9 @@ export function EditorHost({
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-surface-0">
           <ProjectLoadingIndicator downloadStatus={originalVideoDownload} />
         </div>
+      )}
+      {state.error?.name === 'PreviewLoadFailedError' && (
+        <PreviewLoadFailedDialog error={state.error} onBackToProjects={onBack} />
       )}
     </EditorStoreProvider>
   );

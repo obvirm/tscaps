@@ -1,4 +1,5 @@
 import type { Transcriber, TranscriberOptions, TranscriberProgressEvent } from '@tscaps/engine';
+import { WorkerBoundaryError } from '@core/_shared/workers/WorkerBoundaryError';
 
 export interface SerializedWord {
   text: string;
@@ -6,17 +7,23 @@ export interface SerializedWord {
   end: number;
 }
 
+export interface SerializedUntranscribedRegion {
+  start: number;
+  end: number;
+}
+
 export type TranscriberWorkerInbound = {
   type: 'transcribe';
-  audio: Blob;
+  audio: ArrayBuffer;
   options?: TranscriberOptions;
   transcriberConfig?: unknown;
 };
 
 export type TranscriberWorkerOutbound =
   | { type: 'progress'; event: TranscriberProgressEvent }
-  | { type: 'result'; words: SerializedWord[] }
-  | { type: 'error'; message: string };
+  | { type: 'result'; words: SerializedWord[]; untranscribedRegions: SerializedUntranscribedRegion[] }
+  | { type: 'assets-not-kept'; message: string; name: string }
+  | { type: 'error'; message: string; name: string };
 
 /**
  * Worker-side counterpart of `WorkerTranscriber`. Receives transcription
@@ -43,11 +50,21 @@ export class TranscriberWorkerHost {
     self.addEventListener('message', this.handleMessage);
   }
 
+  /**
+   * Tells the owner that the transcriber could not keep the assets it
+   * downloaded, so the next session will download them again. Says
+   * nothing about the run in flight, which is unaffected and may not
+   * even exist yet.
+   */
+  reportAssetsNotKept(error: unknown): void {
+    this.post({ type: 'assets-not-kept', ...WorkerBoundaryError.describe(error, 'Downloaded assets were not kept') });
+  }
+
   private readonly handleMessage = (event: MessageEvent<TranscriberWorkerInbound>): void => {
     const data = event.data;
     if (data.type !== 'transcribe') return;
     const transcriber = this.resolveTranscriber(data.transcriberConfig);
-    void this.run(transcriber, data.audio, data.options);
+    void this.run(transcriber, new Blob([data.audio]), data.options);
   };
 
   private resolveTranscriber(config: unknown): Transcriber {
@@ -67,6 +84,11 @@ export class TranscriberWorkerHost {
     audio: Blob,
     options?: TranscriberOptions,
   ): Promise<void> {
+    // Rebound on every request so a previous run's regions never leak
+    // into the next result.
+    const untranscribedRegions: SerializedUntranscribedRegion[] = [];
+    transcriber.onUntranscribedRegion = (region) =>
+      untranscribedRegions.push({ start: region.startSeconds, end: region.endSeconds });
     try {
       const document = await transcriber.transcribe(audio, options);
       const words = document.getWords().map((w) => ({
@@ -74,12 +96,11 @@ export class TranscriberWorkerHost {
         start: w.time.start,
         end: w.time.end,
       }));
-      this.post({ type: 'result', words });
+      this.post({ type: 'result', words, untranscribedRegions });
     } catch (err) {
       // Log here so the stack survives — postMessage strips it to a string.
       console.error('[transcribe worker] transcription failed', err);
-      const message = err instanceof Error ? err.message : 'Transcription failed';
-      this.post({ type: 'error', message });
+      this.post({ type: 'error', ...WorkerBoundaryError.describe(err, 'Transcription failed') });
     }
   }
 

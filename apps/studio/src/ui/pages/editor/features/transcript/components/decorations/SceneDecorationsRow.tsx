@@ -2,8 +2,6 @@ import { memo, useMemo, useState } from 'react';
 import { SmilePlus } from 'lucide-react';
 import type { Segment, Word } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
-import type { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
-import type { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
 import type { DecorationOverrideRegistry } from '@core/captions/domain/DecorationOverrideRegistry';
 import { Popover } from '@ui/_shared/components/Popover/Popover';
 import { usePopoverNav } from '@ui/_shared/components/Popover/usePopoverNav';
@@ -11,13 +9,10 @@ import { EmojiPopover } from '@ui/pages/editor/features/transcript/components/de
 import { EmojiPickerScreen } from '@ui/pages/editor/features/transcript/components/decorations/EmojiPickerScreen';
 import { useCaptions } from '@ui/_shared/contexts/modules/CaptionsContext';
 import { useSheets } from '@ui/_shared/contexts/modules/SheetsContext';
-import { useWordStyleBaselineResolver } from '@ui/pages/editor/contexts/WordStyleBaselineContext';
 
 interface SceneDecorationsRowProps {
   segment: Segment;
   sheet: Sheet | null;
-  wordStyleOverrides: WordStyleOverrideRegistry;
-  segmentOverrides: SegmentOverrides;
   decorationOverrides: DecorationOverrideRegistry;
 }
 
@@ -72,7 +67,7 @@ const ADD_CHIP_CLASS =
  * popover wiring depends on it.
  */
 export const SceneDecorationsRow = memo(function SceneDecorationsRow({
-  segment, sheet, wordStyleOverrides, segmentOverrides, decorationOverrides,
+  segment, sheet, decorationOverrides,
 }: SceneDecorationsRowProps) {
   const { decorationFilter } = useSheets();
   const visibleSegment = useMemo(
@@ -95,8 +90,6 @@ export const SceneDecorationsRow = memo(function SceneDecorationsRow({
           segment={segment}
           word={word}
           sheet={sheet}
-          wordStyleOverrides={wordStyleOverrides}
-          segmentOverrides={segmentOverrides}
           decorationOverrides={decorationOverrides}
         />
       ))}
@@ -108,30 +101,19 @@ interface SceneEmojiChipProps {
   segment: Segment;
   word: Word;
   sheet: Sheet;
-  wordStyleOverrides: WordStyleOverrideRegistry;
-  segmentOverrides: SegmentOverrides;
   decorationOverrides: DecorationOverrideRegistry;
 }
 
-function SceneEmojiChip({
-  segment, word, sheet, wordStyleOverrides, segmentOverrides, decorationOverrides,
-}: SceneEmojiChipProps) {
+function SceneEmojiChip({ segment, word, sheet, decorationOverrides }: SceneEmojiChipProps) {
   const captions = useCaptions();
-  const baselineResolver = useWordStyleBaselineResolver();
   const [open, setOpen] = useState(false);
 
   const decoration = word.decoration!;
 
   const popoverData = useMemo(() => {
     const override = decorationOverrides.get(decoration.id);
-    const styleOverrides = wordStyleOverrides.get(decoration.id);
-    const styleBaseline = {
-      ...baselineResolver.decorationTypographyBaseline(sheet, segment.id, segmentOverrides),
-      ...wordStyleOverrides.get(word.id),
-    };
-    const inheritedAlignment = baselineResolver.segmentEffectiveAlignment(sheet, segment.id, segmentOverrides);
-    return { override, styleOverrides, styleBaseline, inheritedAlignment };
-  }, [decoration.id, word.id, sheet, segment.id, segmentOverrides, wordStyleOverrides, decorationOverrides, baselineResolver]);
+    return { override, ancestorIds: [word.id, segment.id] };
+  }, [decoration.id, word.id, segment.id, decorationOverrides]);
 
   return (
     <EmojiPopover
@@ -143,11 +125,9 @@ function SceneEmojiChip({
         </button>
       }
       decoration={decoration}
-      inheritedAlignment={popoverData.inheritedAlignment}
-      styleOverrides={popoverData.styleOverrides}
-      styleBaseline={popoverData.styleBaseline}
+      sheet={sheet}
+      ancestorIds={popoverData.ancestorIds}
       onCommitGlyph={(glyph) => captions.actions.decorations.setOverride.execute(decoration.id, { ...popoverData.override, glyph })}
-      onCommitStyleOverrides={(o) => captions.actions.words.setStyleOverride.execute(decoration.id, o)}
       onDelete={() => captions.actions.decorations.clear.execute(decoration.id)}
     />
   );

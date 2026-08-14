@@ -9,10 +9,17 @@ const VAR_REF_RE = /var\(\s*(--[a-zA-Z_][a-zA-Z0-9_-]*)\s*(?:,\s*([^)]*?))?\s*\)
  * scope; unresolved references are left in place so attributes that
  * are CSS properties (e.g. `flood-color`) can still resolve via the
  * host document's CSS variable inheritance after the filter mounts.
+ *
+ * `attributes` holds everything the element declared except its id,
+ * which is reassigned per render scope. They are not decoration: the
+ * filter region (`x` / `y` / `width` / `height`) decides how far
+ * beyond its element a filter may paint, so a blur whose region is
+ * dropped ends in a straight cut instead of fading out.
  */
 export class SvgFilter {
   constructor(
     readonly id: string,
+    readonly attributes: ReadonlyMap<string, string>,
     private readonly source: string,
   ) {}
 

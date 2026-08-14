@@ -9,6 +9,7 @@ import { bootEngine } from '@bootstrap/wiring/engine';
 import { bootBrowserSupport } from '@bootstrap/wiring/browser-support';
 import { bootEditor, bootEditorStore } from '@bootstrap/wiring/editor';
 import { bootCaptions } from '@bootstrap/wiring/captions';
+import { bootElements } from '@bootstrap/wiring/elements';
 import { bootCuts } from '@bootstrap/wiring/cuts';
 import { bootPreview, buildVideoProxiesIndexedDbStoreDefinition } from '@bootstrap/wiring/preview';
 import type { PreviewSurfaceVariant } from '@core/preview/domain/VideoPreviewSurface';
@@ -27,6 +28,8 @@ import { bootVideos, buildVideosIndexedDbStoreDefinition } from '@bootstrap/wiri
 import { bootTranscription } from '@bootstrap/wiring/transcription';
 import { bootTagging } from '@bootstrap/wiring/tagging';
 import { bootPreprocessing, buildPreprocessingProgressStore } from '@bootstrap/wiring/preprocessing';
+import type { TranscriptionAudioLengthPolicy } from '@core/transcription/domain/TranscriptionAudioLengthPolicy';
+import { NoOpTranscriptionAudioLengthPolicy } from '@core/transcription/infrastructure/NoOpTranscriptionAudioLengthPolicy';
 import {
   bootPersonSegmentation,
   buildPersonSegmentationCacheIndexedDbStoreDefinition,
@@ -48,6 +51,7 @@ import { BehindActorPreviewSupportChecker } from '@core/person-segmentation/serv
 import { bootRendering } from '@bootstrap/wiring/rendering';
 import { bootRouting } from '@bootstrap/wiring/routing';
 import { bootTelemetry } from '@bootstrap/wiring/telemetry';
+import { bootErrors } from '@bootstrap/wiring/errors';
 import { isProfilingEnabled, setupProfiler, instrumentExportLifecycle } from '@bootstrap/editor/profiler';
 import { IndexedDbBlockedError } from '@core/_shared/infrastructure/IndexedDbClient';
 
@@ -114,6 +118,7 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
       buildPersonSegmentationCacheIndexedDbStoreDefinition(),
     ],
   });
+  const errors = bootErrors();
   const telemetry = bootTelemetry({
     userAgentInspector: utils.userAgentInspector,
     appVersion: opts.appVersion,
@@ -126,7 +131,6 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
 
   const editorStore = bootEditorStore({
     localStorageClient: utils.localStorageClient,
-    userAgentInspector: utils.userAgentInspector,
   });
   const templates = await bootTemplates({
     localStorageClient: utils.localStorageClient,
@@ -177,7 +181,16 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
     deriver: editor.deriver,
     refresh: editor.refresh,
   });
-  const cuts = bootCuts({ store: editor.store });
+  const elements = bootElements({
+    store: editor.store,
+    refresh: editor.refresh,
+    animationCatalog: rendering.animationCatalog,
+    animationFieldCatalog: rendering.animationFieldCatalog,
+    controlCssWriter: rendering.controlCssWriter,
+    animationCssWriter: rendering.animationCssWriter,
+    elementDescendantResolver: captions.services.elementDescendantResolver,
+  });
+  const cuts = bootCuts({ store: editor.store, localStorageClient: utils.localStorageClient });
   // The proxy pipeline is meaningless on the native surface — the
   // `<video>` element plays the source blob verbatim and no proxy
   // is ever consumed. Both the preview resolver and the preprocessing
@@ -189,6 +202,12 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
     previewProxyEnabled: effectivePreviewProxyEnabled,
     previewSurfaceVariant: opts.previewSurfaceVariant,
     transcodeCoordinator: engine.transcodeCoordinator,
+    workerErrorMonitor: errors.workerErrorMonitor,
+    telemetry,
+    appNoticeChannel: errors.appNoticeChannel,
+    errorClassifier: errors.errorClassifier,
+    errorTelemetryDescriber: errors.errorTelemetryDescriber,
+    storageFootprintProbe: utils.storageFootprintProbe,
   });
   const fonts = await bootFonts({ userBlobs });
   // ExportStore is created up here so it can feed both `projects`
@@ -201,6 +220,7 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
     indexedDb: utils.indexedDb,
     editorStore: editor.store,
     previewSupportChecker: behindActorPreviewSupportChecker,
+    workerErrorMonitor: errors.workerErrorMonitor,
   });
   const projects = bootProjects({
     templateRepository,
@@ -208,11 +228,20 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
     exportStore: exportRunStore,
     refresh: editor.refresh,
     templateSupportChecker: browserSupport.templateSupportChecker,
+    styledElementCatalog: elements.services.styledElementCatalog,
+    controlCssWriter: rendering.controlCssWriter,
+    animationCssWriter: rendering.animationCssWriter,
     indexedDb: utils.indexedDb,
     videoBlobCache: videos.blobCache,
     videos,
     preview,
     personSegmentationCacheRepository: personSegmentation.cacheRepository,
+    telemetry,
+    appNoticeChannel: errors.appNoticeChannel,
+    errorClassifier: errors.errorClassifier,
+    errorTelemetryDescriber: errors.errorTelemetryDescriber,
+    storageFootprintProbe: utils.storageFootprintProbe,
+    fileDownloader: utils.fileDownloader,
   });
   const sheets = bootSheets({
     store: editor.store,
@@ -220,6 +249,9 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
     deriver: editor.deriver,
     templates,
     telemetry,
+    animationCssBuilder: rendering.animationCssBuilder,
+    animationCssWriter: rendering.animationCssWriter,
+    sheetElementResolver: captions.services.sheetElementResolver,
   });
   const exports = bootExport({
     engine,
@@ -227,16 +259,17 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
     sheets,
     cuts,
     utils,
+    workerErrorMonitor: errors.workerErrorMonitor,
     store: editor.store,
     fonts,
     runStore: exportRunStore,
     originalVideoDownloadStore: projects.originalVideoDownloadStore,
     saveProject: projects.actions.save,
+    saveFailureReporter: projects.saveFailureReporter,
+    errorTelemetryDescriber: errors.errorTelemetryDescriber,
     telemetry,
     userBlobs,
-    personSegmentationCacheRepository: personSegmentation.cacheRepository,
-    behindActorGatingService: personSegmentation.gatingService,
-    ensureSegmentMasksAction: personSegmentation.actions.ensureSegmentMasks,
+    renderContributors: [personSegmentation.exportContributor],
     overlayResolver: () => null,
   });
   const tagging = bootTagging({
@@ -248,12 +281,20 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
     preferenceRepository: editor.transcribePreferenceRepository,
     audioDecoder: engine.audioDecoder,
     progressStore: preprocessingProgressStore,
+    workerErrorMonitor: errors.workerErrorMonitor,
+    telemetry,
+    appNoticeChannel: errors.appNoticeChannel,
+    errorClassifier: errors.errorClassifier,
+    errorTelemetryDescriber: errors.errorTelemetryDescriber,
+    storageFootprintProbe: utils.storageFootprintProbe,
     ...(opts.transcriber ? { transcriber: opts.transcriber } : {}),
   });
+  const audioLengthPolicy: TranscriptionAudioLengthPolicy = new NoOpTranscriptionAudioLengthPolicy();
   const preprocessing = bootPreprocessing({
     store: editor.store,
     progressStore: preprocessingProgressStore,
     transcribe: transcription.actions.transcribe,
+    audioLengthPolicy,
     runTaggers: tagging.actions.runTaggers,
     refresh: editor.refresh,
     deriver: editor.deriver,
@@ -261,6 +302,9 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
     videos,
     projects,
     telemetry,
+    errorClassifier: errors.errorClassifier,
+    errorTelemetryDescriber: errors.errorTelemetryDescriber,
+    storagePersistence: utils.storagePersistence,
     previewProxyEnabled: effectivePreviewProxyEnabled,
     projectPersistenceEnabled: opts.projectPersistenceEnabled,
   });
@@ -291,6 +335,7 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
       loadVideo: editor.actions.video.load,
       exportRun: exports.actions.run,
       previewSurface: preview.surface,
+      editorPath: `${import.meta.env.BASE_URL.replace(/\/$/, '')}${routing.routes.editor()}`,
     });
   }
 
@@ -305,6 +350,7 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
         editor,
         captions,
         cuts,
+        elements,
         preview,
         projects,
         templates,
@@ -316,6 +362,7 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
         exports,
         fonts,
         utils,
+        errors,
         telemetry,
         userBlobs,
         userTemplates,

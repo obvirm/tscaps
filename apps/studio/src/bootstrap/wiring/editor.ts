@@ -6,16 +6,15 @@ import { RefreshDocumentAction } from '@core/editor/actions/RefreshDocumentActio
 import type { LocalStorageClient } from '@core/_shared/infrastructure/LocalStorageClient';
 import { LocalStorageTranscribePreferenceRepository } from '@core/transcription/infrastructure/repositories/LocalStorageTranscribePreferenceRepository';
 import type { TemplateRepository } from '@core/templates/domain/TemplateRepository';
-import type { UserAgentInspector } from '@core/_shared/infrastructure/UserAgentInspector';
 import { LoadVideoAction } from '@core/editor/actions/video/LoadVideoAction';
 import { ClearVideoAction } from '@core/editor/actions/video/ClearVideoAction';
 import { InitializeAction } from '@core/editor/actions/InitializeAction';
+import { MediaBunnyVideoMetadataProbe } from '@core/videos/infrastructure/MediaBunnyVideoMetadataProbe';
 import type { EngineModule } from '@bootstrap/wiring/engine';
 import type { RenderingModule } from '@bootstrap/wiring/rendering';
 
 export interface EditorStoreDependencies {
   readonly localStorageClient: LocalStorageClient;
-  readonly userAgentInspector: UserAgentInspector;
 }
 
 export interface EditorDependencies {
@@ -35,17 +34,10 @@ export type EditorModule = ReturnType<typeof bootEditor>;
  * of the editor module so the store is available early — `bootUserBlobs`
  * and `bootRendering` need it before the document deriver and the
  * surface actions can be wired.
- *
- * Low-end mobile devices struggle with anything above `tiny` — base / small
- * routinely run out of memory or take minutes per clip. Bias new mobile
- * users toward `tiny` so a first run on an unknown device at least
- * finishes; anyone who wants more accuracy can pick a larger model from
- * Advanced.
  */
 export function bootEditorStore(deps: EditorStoreDependencies) {
   const transcribePreferenceRepository = new LocalStorageTranscribePreferenceRepository(
     deps.localStorageClient,
-    deps.userAgentInspector.isMobile() ? { backend: 'wasm', model: 'tiny' } : undefined,
   );
   const store = new EditorStore(transcribePreferenceRepository.load());
   return { store, transcribePreferenceRepository };
@@ -58,7 +50,7 @@ export function bootEditorStore(deps: EditorStoreDependencies) {
  * templates on first paint, and the video load / clear actions.
  *
  * Caption-mode actions (words, decorations, segments) live in
- * `bootCaptions`. Cuts-mode actions live in `bootCuts`.
+ * `bootCaptions`. Cut actions live in `bootCuts`.
  */
 export function bootEditor(deps: EditorDependencies) {
   const store = deps.store;
@@ -72,7 +64,7 @@ export function bootEditor(deps: EditorDependencies) {
     new DecorationTimeResolver(),
     new InlineEmojiPunctuationAbsorber(),
   );
-  const refresh = new RefreshDocumentAction(store, deriver);
+  const refresh = new RefreshDocumentAction(store, deriver, deps.rendering.sheetTextScriptSynchronizer);
 
   return {
     store,
@@ -82,7 +74,7 @@ export function bootEditor(deps: EditorDependencies) {
     actions: {
       initialize: new InitializeAction(store, deps.filteredTemplateRepository),
       video: {
-        load: new LoadVideoAction(store),
+        load: new LoadVideoAction(store, new MediaBunnyVideoMetadataProbe()),
         clear: new ClearVideoAction(store),
       },
     },

@@ -2,7 +2,7 @@ import { Tagger } from '@modules/tagging/Tagger';
 import { Document } from '@modules/document/Document';
 import { Line } from '@modules/document/Line';
 import { Word } from '@modules/document/Word';
-import { Tag } from '@modules/document/Tag';
+import { Tag } from '@modules/tags/Tag';
 
 /**
  * Tags every word that falls inside a span delimited by two

@@ -3,7 +3,7 @@ import type { EditorModeId } from '@presentation/editor/stores/EditorWorkspaceSt
 import { useEditorWorkspaceStore } from '@ui/pages/editor/contexts/EditorWorkspaceContext';
 
 /**
- * Reactive read of the active editor mode (Captions, Cuts, ...).
+ * Reactive read of the active editor mode (Captions, Timeline, ...).
  * Re-renders consumers only when the active mode id itself changes.
  */
 export function useActiveEditorMode(): EditorModeId {

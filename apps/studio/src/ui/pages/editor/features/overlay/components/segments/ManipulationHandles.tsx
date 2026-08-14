@@ -22,9 +22,9 @@ const CORNER_CLASS_BY_KIND: Record<ResizeCorner, string> = {
  * handler swallows the bubble so the overlay's selection click
  * handler never re-runs and dismisses the popover).
  *
- * Renders inside the selection chrome box, which mirrors the segment
- * hitzone — the absolute offsets land the handles at the outer corners
- * of the visible chrome rectangle.
+ * Renders inside the selection chrome box, which mirrors the caption
+ * content box — the absolute offsets land the handles at the outer
+ * corners of the visible chrome rectangle.
  */
 export const ManipulationHandles = memo(function ManipulationHandles({ segmentId }: ManipulationHandlesProps) {
   return (

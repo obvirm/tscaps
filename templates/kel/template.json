@@ -16,52 +16,48 @@
       "label": "Text",
       "type": "color",
       "default": "#d4d4d4",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "upcoming-color",
       "label": "Upcoming word",
       "type": "color",
       "default": "#808080",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "highlight-color",
       "label": "Active word",
       "type": "color",
       "default": "#569cd6",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "bg-color",
       "label": "Background",
       "type": "color",
       "default": "#1e1e1e",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
-      "id": "active-bg-color",
+      "id": "highlight-bg-color",
       "label": "Active word background",
       "type": "color",
       "default": "#252526",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "tag-bg-color",
       "label": "Tag background",
       "type": "color",
       "default": "#00008b",
-      "group": "colors"
-    },
-    {
-      "id": "active-weight",
-      "label": "Active weight",
-      "type": "integer",
-      "default": 700,
-      "min": 100,
-      "max": 900,
-      "step": 100,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "bg-radius",
@@ -72,7 +68,8 @@
       "max": 1.5,
       "step": 0.01,
       "unit": "em",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "word-padding-x",
@@ -83,8 +80,8 @@
       "max": 2.0,
       "step": 0.01,
       "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "word-padding-y",
@@ -95,8 +92,8 @@
       "max": 1.0,
       "step": 0.01,
       "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     }
   ],
   "segmentSplitters": [

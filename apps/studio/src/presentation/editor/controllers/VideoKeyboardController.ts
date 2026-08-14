@@ -40,12 +40,25 @@ export class VideoKeyboardController {
     return false;
   }
 
+  /**
+   * Chromium's autofill dropdown dispatches synthetic KeyboardEvents
+   * carrying no `key` despite the DOM type declaring one; those are not
+   * keystrokes and yield `undefined`.
+   */
+  private normalizedKey(e: KeyboardEvent): string | undefined {
+    const key: string | undefined = e.key;
+    return key?.toLowerCase();
+  }
+
   private readonly onKeyUp = (e: KeyboardEvent): void => {
-    this.pressedKeys.delete(e.key.toLowerCase());
+    const key = this.normalizedKey(e);
+    if (key === undefined) return;
+    this.pressedKeys.delete(key);
   };
 
   private readonly onKeyDown = (e: KeyboardEvent): void => {
-    const key = e.key.toLowerCase();
+    const key = this.normalizedKey(e);
+    if (key === undefined) return;
     this.pressedKeys.add(key);
 
     if (this.isTextEditingFocus(e.target as HTMLElement | null)) return;

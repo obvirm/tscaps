@@ -5,11 +5,41 @@
     "multi-speakers"
   ],
   "variants": [
-    { "label": "White", "overrides": { "primary-color": "#ffffff", "quote-color": "#e6d647" } },
-    { "label": "Amber", "overrides": { "primary-color": "#ffd866", "quote-color": "#7be6ff" } },
-    { "label": "Cyan", "overrides": { "primary-color": "#7be6ff", "quote-color": "#ffd866" } },
-    { "label": "Green", "overrides": { "primary-color": "#86ff86", "quote-color": "#ff86c5" } },
-    { "label": "Pink", "overrides": { "primary-color": "#ff86c5", "quote-color": "#86ff86" } }
+    {
+      "label": "White",
+      "overrides": {
+        "primary-color": "#ffffff",
+        "quote-color": "#e6d647"
+      }
+    },
+    {
+      "label": "Amber",
+      "overrides": {
+        "primary-color": "#ffd866",
+        "quote-color": "#7be6ff"
+      }
+    },
+    {
+      "label": "Cyan",
+      "overrides": {
+        "primary-color": "#7be6ff",
+        "quote-color": "#ffd866"
+      }
+    },
+    {
+      "label": "Green",
+      "overrides": {
+        "primary-color": "#86ff86",
+        "quote-color": "#ff86c5"
+      }
+    },
+    {
+      "label": "Pink",
+      "overrides": {
+        "primary-color": "#ff86c5",
+        "quote-color": "#86ff86"
+      }
+    }
   ],
   "typography": {
     "fontFamily": "Lora Variable",
@@ -25,30 +55,24 @@
       "label": "Text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "quote-color",
       "label": "Quote",
       "type": "color",
       "default": "#e6d647",
-      "group": "colors"
-    },
-    {
-      "id": "shadow-color",
-      "label": "Shadow",
-      "type": "color",
-      "default": "#000000",
-      "advanced": true,
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "outline-color",
       "label": "Outline",
       "type": "color",
       "default": "#000000",
-      "advanced": true,
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "outline-thickness",
@@ -59,43 +83,8 @@
       "max": 0.3,
       "step": 0.01,
       "unit": "em",
-      "group": "appearance"
-    },
-    {
-      "id": "shadow-distance",
-      "label": "Shadow distance",
-      "type": "float",
-      "default": 0.06,
-      "min": 0,
-      "max": 1.0,
-      "step": 0.01,
-      "unit": "em",
-      "advanced": true,
-      "group": "appearance"
-    },
-    {
-      "id": "shadow-blur",
-      "label": "Shadow blur",
-      "type": "float",
-      "default": 1.2,
-      "min": 0,
-      "max": 3.0,
-      "step": 0.05,
-      "unit": "em",
-      "advanced": true,
-      "group": "appearance"
-    },
-    {
-      "id": "slide-distance",
-      "label": "Slide distance",
-      "type": "float",
-      "default": 0.06,
-      "min": 0,
-      "max": 0.80,
-      "step": 0.01,
-      "unit": "em",
-      "group": "appearance",
-      "legend": "Distance the segment slides down on entry. 0 disables the slide."
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "tag-weight",
@@ -105,7 +94,8 @@
       "min": 100,
       "max": 900,
       "step": 100,
-      "group": "appearance",
+      "group": "style",
+      "subgroup": "appearance",
       "legend": "Weight applied to emphasis-tagged words."
     },
     {
@@ -115,18 +105,9 @@
       "default": true,
       "valueOn": "italic",
       "valueOff": "normal",
-      "group": "appearance",
+      "group": "style",
+      "subgroup": "appearance",
       "legend": "Italicizes accent and entity tagged words."
-    },
-    {
-      "id": "dynamic-font-size",
-      "label": "Dynamic font size",
-      "type": "toggle",
-      "default": true,
-      "valueOn": "12",
-      "valueOff": "0",
-      "group": "appearance",
-      "legend": "Grows the font size on short captions so they fill the screen."
     }
   ],
   "segmentSplitters": [

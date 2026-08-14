@@ -1,3 +1,4 @@
+import { WorkerBoundaryError } from '@core/_shared/workers/WorkerBoundaryError';
 // lib.dom in our TS version doesn't yet declare these worker-side OPFS
 // types, so we describe the subset we use locally.
 interface SyncAccessHandle {
@@ -20,7 +21,7 @@ export type OpfsWriterInbound =
 
 export type OpfsWriterOutbound =
   | { type: 'ok'; id: number; size?: number }
-  | { type: 'err'; id: number; message: string };
+  | { type: 'err'; id: number; message: string; name: string };
 
 /**
  * Worker-side counterpart of `OpfsExportWriter`. Owns a single
@@ -65,8 +66,7 @@ export class OpfsWriterWorkerHost {
           return;
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.post({ type: 'err', id: msg.id, message });
+      this.post({ type: 'err', id: msg.id, ...WorkerBoundaryError.describe(err, String(err)) });
     }
   }
 

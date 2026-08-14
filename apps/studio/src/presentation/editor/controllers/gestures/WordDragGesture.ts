@@ -1,8 +1,8 @@
 import type { EditorStore } from '@core/editor/store/EditorStore';
-import type { SetWordStyleOverrideAction } from '@core/captions/actions/words/SetWordStyleOverrideAction';
-import type { ClearWordAlignmentOverrideAction } from '@core/captions/actions/words/ClearWordAlignmentOverrideAction';
+import type { SetElementPlacementAction } from '@core/elements/actions/SetElementPlacementAction';
 import type { SnapZoneResolver } from '@presentation/editor/services/SnapZoneResolver';
 import type { DragGeometryResolver } from '@presentation/editor/services/DragGeometryResolver';
+import type { CaptionContentBoxMeasurer } from '@presentation/editor/services/CaptionContentBoxMeasurer';
 import { DragSession } from '@presentation/editor/controllers/DragSession';
 import type { SegmentBindingRegistry } from '@presentation/editor/controllers/SegmentBindingRegistry';
 import type { OverlaySelectionController } from '@presentation/editor/controllers/OverlaySelectionController';
@@ -14,9 +14,9 @@ import {
   type WordDragTarget,
 } from '@presentation/editor/controllers/OverlayManipulationTypes';
 
-// Extra px added to the segment hitzone's bounding rect on each side
-// when testing whether the cursor is over the home segment during a
-// word drag. Deliberately tighter than the visible chrome padding —
+// Extra px added to the home segment's caption content box on each
+// side when testing whether the cursor is over the home segment during
+// a word drag. Deliberately tighter than the visible chrome corona —
 // the chrome extends well past the text for click-target reasons, but
 // snapping back to flow on every release inside that wide rectangle
 // would forbid positioning a word anywhere near its segment. Kept as
@@ -26,10 +26,10 @@ const SEGMENT_DROP_ZONE_INFLATE_PX = 4;
 
 // Used in place of the tight inflation when the home segment has no
 // inline words left to render — every other word in the segment is
-// already detached, so the hitzone shrinks to the decoration's bbox
-// (or to zero). The tight-inflation rationale ("don't snap when the
-// user releases near the segment's text") doesn't apply: there is no
-// text to be near. Values match the visible chrome `::before` inset
+// already detached, so the content box shrinks to the decoration's
+// bbox (or to zero). The tight-inflation rationale ("don't snap when
+// the user releases near the segment's text") doesn't apply: there is
+// no text to be near. Values match the visible chrome `::before` inset
 // (see `SubtitleOverlay.css`), so the snap zone covers the same
 // rectangle the user sees highlighted.
 const EMPTY_HOME_DROP_ZONE_INFLATE_X_PX = 32;
@@ -37,11 +37,10 @@ const EMPTY_HOME_DROP_ZONE_INFLATE_Y_PX = 22;
 
 /**
  * Gesture: drag a word to a new position inside the video frame.
- * Commits a per-word position override (vertical/horizontal align +
- * offset). When the user releases inside the word's home segment the
- * gesture cancels — if the word was already detached, the override
- * is cleared (return-to-flow); if it was in-flow to begin with, the
- * drag is a no-op.
+ * Commits the word's placement. When the user releases inside the
+ * word's home segment the gesture cancels — if the word was already
+ * detached, the placement is cleared (return-to-flow); if it was
+ * in-flow to begin with, the drag is a no-op.
  *
  * Selection-first gating: an in-flow word only drags when it's the
  * current selection. The first press selects; a second press-drag
@@ -50,7 +49,7 @@ const EMPTY_HOME_DROP_ZONE_INFLATE_Y_PX = 22;
  */
 export class WordDragGesture {
   /** Captured at start so the commit branch can tell apart "the user
-   *  moved a previously-detached word back home" (clear the override)
+   *  moved a previously-detached word back home" (clear the placement)
    *  from "the user nudged an in-flow word back inside its segment"
    *  (no edit). `false` between drags. */
   private startedDetached = false;
@@ -59,10 +58,10 @@ export class WordDragGesture {
     private readonly host: OverlayGestureHost,
     private readonly segments: SegmentBindingRegistry,
     private readonly editorStore: EditorStore,
-    private readonly setWordStyleOverride: SetWordStyleOverrideAction,
-    private readonly clearWordAlignmentOverride: ClearWordAlignmentOverrideAction,
+    private readonly setElementPlacement: SetElementPlacementAction,
     private readonly snapResolver: SnapZoneResolver,
     private readonly geometryResolver: DragGeometryResolver,
+    private readonly contentBoxMeasurer: CaptionContentBoxMeasurer,
     private readonly selectionController: OverlaySelectionController,
   ) {}
 
@@ -103,17 +102,15 @@ export class WordDragGesture {
     if (state.dropTargetSegmentId !== null) {
       // Release inside the home segment is the cancel/return-to-flow
       // gesture: skip the position commit. Only call the clear action
-      // when there is an override to remove — an in-flow word
-      // reaching back home mid-gesture just unwinds with no edit.
-      if (this.startedDetached) this.clearWordAlignmentOverride.execute(state.wordId);
+      // when there is a placement to remove — an in-flow word reaching
+      // back home mid-gesture just unwinds with no edit.
+      if (this.startedDetached) this.setElementPlacement.clear(state.wordId, 'word');
       return;
     }
-    const previous = this.editorStore.snapshot().wordStyleOverrides.get(state.wordId);
     // Anchor is pinned to `center` on both axes so a later sheet or
     // segment alignment change does not drag the detached word along
     // with it. Offsets become the position of the word's center.
-    this.setWordStyleOverride.execute(state.wordId, {
-      ...previous,
+    this.setElementPlacement.execute(state.wordId, 'word', {
       verticalAlign: 'center',
       verticalOffset: state.verticalOffset,
       horizontalAlign: 'center',
@@ -130,14 +127,15 @@ export class WordDragGesture {
     if (this.host.isSessionActive()) return;
     const scaler = this.host.scaler();
     if (!scaler) return;
-    const detached = this.editorStore.snapshot().wordStyleOverrides.hasAlignmentOverride(target.wordId);
+    const detached = this.editorStore.snapshot().elementStyles.placementOf(target.wordId) !== null;
     // Selection-first gating only applies to in-flow words inside a
     // segment, where the press is visually ambiguous between "select
     // this word" and "grab the whole subtitle". Already-detached
     // words are standalone anchors with no such ambiguity, so they
     // drag from first touch. When the gate bails the event must keep
-    // bubbling to the segment hitzone so a press-drag on a word
-    // without any selection still moves the segment.
+    // bubbling so the scaler's delegated segment-drag press takes
+    // over — a press-drag on a word without any selection still
+    // moves the segment.
     if (!detached && !this.isWordSelected(target.wordId)) return;
     event.stopPropagation();
     this.startedDetached = detached;
@@ -161,7 +159,7 @@ export class WordDragGesture {
   private resolveReturnToFlowSegmentId(target: WordDragTarget, clientX: number, clientY: number): string | null {
     const home = this.segments.get(target.segmentId);
     if (!home) return null;
-    const rect = home.hitzone.getBoundingClientRect();
+    const rect = this.captionContentBox(home.segment);
     const tight = this.homeSegmentHasInlineWords(target.segmentId, target.wordId);
     const inflateX = tight ? SEGMENT_DROP_ZONE_INFLATE_PX : EMPTY_HOME_DROP_ZONE_INFLATE_X_PX;
     const inflateY = tight ? SEGMENT_DROP_ZONE_INFLATE_PX : EMPTY_HOME_DROP_ZONE_INFLATE_Y_PX;
@@ -170,6 +168,28 @@ export class WordDragGesture {
                 && clientY >= rect.top - inflateY
                 && clientY <= rect.bottom + inflateY;
     return inside ? target.segmentId : null;
+  }
+
+  /**
+   * Client-coordinate box of the segment's visible caption. Measured
+   * as the content box (computed padding stripped), so neither
+   * `rendering.padding` safety-bleed nor template CSS padding widens
+   * the return-to-flow zone past the text the user sees. Any template
+   * translate on `.segment` (behind-actor lift, paint anim) is baked
+   * into the measured position. Falls back to the segment's bounding
+   * rect when no scaler is mounted.
+   */
+  private captionContentBox(segment: HTMLElement): { left: number; right: number; top: number; bottom: number } {
+    const scaler = this.host.scaler();
+    if (!scaler) return segment.getBoundingClientRect();
+    const content = this.contentBoxMeasurer.measure(segment, scaler);
+    const scalerBox = scaler.getBoundingClientRect();
+    return {
+      left: scalerBox.left + content.left,
+      top: scalerBox.top + content.top,
+      right: scalerBox.left + content.left + content.width,
+      bottom: scalerBox.top + content.top + content.height,
+    };
   }
 
   private homeSegmentHasInlineWords(segmentId: string, draggedWordId: string): boolean {
@@ -181,7 +201,7 @@ export class WordDragGesture {
       for (const line of segment.lines) {
         for (const word of line.words) {
           if (word.id === draggedWordId) continue;
-          if (!snap.wordStyleOverrides.hasAlignmentOverride(word.id)) return true;
+          if (snap.elementStyles.placementOf(word.id) === null) return true;
         }
       }
       return false;

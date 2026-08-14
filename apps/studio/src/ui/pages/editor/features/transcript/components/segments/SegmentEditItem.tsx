@@ -2,10 +2,8 @@ import { memo, useCallback } from 'react';
 import { Loader2, Lock, MoreHorizontal } from 'lucide-react';
 import type { Document, Segment } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
-import type { WordStyleOverrides } from '@core/captions/domain/WordStyleOverrides';
-import type { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
-import type { SegmentStyleOverrides } from '@core/captions/domain/SegmentStyleOverrides';
-import type { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
+import type { ElementStyles } from '@core/elements/domain/ElementStyles';
+import type { BehindActorSegmentOverrideRegistry } from '@core/person-segmentation/domain/BehindActorSegmentOverrideRegistry';
 import type { DecorationOverrideRegistry } from '@core/captions/domain/DecorationOverrideRegistry';
 import type { CutRegistry } from '@core/cuts/domain/CutRegistry';
 import { formatTime } from '@ui/pages/editor/features/transcript/utils';
@@ -28,8 +26,10 @@ export interface SegmentEditItemProps {
   activePopoverId: string | null;
   sheet: Sheet | null;
   sheets: Sheet[];
-  wordStyleOverrides: WordStyleOverrideRegistry;
-  segmentOverrides: SegmentOverrides;
+  elementStyles: ElementStyles;
+  behindActorOverrides: BehindActorSegmentOverrideRegistry;
+  /** Whether the segment is excluded from reflow — a rule with more inputs than an element style carries, so it arrives resolved. */
+  isFrozen: boolean;
   decorationOverrides: DecorationOverrideRegistry;
   cuts: CutRegistry;
   prevSegmentEnd: number;
@@ -41,8 +41,6 @@ export interface SegmentEditItemProps {
   onEditWordText: (wordId: string, text: string) => void;
   onEditWordTime: (wordId: string, start: number, end: number) => void;
   onEditWordTags: (wordId: string, tagNames: ReadonlySet<string>) => void;
-  onSetWordStyleOverride: (wordId: string, overrides: WordStyleOverrides) => void;
-  onSetSegmentStyleOverride: (segmentId: string, overrides: SegmentStyleOverrides) => void;
   onDeleteWords: (wordIds: string[]) => void;
   onApplyStructureEdit: (doc: Document) => void;
   onInsertWord: (segIdx: number, lineIdx: number, wordIdx: number) => string;
@@ -76,11 +74,10 @@ const LOCK_BTN =
  * `get(wordId)` returns a stable reference for words whose overrides did
  * not change, so iterating this segment's words is enough to decide.
  */
-function SegmentEditItemImpl({ doc, segment, segIdx, isLastSegment, isFirstSegment, isActive, activeWordId, activePopoverId, sheet, sheets, wordStyleOverrides, segmentOverrides, decorationOverrides, cuts, prevSegmentEnd, nextSegmentStart, videoDuration, onSeek, onActivateWord, onActivatePopover, onEditWordText, onEditWordTime, onEditWordTags, onSetWordStyleOverride, onSetSegmentStyleOverride, onDeleteWords, onApplyStructureEdit, onInsertWord, onAssignSegmentSheet, onCreateSheet, onCommitSegmentTime, onRedistributeWords, onResetSegmentLayout }: SegmentEditItemProps) {
+function SegmentEditItemImpl({ doc, segment, segIdx, isLastSegment, isFirstSegment, isActive, activeWordId, activePopoverId, sheet, sheets, elementStyles, behindActorOverrides, isFrozen, decorationOverrides, cuts, prevSegmentEnd, nextSegmentStart, videoDuration, onSeek, onActivateWord, onActivatePopover, onEditWordText, onEditWordTime, onEditWordTags, onDeleteWords, onApplyStructureEdit, onInsertWord, onAssignSegmentSheet, onCreateSheet, onCommitSegmentTime, onRedistributeWords, onResetSegmentLayout }: SegmentEditItemProps) {
   const timeMap = useRenderTimeMap();
-  const isFrozen = segmentOverrides.isFrozen(segment.id);
   const isComputingActorMasks = useSegmentMaskBackfillPending(segment.id);
-  const hasOverride = segmentOverrides.hasStyleFor(segment.id);
+  const hasOverride = elementStyles.has(segment.id);
   const settingsId = `seg:${segment.id}`;
   const isSettingsOpen = activePopoverId === settingsId;
 
@@ -135,8 +132,6 @@ function SegmentEditItemImpl({ doc, segment, segIdx, isLastSegment, isFirstSegme
           <SceneDecorationsRow
             segment={segment}
             sheet={sheet}
-            wordStyleOverrides={wordStyleOverrides}
-            segmentOverrides={segmentOverrides}
             decorationOverrides={decorationOverrides}
           />
           {isSettingsOpen ? (
@@ -159,15 +154,13 @@ function SegmentEditItemImpl({ doc, segment, segIdx, isLastSegment, isFirstSegme
               isLastSegment={isLastSegment}
               sheet={sheet}
               sheets={sheets}
-              currentOverrides={segmentOverrides.getStyle(segment.id)}
-              behindActorOverride={segmentOverrides.behindActorOverrideFor(segment.id)}
+              behindActorOverride={behindActorOverrides.get(segment.id)}
               prevSegmentEnd={prevSegmentEnd}
               nextSegmentStart={nextSegmentStart}
               onDeleteWords={onDeleteWords}
               onApplyStructureEdit={onApplyStructureEdit}
               onAssignSegmentSheet={onAssignSegmentSheet}
               onCreateSheet={onCreateSheet}
-              onCommitStyleOverrides={(o) => onSetSegmentStyleOverride(segment.id, o)}
               onCommitSegmentTime={(start, end) => onCommitSegmentTime(segment.id, start, end)}
               onRedistributeWords={() => onRedistributeWords(segment.id)}
             />
@@ -206,15 +199,14 @@ function SegmentEditItemImpl({ doc, segment, segIdx, isLastSegment, isFirstSegme
               activeWordId={activeWordId}
               activePopoverId={activePopoverId}
               sheet={sheet}
-              wordStyleOverrides={wordStyleOverrides}
-              segmentOverrides={segmentOverrides}
+              elementStyles={elementStyles}
+              behindActorOverrides={behindActorOverrides}
               cuts={cuts}
               onActivateWord={onActivateWord}
               onActivatePopover={onActivatePopover}
               onEditWordText={onEditWordText}
               onEditWordTime={onEditWordTime}
               onEditWordTags={onEditWordTags}
-              onSetWordStyleOverride={onSetWordStyleOverride}
               onDeleteWords={onDeleteWords}
               onApplyStructureEdit={onApplyStructureEdit}
               onInsertWord={onInsertWord}
@@ -245,24 +237,23 @@ function segmentEditItemPropsEqual(prev: SegmentEditItemProps, next: SegmentEdit
   if (prev.onEditWordText !== next.onEditWordText) return false;
   if (prev.onEditWordTime !== next.onEditWordTime) return false;
   if (prev.onEditWordTags !== next.onEditWordTags) return false;
-  if (prev.onSetWordStyleOverride !== next.onSetWordStyleOverride) return false;
-  if (prev.onSetSegmentStyleOverride !== next.onSetSegmentStyleOverride) return false;
-  // SegmentOverrides composes style + freeze internally: compare the
-  // segment-specific style entry (returns stable refs when unchanged)
-  // AND the freeze flag, since freeze toggles re-render the lock icon.
-  if (prev.segmentOverrides.getStyle(prev.segment.id) !== next.segmentOverrides.getStyle(next.segment.id)) return false;
-  if (prev.segmentOverrides.isFrozen(prev.segment.id) !== next.segmentOverrides.isFrozen(next.segment.id)) return false;
-  if (prev.segmentOverrides.behindActorOverrideFor(prev.segment.id) !== next.segmentOverrides.behindActorOverrideFor(next.segment.id)) return false;
+  // The style entry returns a stable ref when unchanged, so comparing
+  // this segment's entry avoids re-rendering every row when another
+  // segment is styled.
+  if (prev.elementStyles.placementOf(prev.segment.id) !== next.elementStyles.placementOf(next.segment.id)) return false;
+  if (prev.isFrozen !== next.isFrozen) return false;
+  if (prev.behindActorOverrides.get(prev.segment.id) !== next.behindActorOverrides.get(next.segment.id)) return false;
   if (prev.onDeleteWords !== next.onDeleteWords) return false;
   if (prev.onApplyStructureEdit !== next.onApplyStructureEdit) return false;
   if (prev.onInsertWord !== next.onInsertWord) return false;
   if (prev.onAssignSegmentSheet !== next.onAssignSegmentSheet) return false;
   if (prev.onCreateSheet !== next.onCreateSheet) return false;
-  if (prev.wordStyleOverrides !== next.wordStyleOverrides) {
+  if (prev.elementStyles !== next.elementStyles) {
+    if (prev.elementStyles.get(prev.segment.id) !== next.elementStyles.get(next.segment.id)) return false;
     for (const line of next.segment.lines) {
       for (const word of line.words) {
-        if (prev.wordStyleOverrides.get(word.id) !== next.wordStyleOverrides.get(word.id)) return false;
-        if (word.decoration && prev.wordStyleOverrides.get(word.decoration.id) !== next.wordStyleOverrides.get(word.decoration.id)) return false;
+        if (prev.elementStyles.get(word.id) !== next.elementStyles.get(word.id)) return false;
+        if (word.decoration && prev.elementStyles.get(word.decoration.id) !== next.elementStyles.get(word.decoration.id)) return false;
       }
     }
   }

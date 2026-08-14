@@ -5,6 +5,7 @@ import { Section } from '@ui/_shared/components/controls/sections/Section';
 import { Select } from '@ui/_shared/components/controls/fields/Select';
 import { EditorTab, type SheetScope } from '@ui/pages/editor/components/sidebar/tabs/EditorTab';
 import { useSheets } from '@ui/_shared/contexts/modules/SheetsContext';
+import { useCustomizedControlIds } from '@ui/pages/editor/hooks/useCustomizedControlIds';
 
 interface StyleTabProps {
   sheetScope: SheetScope;
@@ -22,11 +23,15 @@ const VARIANT_FIELD_LABEL = 'Preset';
 export const StyleTab = memo(function StyleTab({ sheetScope }: StyleTabProps) {
   const sheets = useSheets();
   const activeSheet = sheetScope.activeSheet;
+  const customizedIds = useCustomizedControlIds(activeSheet);
   const styleGroups = useMemo<StyleGroup[]>(() => {
     const order: string[] = [];
     const map = new Map<string, ControlField[]>();
     for (const field of activeSheet.template.styleControls) {
-      const key = field.group ?? UNGROUPED_TITLE;
+      // A control over how the template moves is shown beside the
+      // animation it moves, which is not here.
+      if (field.group === 'motion') continue;
+      const key = field.subgroup ?? UNGROUPED_TITLE;
       if (!map.has(key)) {
         map.set(key, []);
         order.push(key);
@@ -76,6 +81,7 @@ export const StyleTab = memo(function StyleTab({ sheetScope }: StyleTabProps) {
             title={hideInnerTitles ? undefined : group.title}
             fields={group.fields}
             values={styleValuesMap}
+            customizedIds={customizedIds}
             onChange={(field, value) => sheets.actions.style.updateControl.execute(field, value)}
           />
         ))

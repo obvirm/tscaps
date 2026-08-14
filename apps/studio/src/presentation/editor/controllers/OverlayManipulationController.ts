@@ -1,17 +1,23 @@
 import type { EditorStore } from '@core/editor/store/EditorStore';
+import type { StyledElementCatalog } from '@core/elements/domain/StyledElementCatalog';
+import type { SetElementFieldAction } from '@core/elements/actions/SetElementFieldAction';
 import type { UpdateAlignmentAction } from '@core/sheets/actions/style/UpdateAlignmentAction';
 import type { UpdateTypographyAction } from '@core/sheets/actions/style/UpdateTypographyAction';
 import type { UpdateRotationAction } from '@core/sheets/actions/style/UpdateRotationAction';
-import type { SetWordStyleOverrideAction } from '@core/captions/actions/words/SetWordStyleOverrideAction';
-import type { ClearWordAlignmentOverrideAction } from '@core/captions/actions/words/ClearWordAlignmentOverrideAction';
-import type { SetSegmentStyleOverrideAction } from '@core/captions/actions/segments/SetSegmentStyleOverrideAction';
-import type { SnapZoneResolver } from '@presentation/editor/services/SnapZoneResolver';
+import type { SetElementPlacementAction } from '@core/elements/actions/SetElementPlacementAction';
+import type { SnapBand, SnapZoneResolver } from '@presentation/editor/services/SnapZoneResolver';
+import type { HorizontalPlacementResolver } from '@tscaps/engine';
 import type { DragGeometryResolver } from '@presentation/editor/services/DragGeometryResolver';
+import type { AlignmentGeometryResolver } from '@presentation/editor/services/AlignmentGeometryResolver';
+import type { ElementAlignmentResolver } from '@presentation/editor/services/ElementAlignmentResolver';
+import type { LinkedSheetsSync } from '@core/sheets/services/LinkedSheetsSync';
+import { SegmentDragPlanner } from '@presentation/editor/services/SegmentDragPlanner';
+import type { CaptionContentBoxMeasurer } from '@presentation/editor/services/CaptionContentBoxMeasurer';
 import type { ResizeGeometryResolver } from '@presentation/editor/services/ResizeGeometryResolver';
 import type { RotationGeometryResolver } from '@presentation/editor/services/RotationGeometryResolver';
 import type { DragTransformPainter } from '@presentation/editor/services/DragTransformPainter';
 import type { NextClickSuppressor } from '@presentation/editor/services/NextClickSuppressor';
-import type { FontSizeBounds } from '@presentation/editor/services/FontSizeBounds';
+import type { ElementControlRange } from '@presentation/editor/services/ElementControlRange';
 import type { DragSession } from '@presentation/editor/controllers/DragSession';
 import type { OverlaySelectionController } from '@presentation/editor/controllers/OverlaySelectionController';
 import { SegmentBindingRegistry } from '@presentation/editor/controllers/SegmentBindingRegistry';
@@ -26,9 +32,9 @@ import type {
   OverlayDragState,
   OverlayGestureHost,
   SegmentBindInput,
+  SegmentDragTarget,
   SegmentResizeBindInput,
   SegmentRotateBindInput,
-  SnapGuide,
   WordBindInput,
   WordResizeBindInput,
   WordRotateBindInput,
@@ -55,7 +61,6 @@ export type {
   WordResizeBindInput,
   SegmentRotateBindInput,
   WordRotateBindInput,
-  SnapGuide,
 } from '@presentation/editor/controllers/OverlayManipulationTypes';
 
 /**
@@ -66,10 +71,15 @@ export type {
  * the segment binding table that gestures consult, and the
  * subscriber list React reads through `snapshot`.
  *
- * Elements register via `bindSegment` / `bindWord` /
- * `bindSegmentResizeHandle` / `bindWordResizeHandle`, each
- * delegated to the matching gesture. Gestures request a session via
- * the `OverlayGestureHost` protocol the controller implements.
+ * Word and handle gestures attach their own pointerdown via
+ * `bindWord` / `bindSegmentResizeHandle` / `bindWordResizeHandle`.
+ * Segment drags start from a single delegated pointerdown on the
+ * scaler instead: the segment's clickable surfaces (the scaler-level
+ * hitzone ghost, plus word presses the word gesture declines and
+ * lets bubble) all resolve through `data-tscaps-segment-id`, so one
+ * listener covers them; `bindSegment` only registers geometry.
+ * Gestures request a session via the `OverlayGestureHost` protocol
+ * the controller implements.
  */
 export class OverlayManipulationController implements OverlayGestureHost {
   private readonly subscribers = new Set<() => void>();
@@ -89,57 +99,73 @@ export class OverlayManipulationController implements OverlayGestureHost {
     updateAlignment: UpdateAlignmentAction,
     updateTypography: UpdateTypographyAction,
     updateRotation: UpdateRotationAction,
-    setWordStyleOverride: SetWordStyleOverrideAction,
-    clearWordAlignmentOverride: ClearWordAlignmentOverrideAction,
-    setSegmentStyleOverride: SetSegmentStyleOverrideAction,
+    setElementPlacement: SetElementPlacementAction,
+    styledElementCatalog: StyledElementCatalog,
+    setElementField: SetElementFieldAction,
     private readonly snapResolver: SnapZoneResolver,
+    horizontalPlacementResolver: HorizontalPlacementResolver,
     geometryResolver: DragGeometryResolver,
+    alignmentGeometry: AlignmentGeometryResolver,
+    baselineResolver: ElementAlignmentResolver,
+    linkedSheetsSync: LinkedSheetsSync,
+    contentBoxMeasurer: CaptionContentBoxMeasurer,
     resizeGeometry: ResizeGeometryResolver,
     rotationGeometry: RotationGeometryResolver,
-    fontSizeBounds: FontSizeBounds,
+    controlRange: ElementControlRange,
     transformPainter: DragTransformPainter,
     private readonly clickSuppressor: NextClickSuppressor,
     selectionController: OverlaySelectionController,
   ) {
     this.segmentDrag = new SegmentDragGesture(
-      this, this.segmentBindings, editorStore, updateAlignment, setSegmentStyleOverride,
-      snapResolver, geometryResolver, transformPainter,
+      this, updateAlignment, setElementPlacement,
+      snapResolver, horizontalPlacementResolver, geometryResolver, alignmentGeometry,
+      new SegmentDragPlanner(editorStore, this.segmentBindings, linkedSheetsSync, baselineResolver),
+      transformPainter,
     );
     this.wordDrag = new WordDragGesture(
-      this, this.segmentBindings, editorStore, setWordStyleOverride, clearWordAlignmentOverride,
-      snapResolver, geometryResolver, selectionController,
+      this, this.segmentBindings, editorStore, setElementPlacement,
+      snapResolver, geometryResolver, contentBoxMeasurer, selectionController,
     );
     this.segmentResize = new SegmentResizeGesture(
-      this, this.segmentBindings, editorStore, updateTypography, setSegmentStyleOverride, resizeGeometry, fontSizeBounds,
+      this, this.segmentBindings, editorStore, updateTypography,
+      styledElementCatalog, setElementField, resizeGeometry, controlRange,
     );
     this.wordResize = new WordResizeGesture(
-      this, editorStore, setWordStyleOverride, resizeGeometry, fontSizeBounds,
+      this, styledElementCatalog, setElementField, resizeGeometry, controlRange,
     );
     this.segmentRotate = new SegmentRotateGesture(
-      this, this.segmentBindings, editorStore, updateRotation, setSegmentStyleOverride, rotationGeometry,
+      this, this.segmentBindings, editorStore, updateRotation,
+      styledElementCatalog, setElementField, rotationGeometry,
     );
     this.wordRotate = new WordRotateGesture(
-      this, editorStore, setWordStyleOverride, rotationGeometry,
+      this, editorStore, styledElementCatalog, setElementField, rotationGeometry,
     );
   }
 
   start(): void {
-    // Per-binding pointerdown listeners drive everything; nothing global to install.
+    // Word and handle gestures attach per-binding pointerdown listeners;
+    // the segment-drag listener rides the scaler and installs in `setScaler`.
   }
 
   stop(): void {
     if (this.activeSession) this.cancelActiveSession();
     this.segmentBindings.clear();
     this.subscribers.clear();
-    this.scalerElement = null;
+    this.setScaler(null);
   }
 
   setScaler(element: HTMLElement | null): void {
+    if (this.scalerElement) {
+      this.scalerElement.removeEventListener('pointerdown', this.onScalerPointerDown);
+    }
     this.scalerElement = element;
+    if (element) element.addEventListener('pointerdown', this.onScalerPointerDown);
   }
 
   bindSegment(input: SegmentBindInput): () => void {
-    return this.segmentDrag.bind(input);
+    const target: SegmentDragTarget = { kind: 'segment', ...input };
+    this.segmentBindings.register(target);
+    return () => this.segmentBindings.unregister(input.segmentId);
   }
 
   bindWord(input: WordBindInput): () => void {
@@ -171,17 +197,8 @@ export class OverlayManipulationController implements OverlayGestureHost {
     return this.dragState;
   }
 
-  verticalGuides(): readonly SnapGuide[] {
-    return this.snapResolver.verticalBands.map((band) => ({ center: band.center }));
-  }
-
-  horizontalGuides(): readonly SnapGuide[] {
-    return this.snapResolver.horizontalBands.map((band) => ({ center: band.center }));
-  }
-
-  wordCenterGuide(): SnapGuide {
-    const band = this.snapResolver.horizontalCenterBand();
-    return { center: band.center };
+  wordCenterGuide(): SnapBand {
+    return this.snapResolver.horizontalCenterBand();
   }
 
   scaler(): HTMLElement | null {
@@ -191,6 +208,25 @@ export class OverlayManipulationController implements OverlayGestureHost {
   isSessionActive(): boolean {
     return this.activeSession !== null;
   }
+
+  // Delegated segment-drag start. Bubble phase is load-bearing: surfaces
+  // that claim the press for themselves (word drags, resize / rotate
+  // handles) stop propagation on their own pointerdown, so whatever
+  // still arrives here with a `data-tscaps-segment-id` ancestor is a
+  // segment-move press. Positioned word hosts carry the attribute only
+  // for selection resolution — a press on one must not move the whole
+  // caption, so they are filtered out.
+  private readonly onScalerPointerDown = (event: PointerEvent): void => {
+    const pressed = event.target;
+    if (!(pressed instanceof Element)) return;
+    if (pressed.closest('.subtitle-overlay-positioned-word-host')) return;
+    const hit = pressed.closest('[data-tscaps-segment-id]');
+    if (!hit) return;
+    const segmentId = hit.getAttribute('data-tscaps-segment-id')!;
+    const binding = this.segmentBindings.get(segmentId);
+    if (!binding) return;
+    this.segmentDrag.tryStart(binding, event);
+  };
 
   activateSession(session: DragSession): void {
     session.attach({

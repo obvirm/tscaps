@@ -1,11 +1,10 @@
 import type { AlignmentConfig } from '@tscaps/engine';
-import type { ControlField } from '@core/templates/domain/definition/ControlField';
+import type { ControlField, ControlValue } from '@core/templates/domain/definition/ControlField';
 import type { SegmentSplitterConfig } from '@core/segment-splitter/domain/SegmentSplitterConfig';
 import type { LineSplitterConfig } from '@core/line-splitter/domain/LineSplitterConfig';
 import type { EffectConfig } from '@core/effect/domain/EffectConfig';
 import type { TypographyConfig } from '@core/sheets/domain/TypographyConfig';
 import type { RotationConfig } from '@core/sheets/domain/RotationConfig';
-import type { BehindActorRequirement } from '@tscaps/engine';
 import type { VideoFrameRequirement } from '@core/templates/domain/definition/RenderingConfig';
 import type { StyleVariant } from '@core/templates/domain/definition/StyleVariant';
 
@@ -21,6 +20,21 @@ export type EffectConfigOverride = Partial<EffectConfig> & { type: EffectConfig[
 export type SegmentSplitterEntry = Partial<SegmentSplitterConfig> & { type: SegmentSplitterConfig['type'] };
 
 /**
+ * A `styleControls` entry as it appears in `template.json`. Two forms:
+ *
+ * - **Shorthand** for a catalogued id: `{ id, default, cloudOnly?,
+ *   label?, legend? }`. Type, unit, group and bounds come from
+ *   `StyleControlCatalog` and cannot be redeclared; the two strings
+ *   come from there too unless the template names the concept's role
+ *   in its own layout.
+ * - **Full** for a template-local id the catalog does not describe:
+ *   the complete `ControlField` shape.
+ *
+ * `StyleControlResolver` picks the branch by consulting the catalog.
+ */
+export type JsonStyleControlEntry = ControlField | (Partial<ControlField> & { id: string; default: ControlValue });
+
+/**
  * JSON-side rendering switches. The `padding` field is a CSS-padding
  * shorthand of `em` lengths (e.g. `"0.5em"`, `"1em 2em"`); the loader
  * parses it into the engine's per-side `EmEdges`.
@@ -29,7 +43,16 @@ export interface JsonRenderingConfig {
   splitWordsIntoLetters?: boolean;
   videoFrame?: Partial<VideoFrameRequirement>;
   padding?: string;
-  behindActor?: Partial<BehindActorRequirement>;
+}
+
+/**
+ * JSON-side opt-in for the text-behind-actor effect. `tagCondition`
+ * is a boolean tag expression (e.g. `"highlight or hook"`); absent
+ * means every segment qualifies for automatic activation.
+ */
+export interface JsonBehindActorTemplateConfig {
+  required?: boolean;
+  tagCondition?: string;
 }
 
 /**
@@ -40,6 +63,16 @@ export interface JsonRenderingConfig {
  */
 export interface JsonFeaturesConfig {
   rotation?: { segment?: boolean; word?: boolean };
+  /**
+   * Which kinds of element the template's look survives being
+   * animated. Keyed by the kind an animation lands on, so one entry
+   * covers both the sheet's panel for that kind and one element
+   * answering for itself. Declare `false` where an animation would
+   * break the look — a caption that blends with the video cannot carry
+   * one, since `transform` and `opacity` both put a stacking context
+   * between the blend and the frame.
+   */
+  animation?: { segment?: boolean; line?: boolean; word?: boolean; decoration?: boolean };
   behindActorOverride?: boolean;
 }
 
@@ -58,7 +91,7 @@ export interface JsonTemplateSchema {
    * incorrectly (e.g. `["Firefox"]`).
    */
   unsupportedUserAgents?: string[];
-  styleControls?: ControlField[];
+  styleControls?: JsonStyleControlEntry[];
   typography?: Partial<TypographyConfig>;
   rotation?: Partial<RotationConfig>;
   segmentSplitters?: SegmentSplitterEntry[];
@@ -66,6 +99,7 @@ export interface JsonTemplateSchema {
   alignment?: Partial<AlignmentConfig>;
   rendering?: JsonRenderingConfig;
   features?: JsonFeaturesConfig;
+  behindActor?: JsonBehindActorTemplateConfig;
   effects?: EffectConfigOverride[];
   /**
    * Named style presets the template ships. Each variant overrides a

@@ -11,10 +11,10 @@ export class SetSegmentBehindActorOverrideAction {
    * the persisted entry.
    */
   execute(segmentId: string, override: BehindActorSegmentOverride): void {
-    const current = this.store.snapshot().segmentOverrides;
-    const next = current.withBehindActorOverride(segmentId, override);
+    const current = this.store.snapshot().behindActorOverrides;
+    const next = current.with(segmentId, override);
     if (next === current) return;
     this.store.commit(`segmentBehindActorOverride:${segmentId}`);
-    this.store.patch({ segmentOverrides: next });
+    this.store.patch({ behindActorOverrides: next });
   }
 }

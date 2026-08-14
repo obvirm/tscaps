@@ -8,7 +8,12 @@ import type { ExportStore } from '@core/export/store/ExportStore';
 const PROFILED_CLASSES = new Set([
   'MediaBunnyVideoRenderer',
   'BrowserSubtitleFrameRenderer',
+  'BrowserOverlayFrameRenderer',
   'LayeredFrameCompositor',
+  'CaptionsOverlayFramePainter',
+  'ComposedSubtitleLayerSource',
+  'BatchedSubtitleLayerSource',
+  'VideoBoundSubtitleLayerSource',
   'MediaBunnyCanvasVideoTrackEncoder',
   'WebCodecsVideoFrameDecoder',
   'HtmlVideoElementVideoFrameDecoder',

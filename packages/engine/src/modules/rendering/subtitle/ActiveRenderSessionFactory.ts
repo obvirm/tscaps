@@ -1,9 +1,13 @@
 import type { Document } from '@modules/document/Document';
 import type { WordSplitter } from '@modules/splitting/WordSplitter';
+import type { WordFragmenter } from '@modules/bidi/WordFragmenter';
+import { HorizontalSideResolver } from '@modules/bidi/HorizontalSideResolver';
+import { HorizontalPlacementResolver } from '@modules/rendering/HorizontalPlacementResolver';
 import type { VideoFrameSource } from '@modules/rendering/types/VideoFrameSource';
 import type { BaselineCssComposer } from '@modules/rendering/styles/BaselineCssComposer';
 import { SvgFilterScoper } from '@modules/svg-filter/SvgFilterScoper';
 import { SvgFilterLengthResolver } from '@modules/svg-filter/SvgFilterLengthResolver';
+import { SvgFilterDefsRenderer } from '@modules/svg-filter/SvgFilterDefsRenderer';
 import { SegmentSubtreeHtmlBuilder } from '@modules/rendering/subtitle/SegmentSubtreeHtmlBuilder';
 import { SegmentSubtreeDecomposer } from '@modules/rendering/subtitle/SegmentSubtreeDecomposer';
 import { SegmentPaintRegionResolver } from '@modules/rendering/subtitle/SegmentPaintRegionResolver';
@@ -27,6 +31,7 @@ export class ActiveRenderSessionFactory {
 
   constructor(
     private readonly wordSplitter: WordSplitter,
+    private readonly wordFragmenter: WordFragmenter,
     private readonly baselineCssComposer: BaselineCssComposer,
   ) {}
 
@@ -37,13 +42,12 @@ export class ActiveRenderSessionFactory {
     height: number,
     videoFrameSource: VideoFrameSource | null,
   ): ActiveRenderSession {
-    const subtreeBuilder = new SegmentSubtreeHtmlBuilder(this.wordSplitter);
+    const subtreeBuilder = new SegmentSubtreeHtmlBuilder(this.wordSplitter, this.wordFragmenter);
     const subtreeDecomposer = new SegmentSubtreeDecomposer();
     const paintRegionResolver = new SegmentPaintRegionResolver();
     const paintRegionCache = new SegmentPaintRegionCache();
     const filterMaterializer = new SvgFilterMaterializer(
-      new SvgFilterScoper(),
-      new SvgFilterLengthResolver(),
+      new SvgFilterDefsRenderer(new SvgFilterScoper(), new SvgFilterLengthResolver()),
       height,
     );
     const videoFrameVarsBuilder = new VideoFrameVarsBuilder(
@@ -59,6 +63,7 @@ export class ActiveRenderSessionFactory {
       subtreeDecomposer,
       filterMaterializer,
       videoFrameVarsBuilder,
+      new HorizontalPlacementResolver(new HorizontalSideResolver()),
       width,
       height,
     );

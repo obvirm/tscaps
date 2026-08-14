@@ -1,18 +1,53 @@
 import { CssVariable } from '@modules/document/CssVariable';
+import { DataAttribute } from '@modules/document/DataAttribute';
+import { Decoration } from '@modules/document/Decoration';
 import type { Segment } from '@modules/document/Segment';
+import type { TimeFragment } from '@modules/document/TimeFragment';
 import type { PreparedStyle } from '@modules/rendering/subtitle/PreparedStyle';
 import type { AbstractAnim } from '@modules/rendering/subtitle/AbstractAnim';
 
 const FINGERPRINT_BASE_S = 10000;
 
 /**
+ * One node of a probe chain, as the renderer would emit it: the tag it
+ * carries, the classes on it, and the id a stylesheet can address it
+ * by — `null` when the stylesheet addresses nothing here.
+ */
+interface ProbedElement {
+  readonly tag: 'div' | 'span';
+  readonly classes: ReadonlyArray<string>;
+  readonly elementId: string | null;
+}
+
+/**
+ * The windows a probed node's clock variables resolve against. `line`
+ * and `word` are absent for a node that has none of its own, and every
+ * variable naming one then falls back to the segment's.
+ */
+interface ProbedWindows {
+  readonly segment: TimeFragment;
+  readonly line: TimeFragment | null;
+  readonly word: TimeFragment | null;
+}
+
+/**
  * Decides whether a render item should redraw every frame: builds
- * throw-away DOM chains matching the CSS classes the engine emits,
- * reads back resolved `animation-duration` / `animation-delay` from
+ * throw-away DOM chains matching what the renderer emits, reads back
+ * resolved `animation-duration` / `animation-delay` from
  * `getComputedStyle`, and decodes each timing back to the CSS
- * variable that anchored its window. Caches per `(style, class
- * chain)` so the same chain is probed at most once. `clear` empties
- * the cache.
+ * variable that anchored its window. Caches per chain so the same one
+ * is probed at most once. `clear` empties the cache.
+ *
+ * A chain carries the element ids the renderer stamps as well as the
+ * classes, because a stylesheet can address one element rather than a
+ * class of them. Built from classes alone, the chain resolves a
+ * different animation than the node it stands for — none at all where
+ * only the element carries one, and the wrong window where the
+ * element's beats the template's. Either way the tile is reused across
+ * a frame that moved, and the animation exports as a still image.
+ *
+ * Only ids the stylesheet actually addresses go on, so a caption
+ * nobody has styled probes one chain per class combination as before.
  */
 export class AnimationProbe {
   private readonly timingByKey = new Map<string, AbstractAnim[]>();
@@ -30,16 +65,29 @@ export class AnimationProbe {
     // treat any non-empty filter set as time-varying.
     if (!style.filters.definitions.isEmpty()) return true;
 
-    const segClasses = seg.getCssClasses(t);
-    if (this.evalAnims(this.segmentTiming(style, segClasses), t, seg.time.start, seg.time.end)) return true;
+    const segment = this.probed(style, 'div', seg.getCssClasses(t), seg.id);
+    const segmentWindows: ProbedWindows = { segment: seg.time, line: null, word: null };
+    if (this.animates(style, [segment], t, segmentWindows)) return true;
 
     return [...seg.lines].some((line) => {
-      const lineClasses = line.getCssClasses(t);
-      if (this.evalAnims(this.lineTiming(style, lineClasses, segClasses), t, seg.time.start, seg.time.end, line.time.start, line.time.end)) return true;
+      const lineElement = this.probed(style, 'div', line.getCssClasses(t), line.id);
+      const lineWindows: ProbedWindows = { ...segmentWindows, line: line.time };
+      if (this.animates(style, [segment, lineElement], t, lineWindows)) return true;
 
       return [...line.words].some((word) => {
-        const wordClasses = word.getCssClasses(t);
-        return this.evalAnims(this.wordTiming(style, wordClasses, lineClasses, segClasses), t, seg.time.start, seg.time.end, line.time.start, line.time.end, word.time.start, word.time.end);
+        const wordElement = this.probed(style, 'span', word.getCssClasses(t), word.id);
+        const wordChain = [segment, lineElement, wordElement];
+        if (this.animates(style, wordChain, t, { ...lineWindows, word: word.time })) return true;
+
+        const decoration = word.decoration;
+        if (!decoration) return false;
+        const decorationElement = this.probed(style, 'span', [Decoration.CSS_CLASS], decoration.id);
+        return this.animates(
+          style,
+          [...wordChain, decorationElement],
+          t,
+          { ...lineWindows, word: decoration.customTime ?? word.time },
+        );
       });
     });
   }
@@ -48,44 +96,57 @@ export class AnimationProbe {
     this.timingByKey.clear();
   }
 
-  private wordTiming(style: PreparedStyle, wordClasses: string[], lineClasses: string[], segClasses: string[]): AbstractAnim[] {
-    const key = `${style.kind}|w:${wordClasses.join(' ')}|l:${lineClasses.join(' ')}|s:${segClasses.join(' ')}`;
-    return this.getOrProbeTiming(key, () => {
-      const seg = document.createElement('div'); seg.className = segClasses.join(' ');
-      const line = document.createElement('div'); line.className = lineClasses.join(' ');
-      const word = document.createElement('span'); word.className = wordClasses.join(' ');
-      this.injectProbeMagic(word);
-      line.appendChild(word); seg.appendChild(line);
-      style.probeContainer.appendChild(seg);
-      const timing = this.readAnimTimings(word);
-      style.probeContainer.removeChild(seg);
-      return timing;
-    });
+  /** The element as the probe will build it, addressed only where the stylesheet says so. */
+  private probed(
+    style: PreparedStyle,
+    tag: ProbedElement['tag'],
+    classes: ReadonlyArray<string>,
+    elementId: string,
+  ): ProbedElement {
+    return { tag, classes, elementId: style.addressableElementIds.has(elementId) ? elementId : null };
   }
 
-  private lineTiming(style: PreparedStyle, lineClasses: string[], segClasses: string[]): AbstractAnim[] {
-    const key = `${style.kind}|l:${lineClasses.join(' ')}|s:${segClasses.join(' ')}`;
-    return this.getOrProbeTiming(key, () => {
-      const seg = document.createElement('div'); seg.className = segClasses.join(' ');
-      const line = document.createElement('div'); line.className = lineClasses.join(' ');
-      this.injectProbeMagic(line);
-      seg.appendChild(line); style.probeContainer.appendChild(seg);
-      const timing = this.readAnimTimings(line);
-      style.probeContainer.removeChild(seg);
-      return timing;
-    });
+  private animates(
+    style: PreparedStyle,
+    chain: ReadonlyArray<ProbedElement>,
+    t: number,
+    windows: ProbedWindows,
+  ): boolean {
+    return this.evalAnims(this.timingOf(style, chain), t, windows);
   }
 
-  private segmentTiming(style: PreparedStyle, segClasses: string[]): AbstractAnim[] {
-    const key = `${style.kind}|s:${segClasses.join(' ')}`;
-    return this.getOrProbeTiming(key, () => {
-      const seg = document.createElement('div'); seg.className = segClasses.join(' ');
-      this.injectProbeMagic(seg);
-      style.probeContainer.appendChild(seg);
-      const timing = this.readAnimTimings(seg);
-      style.probeContainer.removeChild(seg);
-      return timing;
-    });
+  private timingOf(style: PreparedStyle, chain: ReadonlyArray<ProbedElement>): AbstractAnim[] {
+    const key = `${style.kind}|${chain.map((element) => this.describe(element)).join('>')}`;
+    let timing = this.timingByKey.get(key);
+    if (!timing) {
+      timing = this.probeChain(style, chain);
+      this.timingByKey.set(key, timing);
+    }
+    return timing;
+  }
+
+  private describe(element: ProbedElement): string {
+    return `${element.classes.join(' ')}#${element.elementId ?? ''}`;
+  }
+
+  /** Mounts the chain, reads what the leaf resolved to, and takes it back out. */
+  private probeChain(style: PreparedStyle, chain: ReadonlyArray<ProbedElement>): AbstractAnim[] {
+    const nodes = chain.map((element) => this.createNode(element));
+    for (let index = 1; index < nodes.length; index++) nodes[index - 1]!.appendChild(nodes[index]!);
+    const root = nodes[0]!;
+    const leaf = nodes[nodes.length - 1]!;
+    this.injectProbeMagic(leaf);
+    style.probeContainer.appendChild(root);
+    const timing = this.readAnimTimings(leaf);
+    style.probeContainer.removeChild(root);
+    return timing;
+  }
+
+  private createNode(element: ProbedElement): HTMLElement {
+    const node = document.createElement(element.tag);
+    node.className = element.classes.join(' ');
+    if (element.elementId !== null) node.setAttribute(DataAttribute.ELEMENT_ID, element.elementId);
+    return node;
   }
 
   // Each CssVariable gets a fingerprint-shaped duration value so the
@@ -95,15 +156,6 @@ export class AnimationProbe {
     Object.values(CssVariable).forEach((cssVar, index) => {
       el.style.setProperty(cssVar, `${(index + 1) * FINGERPRINT_BASE_S}s`);
     });
-  }
-
-  private getOrProbeTiming(key: string, probe: () => AbstractAnim[]): AbstractAnim[] {
-    let timing = this.timingByKey.get(key);
-    if (!timing) {
-      timing = probe();
-      this.timingByKey.set(key, timing);
-    }
-    return timing;
   }
 
   private readAnimTimings(el: HTMLElement): AbstractAnim[] {
@@ -140,31 +192,29 @@ export class AnimationProbe {
     });
   }
 
-  private evalAnims(anims: AbstractAnim[], t: number, segStart: number, segEnd: number, lineStart?: number, lineEnd?: number, wordStart?: number, wordEnd?: number): boolean {
+  private evalAnims(anims: AbstractAnim[], t: number, windows: ProbedWindows): boolean {
+    const { segment } = windows;
+    const line = windows.line ?? segment;
+    const word = windows.word ?? segment;
     return anims.some((a) => {
       let startT: number;
       switch (a.cssVar) {
-        case CssVariable.SECTION_STARTS:
-        case CssVariable.SECTION_ENDS:
-          // Section-level animations are not yet wired into per-frame
-          // timing — treat them as never active.
-          return false;
-        case CssVariable.SEGMENT_STARTS: startT = segStart; break;
-        case CssVariable.SEGMENT_ENDS: startT = segEnd; break;
+        case CssVariable.SEGMENT_STARTS: startT = segment.start; break;
+        case CssVariable.SEGMENT_ENDS: startT = segment.end; break;
 
-        case CssVariable.LINE_NOT_NARRATED_YET_STARTS: startT = segStart; break;
-        case CssVariable.LINE_NOT_NARRATED_YET_ENDS: startT = lineStart ?? segStart; break;
-        case CssVariable.LINE_BEING_NARRATED_STARTS: startT = lineStart ?? segStart; break;
-        case CssVariable.LINE_BEING_NARRATED_ENDS: startT = lineEnd ?? segEnd; break;
-        case CssVariable.LINE_ALREADY_NARRATED_STARTS: startT = lineEnd ?? segEnd; break;
-        case CssVariable.LINE_ALREADY_NARRATED_ENDS: startT = segEnd; break;
+        case CssVariable.LINE_NOT_NARRATED_YET_STARTS: startT = segment.start; break;
+        case CssVariable.LINE_NOT_NARRATED_YET_ENDS: startT = line.start; break;
+        case CssVariable.LINE_BEING_NARRATED_STARTS: startT = line.start; break;
+        case CssVariable.LINE_BEING_NARRATED_ENDS: startT = line.end; break;
+        case CssVariable.LINE_ALREADY_NARRATED_STARTS: startT = line.end; break;
+        case CssVariable.LINE_ALREADY_NARRATED_ENDS: startT = segment.end; break;
 
-        case CssVariable.WORD_NOT_NARRATED_YET_STARTS: startT = segStart; break;
-        case CssVariable.WORD_NOT_NARRATED_YET_ENDS: startT = wordStart ?? segStart; break;
-        case CssVariable.WORD_BEING_NARRATED_STARTS: startT = wordStart ?? segStart; break;
-        case CssVariable.WORD_BEING_NARRATED_ENDS: startT = wordEnd ?? segEnd; break;
-        case CssVariable.WORD_ALREADY_NARRATED_STARTS: startT = wordEnd ?? segEnd; break;
-        case CssVariable.WORD_ALREADY_NARRATED_ENDS: startT = segEnd; break;
+        case CssVariable.WORD_NOT_NARRATED_YET_STARTS: startT = segment.start; break;
+        case CssVariable.WORD_NOT_NARRATED_YET_ENDS: startT = word.start; break;
+        case CssVariable.WORD_BEING_NARRATED_STARTS: startT = word.start; break;
+        case CssVariable.WORD_BEING_NARRATED_ENDS: startT = word.end; break;
+        case CssVariable.WORD_ALREADY_NARRATED_STARTS: startT = word.end; break;
+        case CssVariable.WORD_ALREADY_NARRATED_ENDS: startT = segment.end; break;
 
         default: return false;
       }

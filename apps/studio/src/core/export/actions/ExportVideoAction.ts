@@ -1,14 +1,17 @@
-import type { Document, DecorationPlacementSide, VideoRenderer, SubtitleStyle, OutputFormat, RenderQuality, ScopedRenderOverride, AudioDiscardReason } from '@tscaps/engine';
+import type { Document, DecorationPlacementSide, VideoRenderer, SubtitleStyle, OutputFormat, RenderQuality, ScopedRenderOverride, AudioDiscardReason, TopLayerSource } from '@tscaps/engine';
 import { ElementRenderOverrides, SvgFilterBundle } from '@tscaps/engine';
 import { SheetSvgFilterScopeProvider } from '@core/sheets/services/SheetSvgFilterScopeProvider';
 import type { SheetSvgFilterDefinitionsResolver } from '@core/sheets/services/SheetSvgFilterDefinitionsResolver';
+import type { FileDownloader } from '@core/_shared/domain/FileDownloader';
 import type { EditorStore } from '@core/editor/store/EditorStore';
-import type { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
-import type { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
+import type { ElementStyles } from '@core/elements/domain/ElementStyles';
+import type { BehindActorSegmentOverrideRegistry } from '@core/person-segmentation/domain/BehindActorSegmentOverrideRegistry';
 import type { DecorationFilter } from '@core/captions/services/DecorationFilter';
 import type { CutAwareDocumentBuilder } from '@core/cuts/services/CutAwareDocumentBuilder';
 import type { DecorationPlacementResolver } from '@core/effect/services/DecorationPlacementResolver';
 import type { SheetCssVarsBuilder } from '@core/sheets/services/SheetCssVarsBuilder';
+import type { LayeredCaptionCssBuilder } from '@core/captions/services/LayeredCaptionCssBuilder';
+import type { CaptionFontOverridesBuilder } from '@core/fonts/services/CaptionFontOverridesBuilder';
 import type { SegmentColorRotation } from '@core/sheets/services/SegmentColorRotation';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 import type { FontFaceCssBuilder } from '@core/fonts/services/FontFaceCssBuilder';
@@ -21,17 +24,13 @@ import type { ExportProgressStore } from '@core/export/store/ExportProgressStore
 import type { ExportStore } from '@core/export/store/ExportStore';
 import type { OriginalVideoDownloadStore } from '@core/projects/store/OriginalVideoDownloadStore';
 import type { SaveProjectAction } from '@core/projects/actions/SaveProjectAction';
-import { ProjectSaveFailedError } from '@core/projects/domain/errors/ProjectSaveFailedError';
+import type { AppErrorTelemetryDescriber } from '@core/errors/services/AppErrorTelemetryDescriber';
+import type { NonBlockingFailureReporter } from '@core/errors/services/NonBlockingFailureReporter';
 import type { Telemetry } from '@core/telemetry/domain/Telemetry';
-import type { InlineStyleMap } from '@tscaps/engine';
-import type { BehindActorGatingService } from '@core/person-segmentation/services/BehindActorGatingService';
-import type { EnsureSegmentMasksCachedAction } from '@core/person-segmentation/actions/EnsureSegmentMasksCachedAction';
-import type { PersonSegmentationCacheRepository } from '@core/person-segmentation/domain/PersonSegmentationCacheRepository';
-import type { PersonSegmentationResult } from '@core/person-segmentation/domain/PersonSegmentationResult';
-import { ActorMaskTopLayerSource } from '@core/person-segmentation/infrastructure/ActorMaskTopLayerSource';
-import { BEHIND_ACTOR_LIFT_CSS } from '@core/person-segmentation/domain/BehindActorLiftCss';
+import type { TelemetryEventProperties } from '@shared/telemetry';
+import type { ExportRenderContribution, ExportRenderContributor } from '@core/export/domain/ExportRenderContributor';
 import type { SheetCustomizationDiff } from '@core/sheets/services/SheetCustomizationDiff';
-import { AppError } from '@core/_shared/domain/AppError';
+import { AppError } from '@core/errors/domain/AppError';
 import { ExportFailedError } from '@core/export/domain/ExportFailedError';
 
 /**
@@ -79,6 +78,8 @@ export class ExportVideoAction {
     private readonly downloadStore: OriginalVideoDownloadStore,
     private readonly renderer: VideoRenderer,
     private readonly sheetCssVarsBuilder: SheetCssVarsBuilder,
+    private readonly layeredCaptionCssBuilder: LayeredCaptionCssBuilder,
+    private readonly captionFontOverridesBuilder: CaptionFontOverridesBuilder,
     private readonly segmentColorRotation: SegmentColorRotation,
     private readonly fontFaceCssBuilder: FontFaceCssBuilder,
     private readonly sheetFontFamilyCollector: SheetFontFamilyCollector,
@@ -89,40 +90,29 @@ export class ExportVideoAction {
     private readonly cutAwareDocumentBuilder: CutAwareDocumentBuilder,
     private readonly exportPauseCoordinator: ExportPauseCoordinator,
     private readonly exportWriterFactory: ExportWriterFactory,
+    private readonly fileDownloader: FileDownloader,
     private readonly progressStore: ExportProgressStore,
     private readonly saveProject: SaveProjectAction,
     private readonly telemetry: Telemetry,
+    private readonly saveFailureReporter: NonBlockingFailureReporter,
+    private readonly errorTelemetryDescriber: AppErrorTelemetryDescriber,
     private readonly customizationDiff: SheetCustomizationDiff,
-    private readonly behindActorGatingService: BehindActorGatingService,
-    private readonly personSegmentationCache: PersonSegmentationCacheRepository,
-    private readonly ensureSegmentMasks: EnsureSegmentMasksCachedAction,
+    private readonly renderContributors: ReadonlyArray<ExportRenderContributor>,
     private readonly overlayHtmlProvider?: ExportOverlayHtmlProvider,
   ) {}
 
   async execute(options: ExportVideoOptions): Promise<void> {
-    const { video, document: subtitleDoc, sheets, projectId, wordStyleOverrides, segmentOverrides, decorationOverrides, cuts } = this.editorStore.snapshot();
+    const { video, document: subtitleDoc, sheets, projectId, behindActorOverrides, elementStyles, decorationOverrides, cuts } = this.editorStore.snapshot();
     const videoLayout = video.layout;
     if (!subtitleDoc || sheets.length === 0 || video.fileName === null) return;
 
     const visibleDoc = this.cutAwareDocumentBuilder.build(subtitleDoc, cuts);
     const renderDoc = this.decorationFilter.filterDocument(visibleDoc, sheets, decorationOverrides);
-    const wordOverridesBySheet = this.collectWordOverrides(renderDoc, wordStyleOverrides);
+    const fontOverrides = this.captionFontOverridesBuilder.build(renderDoc, sheets, elementStyles);
+    const wordOverridesBySheet = this.collectWordPlacements(renderDoc, elementStyles);
     const decorationPlacementsBySheet = this.collectDecorationPlacements(renderDoc, sheets);
     const usedCodepoints = this.documentUsedCodepointCollector.collect(renderDoc);
-    let personSegmentation = await this.loadPersonSegmentationResult(projectId);
-    if (personSegmentation !== null && await this.backfillForcedSegmentMasks(renderDoc, segmentOverrides)) {
-      personSegmentation = await this.loadPersonSegmentationResult(projectId) ?? personSegmentation;
-    }
-    // Without a detector result there are no masks to composite, so the
-    // effect stays fully off — publishing forced vars would move the
-    // caption without the occlusion that justifies the move.
-    const behindActorVars = personSegmentation
-      ? this.behindActorGatingService.buildSegmentInlineVars(
-          renderDoc,
-          personSegmentation.windows,
-          segmentOverrides.behindActorOverrides(),
-        )
-      : new Map<string, InlineStyleMap>();
+    const contribution = await this.prepareRenderContribution(renderDoc, sheets, behindActorOverrides, projectId);
 
     const styles: Record<string, SubtitleStyle> = {};
     for (const sheet of sheets) {
@@ -133,14 +123,17 @@ export class ExportVideoAction {
         document: subtitleDoc,
         inlineStyles,
         sheetCss,
-        wordOverrides: wordStyleOverrides,
-        segmentOverrides,
+        elementStyles,
       });
       const fontFaces = this.fontFaceCssBuilder.build(families, usedCodepoints);
+      const layeredCss = this.layeredCaptionCssBuilder.build(sheetCss, sheet.animations, elementStyles);
       const webRendering = sheet.template.rendering;
-      const liftCss = webRendering.behindActor.required ? `\n${BEHIND_ACTOR_LIFT_CSS}` : '';
       styles[sheet.id] = {
-        css: `${fontFaces ? `${fontFaces}\n${sheetCss}` : sheetCss}${liftCss}`,
+        // `@font-face` stays outside the layers: it declares no
+        // properties to cascade, and layering it would only make the
+        // rules harder to read.
+        css: fontFaces ? `${fontFaces}\n${layeredCss}` : layeredCss,
+        addressableElementIds: elementStyles.elementIds(),
         inlineStyles,
         alignment: sheet.alignmentConfig,
         rendering: {
@@ -150,10 +143,12 @@ export class ExportVideoAction {
             jpegQuality: webRendering.videoFrame.jpegQuality,
           },
           padding: webRendering.padding,
-          behindActor: { required: webRendering.behindActor.required },
+          textDirection: sheet.textDirection,
         },
-        wordOverrides: wordOverridesBySheet[sheet.id] ?? ElementRenderOverrides.empty(),
-        segmentOverrides: this.collectSegmentOverrides(subtitleDoc, sheet, segmentOverrides, behindActorVars),
+        wordOverrides: (wordOverridesBySheet[sheet.id] ?? ElementRenderOverrides.empty())
+          .mergedWith(fontOverrides.wordsBySheet[sheet.id] ?? ElementRenderOverrides.empty()),
+        segmentOverrides: this.collectSegmentOverrides(subtitleDoc, sheet, elementStyles, contribution.segmentClasses)
+          .mergedWith(fontOverrides.segmentsBySheet[sheet.id] ?? ElementRenderOverrides.empty()),
         svgFilters: new SvgFilterBundle(this.svgFilterDefinitionsResolver.resolve(sheet), new SheetSvgFilterScopeProvider(sheet)),
         decorationPlacements: decorationPlacementsBySheet[sheet.id] ?? new Map<string, DecorationPlacementSide>(),
       };
@@ -190,7 +185,7 @@ export class ExportVideoAction {
     this.captureTemplateUsageAtExport(sheets);
     try {
       const videoFile = await this.resolveOriginalVideoFile(video.file);
-      const topLayer = personSegmentation ? new ActorMaskTopLayerSource(personSegmentation.maskCache) : undefined;
+      const topLayer = contribution.topLayer ?? undefined;
       await this.renderer.render(
         {
           video: videoFile,
@@ -220,38 +215,88 @@ export class ExportVideoAction {
           ? { kind: 'audio-discarded', reason: audioDiscardedReason }
           : null,
       );
-      this.telemetry.capture('export_completed', {
-        format: options.format,
-        quality: options.quality,
-        resolution: this.describeResolution(options.resolution),
-        elapsed_ms: Math.round(performance.now() - startedAt),
-        audio_discarded: audioDiscardedReason !== null,
-      });
+      this.telemetry.capture('export_completed', this.buildCompletedProperties({
+        options,
+        startedAt,
+        audioDiscardedReason,
+        sheets,
+      }));
     } catch (err) {
       await writer.abort();
-      const isCanceled = err instanceof Error && err.name === 'AbortError';
-      const appError = isCanceled ? null : this.asExportError(err);
-      // Write `error` before flipping the export state so subscribers
-      // that react to the run-ending edge see the report already in
-      // place when they snapshot the editor.
-      this.editorStore.patch({ error: appError });
-      this.exportStore.finish(null);
-      if (appError) {
-        const cause = appError.cause instanceof Error ? appError.cause : null;
-        this.telemetry.capture('export_failed', {
-          format: options.format,
-          resolution: this.describeResolution(options.resolution),
-          elapsed_ms: Math.round(performance.now() - startedAt),
-          error_name: appError.name,
-          error_message: appError.message,
-          error_cause_name: cause ? cause.name : null,
-          error_cause_message: cause ? cause.message : null,
-        });
+      const elapsedMs = Math.round(performance.now() - startedAt);
+      if (this.isCancellation(err)) {
+        this.reportCancellation(options, elapsedMs);
+      } else {
+        this.reportFailure(err, options, elapsedMs);
       }
     } finally {
       console.timeEnd('[export] total');
       writer.dispose();
     }
+  }
+
+  private isCancellation(err: unknown): boolean {
+    return err instanceof Error && err.name === 'AbortError';
+  }
+
+  private reportCancellation(options: ExportVideoOptions, elapsedMs: number): void {
+    // Write the cleared error before flipping the export state so
+    // subscribers that react to the run-ending edge see the fresh
+    // slot when they snapshot the editor.
+    this.editorStore.patch({ error: null });
+    this.exportStore.finish(null);
+    this.telemetry.capture('export_cancelled', {
+      format: options.format,
+      quality: options.quality,
+      resolution: this.describeResolution(options.resolution),
+      elapsed_ms: elapsedMs,
+    });
+  }
+
+  private reportFailure(err: unknown, options: ExportVideoOptions, elapsedMs: number): void {
+    const appError = this.asExportError(err);
+    this.editorStore.patch({ error: appError });
+    this.exportStore.finish(null);
+    this.telemetry.capture('export_failed', {
+      format: options.format,
+      resolution: this.describeResolution(options.resolution),
+      elapsed_ms: elapsedMs,
+      ...this.errorTelemetryDescriber.describe(appError),
+    });
+  }
+
+  private buildCompletedProperties(inputs: {
+    options: ExportVideoOptions;
+    startedAt: number;
+    audioDiscardedReason: AudioDiscardReason | null;
+    sheets: readonly Sheet[];
+  }): TelemetryEventProperties {
+    const { video, cuts, elementStyles } = this.editorStore.snapshot();
+    return {
+      format: inputs.options.format,
+      quality: inputs.options.quality,
+      resolution: this.describeResolution(inputs.options.resolution),
+      elapsed_ms: Math.round(performance.now() - inputs.startedAt),
+      audio_discarded: inputs.audioDiscardedReason !== null,
+      source_width: video.layout?.width ?? null,
+      source_height: video.layout?.height ?? null,
+      source_duration_s: video.duration,
+      source_size_mb: video.file ? this.videoSizeInMegabytes(video.file) : null,
+      sheet_count: inputs.sheets.length,
+      total_customized_count: this.totalCustomizedCount(inputs.sheets),
+      has_cuts: !cuts.isEmpty(),
+      has_element_styles: !elementStyles.isEmpty(),
+    };
+  }
+
+  private videoSizeInMegabytes(videoFile: File): number {
+    return Math.round((videoFile.size / (1024 * 1024)) * 10) / 10;
+  }
+
+  private totalCustomizedCount(sheets: readonly Sheet[]): number {
+    let count = 0;
+    for (const sheet of sheets) count += this.customizationDiff.diff(sheet).length;
+    return count;
   }
 
   private describeResolution(resolution: ExportResolution): string {
@@ -308,10 +353,10 @@ export class ExportVideoAction {
       await this.saveProject.execute();
     } catch (cause) {
       // Best-effort: a save failure here must not block an export the
-      // user already committed to. The error surfaces in the editor
-      // store so the next render-tick reflects it.
+      // user already committed to, and must not land in the editor's
+      // error slot, which is what the export itself reports through.
       console.error('[export] auto-save before render failed', cause);
-      this.editorStore.patch({ error: new ProjectSaveFailedError({ cause }) });
+      this.saveFailureReporter.report(cause);
     }
   }
 
@@ -339,23 +384,18 @@ export class ExportVideoAction {
   }
 
   private triggerDownload(blob: Blob, format: OutputFormat): void {
-    const url = URL.createObjectURL(blob);
-    const a = window.document.createElement('a');
-    a.href = url;
-    a.download = `subtitled.${format}`;
-    a.click();
-    URL.revokeObjectURL(url);
+    this.fileDownloader.download(blob, `subtitled.${format}`);
   }
 
   /**
-   * Groups per-word and per-decoration overrides by the sheet id of
-   * the section each element belongs to. The renderer dispatches per
-   * frame using `Section.kind` as the lookup key, so each bucket maps
-   * to one `SubtitleStyle.wordOverrides`.
+   * Groups every placed word and glyph by the sheet id of the section
+   * it belongs to. The renderer dispatches per frame using
+   * `Section.kind` as the lookup key, so each bucket maps to one
+   * `SubtitleStyle.wordOverrides`.
    */
-  private collectWordOverrides(
+  private collectWordPlacements(
     doc: Document,
-    overrides: WordStyleOverrideRegistry,
+    elementStyles: ElementStyles,
   ): Record<string, ElementRenderOverrides> {
     const buckets: Record<string, Array<readonly [string, ScopedRenderOverride]>> = {};
     for (const section of doc.sections) {
@@ -363,13 +403,13 @@ export class ExportVideoAction {
       for (const segment of section.segments) {
         for (const line of segment.lines) {
           for (const word of line.words) {
-            const wordEntry = this.buildOverrideEntry(word.id, overrides);
+            const wordEntry = this.buildPlacementEntry(word.id, elementStyles);
             if (wordEntry) {
               const bucket = buckets[sheetId] ?? (buckets[sheetId] = []);
               bucket.push([word.id, wordEntry]);
             }
             if (word.decoration) {
-              const decorationEntry = this.buildOverrideEntry(word.decoration.id, overrides);
+              const decorationEntry = this.buildPlacementEntry(word.decoration.id, elementStyles);
               if (decorationEntry) {
                 const bucket = buckets[sheetId] ?? (buckets[sheetId] = []);
                 bucket.push([word.decoration.id, decorationEntry]);
@@ -410,85 +450,66 @@ export class ExportVideoAction {
     return result;
   }
 
-  private buildOverrideEntry(
-    elementId: string,
-    overrides: WordStyleOverrideRegistry,
-  ): ScopedRenderOverride | null {
-    const alignment = overrides.buildAlignmentOverride(elementId);
-    const inlineStyles = overrides.buildInlineStyles(elementId);
-    const scoped: ScopedRenderOverride = {
-      ...(Object.keys(inlineStyles).length > 0 ? { inlineStyles } : {}),
-      ...(alignment ? { alignment } : {}),
-    };
-    if (!scoped.inlineStyles && !scoped.alignment) return null;
-    return scoped;
+  private buildPlacementEntry(elementId: string, elementStyles: ElementStyles): ScopedRenderOverride | null {
+    const placement = elementStyles.placementOf(elementId);
+    return placement ? { alignment: placement } : null;
+  }
+
+  /**
+   * Runs every render contributor against the same context and merges
+   * the results: per-segment classes are concatenated in contributor
+   * order, and at most one contributor may supply a top layer — a
+   * second one is a programming error in the composition root.
+   */
+  private async prepareRenderContribution(
+    document: Document,
+    sheets: Sheet[],
+    behindActorOverrides: BehindActorSegmentOverrideRegistry,
+    projectId: string | null,
+  ): Promise<ExportRenderContribution> {
+    const segmentClasses = new Map<string, ReadonlyArray<string>>();
+    let topLayer: TopLayerSource | null = null;
+    for (const contributor of this.renderContributors) {
+      const contribution = await contributor.prepare({ document, sheets, behindActorOverrides, projectId });
+      for (const [segmentId, classes] of contribution.segmentClasses) {
+        segmentClasses.set(segmentId, [...(segmentClasses.get(segmentId) ?? []), ...classes]);
+      }
+      if (contribution.topLayer !== null) {
+        if (topLayer !== null) throw new Error('Multiple export render contributors supplied a top layer.');
+        topLayer = contribution.topLayer;
+      }
+    }
+    return { segmentClasses, topLayer };
   }
 
   /**
    * Builds the per-segment overrides for a sheet by walking the
    * document's segments in document order, asking the rotation resolver
-   * for each and merging the user's per-segment overrides. Segments
-   * with no inline-style and no alignment override are omitted so the
-   * renderer falls back to the sheet's root defaults.
+   * for each and merging the user's per-segment overrides with the
+   * contributed classes. Segments with no inline-style, no alignment
+   * override and no classes are omitted so the renderer falls back to
+   * the sheet's root defaults.
    */
-  private async loadPersonSegmentationResult(projectId: string | null): Promise<PersonSegmentationResult | null> {
-    if (projectId === null) return null;
-    try {
-      return await this.personSegmentationCache.load(projectId);
-    } catch (error) {
-      console.error('[export] failed to load person-segmentation cache', error);
-      return null;
-    }
-  }
-
-  /**
-   * Fills mask gaps for every force-on segment before the render
-   * starts — a forced segment outside the detector's windows has no
-   * masks from the initial scan (or lost them to a re-scan on another
-   * device). Best-effort per segment: a failed backfill logs and the
-   * export proceeds with whatever the cache holds. Returns whether any
-   * backfill ran, so the caller knows to reload the cached result.
-   */
-  private async backfillForcedSegmentMasks(doc: Document, segmentOverrides: SegmentOverrides): Promise<boolean> {
-    let anyRan = false;
-    for (const section of doc.sections) {
-      for (const segment of section.segments) {
-        if (segmentOverrides.behindActorOverrideFor(segment.id) !== 'force-on') continue;
-        try {
-          await this.ensureSegmentMasks.execute({
-            segmentId: segment.id,
-            range: { start: segment.time.start, end: segment.time.end },
-          });
-          anyRan = true;
-        } catch (error) {
-          console.error('[export] failed to backfill masks for forced segment', segment.id, error);
-        }
-      }
-    }
-    return anyRan;
-  }
-
   private collectSegmentOverrides(
     doc: Document,
     sheet: Sheet,
-    segmentOverrides: SegmentOverrides,
-    behindActorVars: ReadonlyMap<string, InlineStyleMap>,
+    elementStyles: ElementStyles,
+    contributedSegmentClasses: ReadonlyMap<string, ReadonlyArray<string>>,
   ): ElementRenderOverrides {
     const entries: Array<readonly [string, ScopedRenderOverride]> = [];
     let segIdx = 0;
     for (const section of doc.sections) {
       if (section.kind !== sheet.id) continue;
       for (const segment of section.segments) {
-        const colorOverrides = this.segmentColorRotation.resolveOverrides(sheet, segment.id, segIdx);
-        const userInlineStyles = segmentOverrides.buildInlineStyles(segment.id);
-        const behindActorInlineStyles = behindActorVars.get(segment.id) ?? {};
-        const inlineStyles = { ...colorOverrides, ...userInlineStyles, ...behindActorInlineStyles };
-        const alignment = segmentOverrides.buildAlignmentOverride(segment.id);
+        const inlineStyles = this.segmentColorRotation.resolveOverrides(sheet, segment.id, segIdx);
+        const alignment = elementStyles.placementOf(segment.id);
+        const classes = contributedSegmentClasses.get(segment.id);
         const scoped: ScopedRenderOverride = {
           ...(Object.keys(inlineStyles).length > 0 ? { inlineStyles } : {}),
           ...(alignment ? { alignment } : {}),
+          ...(classes && classes.length > 0 ? { classes } : {}),
         };
-        if (scoped.inlineStyles || scoped.alignment) entries.push([segment.id, scoped]);
+        if (scoped.inlineStyles || scoped.alignment || scoped.classes) entries.push([segment.id, scoped]);
         segIdx++;
       }
     }

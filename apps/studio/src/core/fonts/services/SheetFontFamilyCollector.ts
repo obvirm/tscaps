@@ -1,7 +1,8 @@
 import type { Document } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
-import type { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
-import type { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
+import type { ElementStyles } from '@core/elements/domain/ElementStyles';
+import { ElementFieldId } from '@core/elements/domain/fields/ElementFieldId';
+import type { FontStackResolver } from '@core/fonts/services/FontStackResolver';
 import { TemplateCssVariable } from '@core/templates/domain/definition/TemplateCssVariable';
 
 const FONT_FAMILY_DECLARATION = /font-family\s*:\s*([^;}]+)/g;
@@ -12,8 +13,7 @@ export interface SheetFontFamilyCollectorInput {
   readonly document: Document;
   readonly inlineStyles: Record<string, string>;
   readonly sheetCss: string;
-  readonly wordOverrides: WordStyleOverrideRegistry;
-  readonly segmentOverrides: SegmentOverrides;
+  readonly elementStyles: ElementStyles;
 }
 
 /**
@@ -22,14 +22,15 @@ export interface SheetFontFamilyCollectorInput {
  * family:
  *
  *  1. The sheet's primary typography font.
- *  2. Per-word and per-segment `fontFamily` overrides.
+ *  2. The face given to any single word or segment.
  *  3. The user's value for every `font`-typed styleControl the
  *     template exposes.
- *  4. Family names hard-coded in the template CSS — quoted literals
- *     *outside* `var(...)` expressions. `var(...)` fallbacks are
- *     skipped because the user-set value via sources 1–3 always wins;
- *     embedding their unused fonts would bundle ~50–200 KB of payload
- *     per rendered frame for nothing.
+ *  4. Family names hard-coded in the template CSS, and in the CSS of
+ *     every element the sheet renders — quoted literals *outside*
+ *     `var(...)` expressions. `var(...)` fallbacks are skipped because
+ *     the user-set value via sources 1–3 always wins; embedding their
+ *     unused fonts would bundle ~50–200 KB of payload per rendered
+ *     frame for nothing.
  *
  * The result is meant to feed `FontFaceCssBuilder.build` so each
  * frame's embedded stylesheet ships only the `@font-face` blocks the
@@ -37,41 +38,57 @@ export interface SheetFontFamilyCollectorInput {
  */
 export class SheetFontFamilyCollector {
 
+  constructor(private readonly fontStackResolver: FontStackResolver) {}
+
   collect(input: SheetFontFamilyCollectorInput): Set<string> {
     const families = new Set<string>();
     this.addPrimaryFamily(input.inlineStyles, families);
-    this.addPerElementOverrideFamilies(input, families);
+    this.addPerElementFamilies(input, families);
     this.addFontControlFamilies(input.sheet, input.inlineStyles, families);
     this.addCssLiteralFamilies(input.sheetCss, families);
+    this.addElementCssLiteralFamilies(input.elementStyles, families);
     return families;
   }
 
   private addPrimaryFamily(inlineStyles: Record<string, string>, out: Set<string>): void {
-    const value = inlineStyles[TemplateCssVariable.FONT_FAMILY];
-    if (value) out.add(this.unquote(value));
+    this.addStack(inlineStyles[TemplateCssVariable.FONT_FAMILY], out);
   }
 
-  private addPerElementOverrideFamilies(input: SheetFontFamilyCollectorInput, out: Set<string>): void {
+  // A chosen face is collected as its full stack: the element renders
+  // with that face's stand-ins when its text is in a script the face
+  // cannot draw, and those are not necessarily in the sheet's own stack.
+  private addPerElementFamilies(input: SheetFontFamilyCollectorInput, out: Set<string>): void {
     for (const section of input.document.sections) {
       if (section.kind !== input.sheet.id) continue;
       for (const segment of section.segments) {
-        const segFf = input.segmentOverrides.getStyle(segment.id).fontFamily;
-        if (segFf) out.add(segFf);
-        for (const line of segment.lines) {
-          for (const word of line.words) {
-            const wordFf = input.wordOverrides.get(word.id).fontFamily;
-            if (wordFf) out.add(wordFf);
-          }
+        this.addChosenFace(input.elementStyles, segment.id, out);
+        for (const word of segment.getWords()) {
+          this.addChosenFace(input.elementStyles, word.id, out);
         }
       }
+    }
+  }
+
+  private addChosenFace(elementStyles: ElementStyles, elementId: string, out: Set<string>): void {
+    const family = elementStyles.fieldText(elementId, ElementFieldId.FONT_FAMILY);
+    if (family === null) return;
+    this.addStack(this.fontStackResolver.resolve(family), out);
+  }
+
+  // Every element's CSS is scanned, not only the ones a field wrote:
+  // the text is editable, so a face can arrive there without any field
+  // holding it, and a family nobody collects is a family the export
+  // ships no `@font-face` for.
+  private addElementCssLiteralFamilies(elementStyles: ElementStyles, out: Set<string>): void {
+    for (const style of elementStyles.all().values()) {
+      this.addCssLiteralFamilies(style.css, out);
     }
   }
 
   private addFontControlFamilies(sheet: Sheet, inlineStyles: Record<string, string>, out: Set<string>): void {
     for (const control of sheet.template.styleControls) {
       if (control.type !== 'font') continue;
-      const value = inlineStyles[`--tscaps-${control.id}`];
-      if (value) out.add(this.unquote(value));
+      this.addStack(inlineStyles[`--tscaps-${control.id}`], out);
     }
   }
 
@@ -114,6 +131,21 @@ export class SheetFontFamilyCollector {
       i++;
     }
     return i;
+  }
+
+  /**
+   * Adds every family of a `font-family` stack. A chosen font arrives with
+   * the stand-ins that cover the scripts it cannot draw appended to it, and
+   * a caption mixing scripts renders in more than one of them — collecting
+   * only the first would leave those faces out of the exported frames while
+   * the preview, which loads the whole catalog, kept showing them.
+   */
+  private addStack(value: string | undefined, out: Set<string>): void {
+    if (!value) return;
+    for (const family of value.split(',')) {
+      const name = this.unquote(family.trim());
+      if (name) out.add(name);
+    }
   }
 
   /**

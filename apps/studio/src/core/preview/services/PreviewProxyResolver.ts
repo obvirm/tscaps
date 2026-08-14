@@ -4,6 +4,7 @@ import type {
   PreviewProxyProgressCallback,
 } from '@core/preview/domain/PreviewProxyGenerator';
 import type { PreviewProxyRepository } from '@core/preview/domain/PreviewProxyRepository';
+import type { NonBlockingFailureReporter } from '@core/errors/services/NonBlockingFailureReporter';
 
 /**
  * Outcome of a source-based proxy resolution.
@@ -24,13 +25,25 @@ export interface PreviewProxyResolution {
  * Reads or generates a preview proxy. Does not touch the editor
  * store; publishing the resolved blob and persisting the fresh proxy
  * are both caller concerns.
+ *
+ * The proxy is an optimization, never a requirement: it makes
+ * playback cheap, and the source plays without it. So generation
+ * failures resolve to the source bytes rather than propagating.
+ * Losing a smooth preview is a far smaller harm than discarding
+ * everything the pipeline produced up to that point, which is what
+ * a thrown error costs the person waiting on it.
  */
 export class PreviewProxyResolver {
   constructor(
     private readonly repository: PreviewProxyRepository,
     private readonly generator: PreviewProxyGenerator,
+    private readonly fallbackReporter: NonBlockingFailureReporter,
     private readonly enabled: boolean,
   ) {}
+
+  private sizeInMb(source: Blob): number {
+    return Math.round((source.size / (1024 * 1024)) * 10) / 10;
+  }
 
   /**
    * Reads the proxy for `projectId` from the repository. Resolves to
@@ -43,16 +56,24 @@ export class PreviewProxyResolver {
   }
 
   /**
-   * Generates a fresh proxy from `source`. When the pipeline is
-   * disabled, resolves to the `source` bytes verbatim as
-   * `previewBlob` and a `null` `freshProxy`.
+   * Generates a fresh proxy from `source`. Resolves to the `source`
+   * bytes verbatim as `previewBlob` and a `null` `freshProxy` when
+   * the pipeline is disabled, and equally when generation fails —
+   * the failure is reported, not raised, so callers get a playable
+   * blob in every case and never have to handle proxy errors.
    */
   async fromSource(
     source: Blob,
     onProgress?: PreviewProxyProgressCallback,
   ): Promise<PreviewProxyResolution> {
     if (!this.enabled) return { previewBlob: source, freshProxy: null };
-    const proxy = await this.generator.generate(source, onProgress);
-    return { previewBlob: proxy.blob, freshProxy: proxy };
+    try {
+      const proxy = await this.generator.generate(source, onProgress);
+      return { previewBlob: proxy.blob, freshProxy: proxy };
+    } catch (cause) {
+      console.error('[preview-proxy] generation failed, continuing on the source', cause);
+      this.fallbackReporter.report(cause, { source_size_mb: this.sizeInMb(source) });
+      return { previewBlob: source, freshProxy: null };
+    }
   }
 }

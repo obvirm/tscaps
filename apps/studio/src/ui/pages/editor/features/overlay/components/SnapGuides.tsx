@@ -4,8 +4,9 @@ import { useOverlayDragState } from '@ui/pages/editor/features/overlay/hooks/use
 
 /**
  * Visual snap guides drawn over the video while a drag is in progress.
- * For a segment drag, renders 3 horizontal + 3 vertical bands and
- * highlights whichever the drag has snapped to. For a word drag, only
+ * For a segment drag, renders the bands the dragged caption can land on
+ * — a box too big to tell a margin from the centre is offered fewer —
+ * and highlights whichever the drag has snapped to. For a word drag, only
  * the horizontal-center vertical line is drawn (the only weighted
  * guide for words) and highlights when snapped. Renders nothing when
  * no drag is in progress.
@@ -18,10 +19,7 @@ export const SnapGuides = memo(function SnapGuides() {
 });
 
 const SegmentSnapGuides = memo(function SegmentSnapGuides() {
-  const controller = useOverlayManipulationController();
   const dragState = useOverlayDragState();
-  const verticalGuides = useMemo(() => controller.verticalGuides(), [controller]);
-  const horizontalGuides = useMemo(() => controller.horizontalGuides(), [controller]);
 
   if (!dragState || dragState.kind !== 'segment') return null;
 
@@ -30,14 +28,14 @@ const SegmentSnapGuides = memo(function SegmentSnapGuides() {
 
   return (
     <div className="subtitle-overlay-snap-guides" aria-hidden>
-      {verticalGuides.map((guide) => (
+      {dragState.verticalGuides.map((guide) => (
         <div
           key={`v-${guide.center}`}
           className={horizontalLineClass(guide.center === activeVerticalCenter)}
           style={topPercentStyle(guide.center)}
         />
       ))}
-      {horizontalGuides.map((guide) => (
+      {dragState.horizontalGuides.map((guide) => (
         <div
           key={`h-${guide.center}`}
           className={verticalLineClass(guide.center === activeHorizontalCenter)}

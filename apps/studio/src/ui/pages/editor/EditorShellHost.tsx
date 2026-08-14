@@ -13,6 +13,7 @@ import { PreprocessingScreenHost } from '@ui/pages/editor/features/preprocessing
 import { StartFlowHost } from '@ui/pages/editor/features/preprocessing/StartFlowHost';
 import { useStartFlowSlot } from '@bootstrap/StartFlowSlotContext';
 import { PersonSegmentationDialogHost } from '@ui/pages/editor/features/person-segmentation/PersonSegmentationDialogHost';
+import { UntranscribedRegionsDialog } from '@ui/pages/editor/features/preprocessing/components/UntranscribedRegionsDialog';
 import { ExportingScreenHost } from '@ui/pages/editor/features/export/ExportingScreenHost';
 import { ExportFlowHost } from '@ui/pages/editor/features/export/ExportFlowHost';
 
@@ -85,6 +86,7 @@ export function EditorShellHost({ onBack }: EditorShellHostProps) {
       />
       {startFlowSlot ?? <StartFlowHost onBack={onBack} />}
       <PersonSegmentationDialogHost />
+      <UntranscribedRegionsDialog />
       <ExportFlowHost
         settingsOpen={exportSettingsOpen}
         onSettingsOpenChange={setExportSettingsOpen}

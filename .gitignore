@@ -8,3 +8,13 @@ dist/
 !.env.example
 .DS_Store
 apps/studio/tests/e2e/fixtures/crash-repro-*.mp4
+
+# Compiled from the Sass sources beside them by `pnpm templates:build`,
+# which the root postinstall runs. Generated output is not committed here
+# for the same reason it is not committed upstream: it would drift from
+# the source it is built from.
+templates/*/style.build.css
+templates/*/filters.build.svg
+templates/*/controls.build.json
+templates/*/animations.build.json
+templates/_lib/animation/presets.build.json

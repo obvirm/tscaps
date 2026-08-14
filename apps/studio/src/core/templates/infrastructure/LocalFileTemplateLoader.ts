@@ -1,11 +1,16 @@
 import type { AlignmentConfig } from '@tscaps/engine';
-import { SvgFilterDefinitions, SvgFilterDefinitionsParser } from '@tscaps/engine';
-import type { JsonTemplateSchema, JsonRenderingConfig, JsonFeaturesConfig, EffectConfigOverride, SegmentSplitterEntry } from '@core/templates/domain/definition/JsonTemplateSchema';
+import { SvgFilterDefinitions, SvgFilterDefinitionsParser, TagConditionParser } from '@tscaps/engine';
+import type { JsonTemplateSchema, JsonRenderingConfig, JsonFeaturesConfig, JsonBehindActorTemplateConfig, EffectConfigOverride, SegmentSplitterEntry } from '@core/templates/domain/definition/JsonTemplateSchema';
+import type { ControlField } from '@core/templates/domain/definition/ControlField';
+import type { DeclaredAnimation } from '@core/templates/domain/definition/DeclaredAnimation';
+import type { StyleControlResolver } from '@core/templates/services/controls/StyleControlResolver';
 import TemplateLoader from '@core/templates/domain/TemplateLoader';
 import { Template } from '@core/templates/domain/Template';
 import { TemplateMetadata } from '@core/templates/domain/TemplateMetadata';
 import type { RenderingConfig } from '@core/templates/domain/definition/RenderingConfig';
-import type { FeaturesConfig, RotationSupport } from '@core/templates/domain/definition/FeaturesConfig';
+import type { AnimationSupport, FeaturesConfig, RotationSupport } from '@core/templates/domain/definition/FeaturesConfig';
+import type { BehindActorTemplateConfig } from '@core/person-segmentation/domain/BehindActorTemplateConfig';
+import { BEHIND_ACTOR_TEMPLATE_CONFIG_DEFAULT } from '@core/person-segmentation/domain/BehindActorTemplateConfig';
 import { BoxEdgesShorthandParser } from '@core/templates/services/BoxEdgesShorthandParser';
 import { CssAssetReferenceResolver } from '@core/templates/services/CssAssetReferenceResolver';
 import type { SegmentSplitterConfig } from '@core/segment-splitter/domain/SegmentSplitterConfig';
@@ -25,6 +30,20 @@ export type TemplateAssets = Record<string, {
   config: JsonTemplateSchema;
   /** Raw `filters.svg` contents when the template ships one. */
   filtersSvg?: string;
+  /**
+   * Controls the stylesheet declared for itself while compiling, by
+   * using a primitive that reads one. They are the template's controls
+   * as much as the hand-written ones — only their declaration lives at
+   * the point of use instead of in `template.json`.
+   */
+  declaredControls?: readonly ControlField[];
+  /**
+   * The library animations the stylesheet applied while compiling, each
+   * with the clock it runs on. What the template moves, as opposed to
+   * what it looks like — absent for a template that moves nothing, or
+   * that moves on keyframes of its own.
+   */
+  declaredAnimations?: readonly DeclaredAnimation[];
 }>;
 
 const ALIGNMENT_DEFAULT: AlignmentConfig = { verticalAlign: 'top', verticalOffset: 0.75, horizontalAlign: 'center', horizontalOffset: 0.5 };
@@ -32,10 +51,10 @@ const RENDERING_DEFAULT: RenderingConfig = {
   splitWordsIntoLetters: false,
   videoFrame: { required: false, jpegQuality: 0.7, previewMode: 'omit' },
   padding: null,
-  behindActor: { required: false },
 };
 const FEATURES_DEFAULT: FeaturesConfig = {
   rotation: { segment: true, word: true },
+  animation: { segment: true, line: true, word: true, decoration: true },
   behindActorOverride: true,
 };
 const SEGMENT_SPLITTERS_DEFAULT: SegmentSplitterEntry[] = [
@@ -54,7 +73,9 @@ const MANDATORY_SEGMENT_SPLITTER: SegmentSplitterConfig['type'] = 'speaker_chang
 // read via `var(<name>, <fallback>)` so the global controls take
 // effect. Rotation vars are intentionally excluded — they are opt-in
 // per template (see `detectRotationSupport`), and `HIGHLIGHT_COLOR`
-// is a per-template styleControl.
+// is a per-template styleControl. `TEXT_DIRECTION` is excluded too:
+// only a template whose design points at a side has anything to mirror,
+// and it reads the value through a style query rather than `var(`.
 const REQUIRED_UNIVERSAL_CSS_VARS: ReadonlyArray<TemplateCssVariable> = [
   TemplateCssVariable.FONT_FAMILY,
   TemplateCssVariable.FONT_SIZE,
@@ -78,6 +99,8 @@ export class LocalFileTemplateLoader implements TemplateLoader {
     private readonly effects: EffectRegistry,
     private readonly svgFilterDefinitionsParser: SvgFilterDefinitionsParser,
     private readonly boxEdgesShorthandParser: BoxEdgesShorthandParser,
+    private readonly tagConditionParser: TagConditionParser,
+    private readonly styleControlResolver: StyleControlResolver,
   ) {}
 
   async load(name: string): Promise<Template> {
@@ -88,6 +111,7 @@ export class LocalFileTemplateLoader implements TemplateLoader {
     const { config } = asset;
     const rendering = this.loadRendering(config.rendering);
     const features = this.loadFeatures(config.features);
+    const behindActor = this.loadBehindActor(config.behindActor);
     const css = this.cssAssetReferenceResolver.resolve(asset.css);
     this.warnOnMissingUniversalCssVars(name, css);
     return new Template(
@@ -97,25 +121,68 @@ export class LocalFileTemplateLoader implements TemplateLoader {
       this.loadAlignment(config.alignment),
       rendering,
       features,
+      behindActor,
       this.loadEffectConfigs(config.effects),
       this.loadSegmentSplitters(config.segmentSplitters),
       this.loadLineSplitter(config.lineSplitter),
-      config.styleControls ?? [],
+      this.buildStyleControls(config, asset.declaredControls),
       config.variants ?? [],
       asset.filtersSvg
         ? this.svgFilterDefinitionsParser.parse(asset.filtersSvg)
         : SvgFilterDefinitions.empty(),
       css,
       asset.filtersSvg ?? '',
+      asset.declaredAnimations ?? [],
     );
+  }
+
+  /**
+   * Assembles the template's `ControlField` list from the two sources
+   * that declare controls — `styleControls` in `template.json` and the
+   * primitives the stylesheet uses — running each hand-declared entry
+   * through the resolver so a catalogued id needs only its default.
+   */
+  private buildStyleControls(
+    config: JsonTemplateSchema,
+    declaredByStylesheet: readonly ControlField[] | undefined,
+  ): ControlField[] {
+    const handDeclared = (config.styleControls ?? []).map((entry) => this.styleControlResolver.resolve(entry));
+    return [...handDeclared, ...(declaredByStylesheet ?? [])];
   }
 
   private loadRendering(config: JsonRenderingConfig | undefined): RenderingConfig {
     const splitWordsIntoLetters = config?.splitWordsIntoLetters ?? RENDERING_DEFAULT.splitWordsIntoLetters;
-    const videoFrame = { ...RENDERING_DEFAULT.videoFrame, ...config?.videoFrame };
+    const videoFrame = {
+      ...RENDERING_DEFAULT.videoFrame,
+      ...config?.videoFrame,
+      jpegQuality: this.resolveJpegQuality(config?.videoFrame?.jpegQuality),
+    };
     const padding = config?.padding ? this.boxEdgesShorthandParser.parse(config.padding) : null;
-    const behindActor = { ...RENDERING_DEFAULT.behindActor, ...config?.behindActor };
-    return { splitWordsIntoLetters, videoFrame, padding, behindActor };
+    return { splitWordsIntoLetters, videoFrame, padding };
+  }
+
+  /**
+   * Falls back to the default for anything that is not a number in `[0, 1]`.
+   * The parameter is `unknown` because the value arrives from parsed JSON,
+   * where the declared type guarantees nothing.
+   *
+   * Load-bearing because the canvas encode APIs disagree on how to read an
+   * unusable quality: Chromium's `convertToBlob` treats a missing one as 1.0
+   * while `toDataURL` applies its own ~0.92 default. Either way the frame
+   * silently encodes far heavier than the template asked for, with no error.
+   */
+  private resolveJpegQuality(value: unknown): number {
+    const isUsable = typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
+    return isUsable ? value : RENDERING_DEFAULT.videoFrame.jpegQuality;
+  }
+
+  private loadBehindActor(config: JsonBehindActorTemplateConfig | undefined): BehindActorTemplateConfig {
+    return {
+      required: config?.required ?? BEHIND_ACTOR_TEMPLATE_CONFIG_DEFAULT.required,
+      tagCondition: config?.tagCondition
+        ? this.tagConditionParser.parse(config.tagCondition)
+        : null,
+    };
   }
 
   /** Every feature flag defaults to `true`; the template author only
@@ -123,7 +190,18 @@ export class LocalFileTemplateLoader implements TemplateLoader {
   private loadFeatures(config: JsonFeaturesConfig | undefined): FeaturesConfig {
     return {
       rotation: this.loadRotationSupport(config?.rotation),
+      animation: this.loadAnimationSupport(config?.animation),
       behindActorOverride: config?.behindActorOverride ?? FEATURES_DEFAULT.behindActorOverride,
+    };
+  }
+
+  private loadAnimationSupport(declared: JsonFeaturesConfig['animation']): AnimationSupport {
+    const shipped = FEATURES_DEFAULT.animation;
+    return {
+      segment: declared?.segment ?? shipped.segment,
+      line: declared?.line ?? shipped.line,
+      word: declared?.word ?? shipped.word,
+      decoration: declared?.decoration ?? shipped.decoration,
     };
   }
 

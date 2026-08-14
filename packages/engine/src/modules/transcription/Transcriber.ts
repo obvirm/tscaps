@@ -15,7 +15,21 @@ export type TranscriberProgressEvent =
   | { stage: 'loading'; progress: number }
   | { stage: 'inferring'; progress?: number };
 
+/**
+ * An audio region, in absolute seconds, that transcription deliberately
+ * left empty because decoding produced no trustworthy output for it.
+ */
+export interface UntranscribedRegion {
+  startSeconds: number;
+  endSeconds: number;
+}
+
 export interface Transcriber {
   onProgress?: (event: TranscriberProgressEvent) => void;
+  /**
+   * Fired at most once per region, before `transcribe` resolves.
+   * Implementations that always cover the full audio never fire it.
+   */
+  onUntranscribedRegion?: (region: UntranscribedRegion) => void;
   transcribe(audio: Blob, options?: TranscriberOptions): Promise<Document>;
 }

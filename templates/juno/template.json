@@ -17,22 +17,20 @@
       "label": "Text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "highlight-color",
       "label": "Highlight",
       "type": "color",
       "default": "#ffdd00",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "shadow-color",
-      "label": "Shadow",
-      "type": "color",
-      "default": "#000000",
-      "advanced": true,
-      "group": "colors"
+      "default": "#000000"
     },
     {
       "id": "stroke-width",
@@ -43,8 +41,8 @@
       "max": 0.16,
       "step": 0.01,
       "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "shadow-depth",
@@ -54,7 +52,8 @@
       "min": 0.5,
       "max": 2,
       "step": 0.1,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     }
   ],
   "segmentSplitters": [

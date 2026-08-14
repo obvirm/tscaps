@@ -96,6 +96,7 @@ export class RafVideoFramePump implements VideoFramePump {
   private scrubConsumerTask: AbortController | null = null;
   private warmingStream = false;
   private pendingRestartOutputSec: number | null = null;
+  private paintCeilingOutputSec: number | null = null;
 
   constructor(
     private readonly track: PreviewVideoTrack,
@@ -147,6 +148,10 @@ export class RafVideoFramePump implements VideoFramePump {
     this.currentDecodeTask = null;
     this.currentPaintTeardown?.();
     this.currentPaintTeardown = null;
+  }
+
+  paintNoFurtherThan(outputSec: number | null): void {
+    this.paintCeilingOutputSec = outputSec;
   }
 
   async paintSingleFrameAt(outputSec: number): Promise<void> {
@@ -327,13 +332,17 @@ export class RafVideoFramePump implements VideoFramePump {
       if (signal.aborted) return;
       const target = this.clock.currentOutputTimeSec();
       diagnostics?.recordClockTarget(target);
-      const frame = buffer.takeLatestUpTo(target);
+      const frame = buffer.takeLatestUpTo(this.paintableUpTo(target));
       diagnostics?.recordRafTick(buffer.size(), frame !== null);
       diagnostics?.recordBufferOutputTimeRange(buffer.headOutputTimeSec(), buffer.tailOutputTimeSec());
       if (frame) this.paintAndCloseFrame(frame, diagnostics);
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
+  }
+
+  private paintableUpTo(clockTarget: number): number {
+    return this.paintCeilingOutputSec === null ? clockTarget : Math.min(clockTarget, this.paintCeilingOutputSec);
   }
 
   private paintAndCloseFrame(

@@ -1,10 +1,11 @@
 import type { Document } from '@tscaps/engine';
-import type { AppError } from '@core/_shared/domain/AppError';
+import type { AppError } from '@core/errors/domain/AppError';
 import type { Template } from '@core/templates/domain/Template';
 import type { TranscribePreference } from '@core/transcription/domain/TranscribePreference';
 import type { Sheet } from '@core/sheets/domain/Sheet';
-import type { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
-import type { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
+import type { BehindActorSegmentOverrideRegistry } from '@core/person-segmentation/domain/BehindActorSegmentOverrideRegistry';
+import type { FrozenSegmentSet } from '@core/captions/domain/FrozenSegmentSet';
+import type { ElementStyles } from '@core/elements/domain/ElementStyles';
 import type { DecorationOverrideRegistry } from '@core/captions/domain/DecorationOverrideRegistry';
 import type { CutRegistry } from '@core/cuts/domain/CutRegistry';
 import type { VideoState } from '@core/editor/domain/VideoState';
@@ -47,8 +48,19 @@ export interface EditorState {
   // afterwards.
   readonly sheets: Sheet[];
   readonly activeSheetId: string | null;
-  readonly wordStyleOverrides: WordStyleOverrideRegistry;
-  readonly segmentOverrides: SegmentOverrides;
+  readonly behindActorOverrides: BehindActorSegmentOverrideRegistry;
+  /**
+   * The segments excluded from reflow. Carries the hand-drawn
+   * boundaries as state and works the other reasons out from the stores
+   * that hold them; the store keeps it in step with those.
+   */
+  readonly frozenSegments: FrozenSegmentSet;
+  /**
+   * Raw CSS the user wrote against one specific element, keyed by
+   * element id. Spans every kind of element, so it is not partitioned
+   * by the registries above, which each hold one element's shape.
+   */
+  readonly elementStyles: ElementStyles;
   readonly decorationOverrides: DecorationOverrideRegistry;
   readonly cuts: CutRegistry;
   readonly canUndo: boolean;

@@ -136,6 +136,14 @@ export class VideoController {
     this.surface.cancelScheduledAudioMute();
   }
 
+  scheduleStopAt(sourceTimeSec: number): void {
+    this.surface.scheduleStopAt(sourceTimeSec);
+  }
+
+  cancelScheduledStop(): void {
+    this.surface.cancelScheduledStop();
+  }
+
   seek(time: number): void {
     this.surface.seek(time);
   }
@@ -172,13 +180,24 @@ export class VideoController {
       this.store.setCurrentTime(snap.currentTimeSec);
     }
     this.store.patchVideoState({
-      duration: snap.durationSec,
       isPlaying: snap.isPlaying,
       volume: snap.volume,
       playbackRate: snap.playbackRate,
       isReady: snap.isReady,
       loadError: this.toVideoLoadError(snap),
+      ...this.durationPatch(snap),
     });
+  }
+
+  /**
+   * Surface-authoritative duration to overlay onto the store patch,
+   * limited to the moment the source has actually opened. Anything
+   * else — pre-load ticks, unload transitions — reports zero and
+   * would otherwise wipe the value persisted with the project.
+   */
+  private durationPatch(snap: VideoPreviewSurfaceSnapshot): { duration: number } | Record<string, never> {
+    if (!snap.isReady) return {};
+    return { duration: snap.durationSec };
   }
 
   private toVideoLoadError(snap: VideoPreviewSurfaceSnapshot): VideoLoadError | null {

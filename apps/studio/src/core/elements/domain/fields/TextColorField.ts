@@ -1,0 +1,27 @@
+import type { AuthoredElementControl } from '@core/elements/domain/ElementControl';
+import type { ElementStyleSurface } from '@core/elements/domain/ElementStyleSurface';
+import type { ElementField } from '@core/elements/domain/fields/ElementField';
+import { ElementFieldId } from '@core/elements/domain/fields/ElementFieldId';
+import { ElementFieldSection } from '@core/elements/domain/fields/ElementFieldSection';
+import { TemplateCssVariable } from '@core/templates/domain/definition/TemplateCssVariable';
+
+/** The colour the element's text is painted in. */
+export class TextColorField implements ElementField {
+  readonly id = ElementFieldId.PRIMARY_COLOR;
+
+  readonly section = ElementFieldSection.TEXT;
+
+  controlFor(surface: ElementStyleSurface): AuthoredElementControl {
+    return {
+      id: this.id,
+      label: 'Color',
+      part: 'whole',
+      type: 'color',
+      property: surface === 'text' ? 'color' : TemplateCssVariable.PRIMARY_COLOR,
+    };
+  }
+
+  inheritsFromAncestor(): boolean {
+    return true;
+  }
+}

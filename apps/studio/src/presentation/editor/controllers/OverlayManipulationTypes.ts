@@ -1,11 +1,14 @@
-import type { VerticalResolution, HorizontalResolution } from '@presentation/editor/services/SnapZoneResolver';
+import type { SnapBand, VerticalResolution, HorizontalResolution } from '@presentation/editor/services/SnapZoneResolver';
 import type { ResizeCorner } from '@presentation/editor/services/ResizeGeometryResolver';
 import type { DragSession } from '@presentation/editor/controllers/DragSession';
 
 export interface SegmentDragTarget {
   readonly kind: 'segment';
   readonly segmentId: string;
-  readonly hitzone: HTMLElement;
+  /** Sheet the segment belongs to — the one a sheet-scoped gesture writes to. */
+  readonly sheetId: string;
+  /** The engine-bound `.segment` element — pointer-transparent, used for geometry only. */
+  readonly segment: HTMLElement;
   readonly wrapper: HTMLElement;
 }
 
@@ -53,10 +56,11 @@ export type AnyDragTarget =
 export interface SegmentDragState {
   readonly kind: 'segment';
   readonly segmentId: string;
-  readonly deltaX: number;
-  readonly deltaY: number;
   readonly vertical: VerticalResolution;
   readonly horizontal: HorizontalResolution;
+  /** Bands the dragged box can land on, per axis: the guides to draw. */
+  readonly verticalGuides: readonly SnapBand[];
+  readonly horizontalGuides: readonly SnapBand[];
   readonly scopedToSegment: boolean;
 }
 
@@ -84,7 +88,8 @@ export interface SegmentResizeState {
 export interface WordResizeState {
   readonly kind: 'word-resize';
   readonly wordId: string;
-  readonly fontSize: number;
+  /** Latest size committed during the resize, as a percentage of the text around the word. */
+  readonly relativeSize: number;
 }
 
 export interface SegmentRotateState {
@@ -117,7 +122,10 @@ export type OverlayDragState =
 
 export interface SegmentBindInput {
   readonly segmentId: string;
-  readonly hitzone: HTMLElement;
+  /** Sheet the segment belongs to — the one a sheet-scoped gesture writes to. */
+  readonly sheetId: string;
+  /** The engine-bound `.segment` element — pointer-transparent, used for geometry only. */
+  readonly segment: HTMLElement;
   readonly wrapper: HTMLElement;
 }
 
@@ -147,10 +155,6 @@ export interface SegmentRotateBindInput {
 export interface WordRotateBindInput {
   readonly wordId: string;
   readonly handle: HTMLElement;
-}
-
-export interface SnapGuide {
-  readonly center: number;
 }
 
 /** Pixel distance a pointer must move past the down position before

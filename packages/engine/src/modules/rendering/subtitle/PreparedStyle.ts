@@ -26,6 +26,7 @@ export interface PreparedStyle {
   wordOverrides: ElementRenderOverrides;
   segmentOverrides: ElementRenderOverrides;
   decorationPlacements: ReadonlyMap<string, DecorationPlacementSide>;
+  addressableElementIds: ReadonlySet<string>;
   probeStyleElement: HTMLStyleElement;
   probeContainer: HTMLElement;
   scopeClass: string;

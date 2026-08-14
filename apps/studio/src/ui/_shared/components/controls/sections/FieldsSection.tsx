@@ -10,6 +10,8 @@ interface FieldsSectionProps {
   values: Readonly<Record<string, ControlValue | undefined>>;
   onChange: (field: ControlField, value: ControlValue) => void;
   disabled?: boolean;
+  /** Ids whose variable the sheet's own CSS no longer reads. */
+  customizedIds?: ReadonlySet<string>;
 }
 
 const STRUCTURE_LOCK_MESSAGE =
@@ -30,6 +32,7 @@ export const FieldsSection = memo(function FieldsSection({
   values,
   onChange,
   disabled,
+  customizedIds,
 }: FieldsSectionProps) {
   if (fields.length === 0) return null;
 
@@ -49,6 +52,7 @@ export const FieldsSection = memo(function FieldsSection({
           value={values[field.id] ?? field.default}
           onChange={onChange}
           disabled={disabled ?? false}
+          customized={customizedIds?.has(field.id) ?? false}
         />
       ))}
       {colors.length > 0 && (
@@ -60,6 +64,7 @@ export const FieldsSection = memo(function FieldsSection({
               value={values[field.id] ?? field.default}
               onChange={onChange}
               disabled={disabled ?? false}
+              customized={customizedIds?.has(field.id) ?? false}
             />
           ))}
         </div>

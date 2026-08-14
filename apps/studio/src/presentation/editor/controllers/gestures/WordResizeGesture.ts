@@ -1,7 +1,9 @@
-import type { EditorStore } from '@core/editor/store/EditorStore';
-import type { SetWordStyleOverrideAction } from '@core/captions/actions/words/SetWordStyleOverrideAction';
+import type { AuthoredElementControl } from '@core/elements/domain/ElementControl';
+import { ElementFieldId } from '@core/elements/domain/fields/ElementFieldId';
+import type { StyledElementCatalog } from '@core/elements/domain/StyledElementCatalog';
+import type { SetElementFieldAction } from '@core/elements/actions/SetElementFieldAction';
 import type { ResizeGeometryResolver } from '@presentation/editor/services/ResizeGeometryResolver';
-import type { FontSizeBounds } from '@presentation/editor/services/FontSizeBounds';
+import type { ElementControlRange } from '@presentation/editor/services/ElementControlRange';
 import { DragSession } from '@presentation/editor/controllers/DragSession';
 import {
   DRAG_ACTIVATION_THRESHOLD_PX,
@@ -12,26 +14,24 @@ import {
 } from '@presentation/editor/controllers/OverlayManipulationTypes';
 
 /**
- * Gesture: drag a corner handle on the selected word to scale its
- * per-word font-size override. Per-word font-size is
- * post-derivation, so commits do not trigger a line-splitter re-run
- * — the handle can fire on every pointermove without debouncing.
- * The set-word-override action coalesces per-tick writes into one
- * undo step via its commit key.
+ * Gesture: drag a corner handle on the selected word to scale how big
+ * that word is next to the words around it. A word's size is
+ * post-derivation, so commits do not trigger a line-splitter re-run —
+ * the handle can fire on every pointermove without debouncing. The
+ * field write coalesces per-tick commits into one undo step.
  */
 export class WordResizeGesture {
-  /** The original cqh-equivalent of the word's rendered font-size at
-   *  pointerdown, used so per-move commits scale from the original
-   *  value instead of compounding each tick. `null` between
-   *  gestures. */
-  private originalFontSize: number | null = null;
+  /** How big the word was next to its neighbours at pointerdown, as a
+   *  percentage, so per-move commits scale from the original value
+   *  instead of compounding each tick. `null` between gestures. */
+  private originalRatio: number | null = null;
 
   constructor(
     private readonly host: OverlayGestureHost,
-    private readonly editorStore: EditorStore,
-    private readonly setWordStyleOverride: SetWordStyleOverrideAction,
+    private readonly styledElementCatalog: StyledElementCatalog,
+    private readonly setElementField: SetElementFieldAction,
     private readonly resizeGeometry: ResizeGeometryResolver,
-    private readonly fontSizeBounds: FontSizeBounds,
+    private readonly controlRange: ElementControlRange,
   ) {}
 
   bind(input: WordResizeBindInput): () => void {
@@ -44,28 +44,31 @@ export class WordResizeGesture {
   }
 
   computeState(session: DragSession, target: WordResizeTarget, clientX: number, clientY: number): WordResizeState {
-    const original = this.originalFontSize ?? 0;
+    const original = this.originalRatio ?? 0;
     const { dx, dy } = session.delta(clientX, clientY);
     const scale = this.resizeGeometry.scale(session.anchorRect, target.corner, dx, dy);
-    const fontSize = this.fontSizeBounds.clamp(original * scale);
-    return { kind: 'word-resize', wordId: target.wordId, fontSize };
+    const relativeSize = this.controlRange.clamp(this.sizeControl(), original * scale);
+    return { kind: 'word-resize', wordId: target.wordId, relativeSize };
   }
 
   applyMoveSideEffects(_session: DragSession, state: WordResizeState): void {
-    this.writeFontSizeOverride(state.wordId, state.fontSize);
+    this.writeRelativeSize(state.wordId, state.relativeSize);
   }
 
   commit(state: WordResizeState): void {
-    this.writeFontSizeOverride(state.wordId, state.fontSize);
+    this.writeRelativeSize(state.wordId, state.relativeSize);
   }
 
   cleanupOnEnd(): void {
-    this.originalFontSize = null;
+    this.originalRatio = null;
   }
 
-  private writeFontSizeOverride(wordId: string, fontSize: number): void {
-    const previous = this.editorStore.snapshot().wordStyleOverrides.get(wordId);
-    this.setWordStyleOverride.execute(wordId, { ...previous, fontSize });
+  private sizeControl(): AuthoredElementControl {
+    return this.styledElementCatalog.requireControl('word', ElementFieldId.RELATIVE_SIZE);
+  }
+
+  private writeRelativeSize(wordId: string, ratio: number): void {
+    this.setElementField.execute(wordId, 'word', this.sizeControl(), ratio);
   }
 
   private tryStart(target: WordResizeTarget, event: PointerEvent): void {
@@ -75,10 +78,10 @@ export class WordResizeGesture {
     if (!scaler) return;
     const span = this.findWordSpan(scaler, target.wordId);
     if (!span) return;
-    const originalFontSize = this.readRenderedFontSizeAsCqh(span, scaler);
-    if (originalFontSize === null) return;
+    const originalRatio = this.readRenderedRatio(span);
+    if (originalRatio === null) return;
     event.stopPropagation();
-    this.originalFontSize = originalFontSize;
+    this.originalRatio = originalRatio;
     const session = new DragSession(
       target,
       span.getBoundingClientRect(),
@@ -95,16 +98,21 @@ export class WordResizeGesture {
     return scaler.querySelector<HTMLElement>(`[data-tscaps-word-id="${CSS.escape(wordId)}"]`);
   }
 
-  /** Round-trips the span's rendered font-size from px back into the
-   *  `cqh` unit the override expects — the only container is the
-   *  scaler (declared `container-type: size` in CSS), so its height
-   *  is the 100cqh reference. Returns null when the scaler has no
-   *  measurable height (e.g. before the first layout). */
-  private readRenderedFontSizeAsCqh(span: HTMLElement, scaler: HTMLElement): number | null {
-    const fontSizePx = parseFloat(getComputedStyle(span).fontSize);
-    if (!Number.isFinite(fontSizePx)) return null;
-    const scalerHeight = scaler.clientHeight;
-    if (scalerHeight <= 0) return null;
-    return (fontSizePx / scalerHeight) * 100;
+  /**
+   * How big the word is drawn next to the text it sits in, as the
+   * percentage the field stores. Measured against the word's own
+   * parent because that is what a percentage font-size resolves
+   * against, so whatever else grew the caption — a template shrinking
+   * a long line, a resized scene — is already inside the number and
+   * the ratio stays what the user set. Returns null while the parent
+   * has no measurable size.
+   */
+  private readRenderedRatio(span: HTMLElement): number | null {
+    const parent = span.parentElement;
+    if (!parent) return null;
+    const wordPx = parseFloat(getComputedStyle(span).fontSize);
+    const parentPx = parseFloat(getComputedStyle(parent).fontSize);
+    if (!Number.isFinite(wordPx) || !Number.isFinite(parentPx) || parentPx <= 0) return null;
+    return (wordPx / parentPx) * 100;
   }
 }

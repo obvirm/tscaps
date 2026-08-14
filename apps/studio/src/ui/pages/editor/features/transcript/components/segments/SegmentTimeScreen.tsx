@@ -26,6 +26,9 @@ const TIME_INPUT_CLASS =
 // Slider step in seconds: 10ms is precise enough for visual drag without
 // overwhelming the coalesce window; finer-than-10ms goes through the input.
 const TIME_SLIDER_STEP = 0.01;
+// `warning`, not `danger`: nothing broke and nothing was lost — the edit
+// simply did not fit, and the window it settled on is right there.
+const ADJUSTED_NOTE_CLASS = 'm-0 text-3xs text-warning leading-snug';
 const REDISTRIBUTE_BTN =
   'inline-flex items-center gap-1 text-3xs text-fg-secondary hover:text-fg-primary ' +
   'bg-transparent border-none cursor-pointer px-1 py-0.5 rounded-xs ' +
@@ -58,6 +61,8 @@ export function SegmentTimeScreen({
   const [endStr, setEndStr] = useState(() => outputSegEnd.toFixed(3));
   const [lastStart, setLastStart] = useState(segment.time.start);
   const [lastEnd, setLastEnd] = useState(segment.time.end);
+  const [asked, setAsked] = useState<WordsRange | null>(null);
+  const [rejected, setRejected] = useState(false);
 
   // Re-seed input strings when the segment's time changes from outside
   // (undo/redo, redistribute). Render-time sync avoids an extra effect tick.
@@ -67,6 +72,20 @@ export function SegmentTimeScreen({
   }
   if (segment.time.end !== lastEnd) {
     setLastEnd(segment.time.end);
+    setEndStr(outputSegEnd.toFixed(3));
+  }
+
+  // A committed edit is not always the edit that was asked for: scenes of
+  // one sheet may not overlap, and the write clamps. Re-seeding only when
+  // the stored time *changes* misses the very case that needs saying — a
+  // value clamped back to where it already was leaves the field showing a
+  // number that was never stored, and the user finds out on reopening.
+  // So the fields are re-seeded after every commit, whether or not
+  // anything moved.
+  if (asked !== null) {
+    setRejected(asked.start !== segment.time.start || asked.end !== segment.time.end);
+    setAsked(null);
+    setStartStr(outputSegStart.toFixed(3));
     setEndStr(outputSegEnd.toFixed(3));
   }
 
@@ -87,7 +106,10 @@ export function SegmentTimeScreen({
       setEndStr(timeMap.toOutputTime(segment.time.end).toFixed(3));
       return;
     }
-    onCommitSegmentTime(timeMap.toSourceTime(sOutput), timeMap.toSourceTime(eOutput));
+    const start = timeMap.toSourceTime(sOutput);
+    const end = timeMap.toSourceTime(eOutput);
+    setAsked({ start, end });
+    onCommitSegmentTime(start, end);
   }, [startStr, endStr, segment.time.start, segment.time.end, onCommitSegmentTime, timeMap]);
 
   const handleSliderStart = useCallback((outputValue: number) => {
@@ -117,7 +139,7 @@ export function SegmentTimeScreen({
             inputMode="decimal"
             className={TIME_INPUT_CLASS}
             value={startStr}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => setStartStr(e.target.value)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => { setRejected(false); setStartStr(e.target.value); }}
             onBlur={commitInputs}
             onKeyDown={handleKey}
           />
@@ -129,12 +151,20 @@ export function SegmentTimeScreen({
             inputMode="decimal"
             className={TIME_INPUT_CLASS}
             value={endStr}
-            onChange={(e: ChangeEvent<HTMLInputElement>) => setEndStr(e.target.value)}
+            onChange={(e: ChangeEvent<HTMLInputElement>) => { setRejected(false); setEndStr(e.target.value); }}
             onBlur={commitInputs}
             onKeyDown={handleKey}
           />
         </label>
       </div>
+      {rejected && (
+        // States the window that survived rather than naming the wall it
+        // hit: the limit can be a neighbouring scene or the video's end,
+        // and guessing wrong would teach the user a rule that is not there.
+        <p className={ADJUSTED_NOTE_CLASS}>
+          That range was not available. Kept {startStr}–{endStr}.
+        </p>
+      )}
       <DualRangeSlider
         min={axisMin}
         max={axisMax}

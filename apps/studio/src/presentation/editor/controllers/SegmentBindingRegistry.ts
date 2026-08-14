@@ -2,7 +2,7 @@ import type { SegmentDragTarget } from '@presentation/editor/controllers/Overlay
 
 /**
  * Tracks the segments currently registered with the manipulation
- * controller so gestures can look up a segment's hitzone or wrapper
+ * controller so gestures can look up a segment's element or wrapper
  * by id without each gesture maintaining its own copy of the table.
  * Owned by the controller, read by every gesture that needs cross-
  * segment context (drop-target detection, paint-all-on-drag, etc.).

@@ -1,9 +1,14 @@
+import { BidiJsCharacterClassifier, HorizontalPlacementResolver, HorizontalSideResolver, StrongCharacterMajorityTextDirectionDetector } from '@tscaps/engine';
+import { DocumentElementIdCollector } from '@core/captions/services/DocumentElementIdCollector';
 import type { IndexedDbClient } from '@core/_shared/infrastructure/IndexedDbClient';
 import type { IndexedDbStoreDefinition } from '@core/_shared/infrastructure/IndexedDbStoreDefinition';
 import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { ExportStore } from '@core/export/store/ExportStore';
 import type { RefreshDocumentAction } from '@core/editor/actions/RefreshDocumentAction';
 import type { TemplateBrowserSupportChecker } from '@core/browser-support/services/TemplateBrowserSupportChecker';
+import type { StyledElementCatalog } from '@core/elements/domain/StyledElementCatalog';
+import type { ElementControlCssWriter } from '@core/elements/services/css/ElementControlCssWriter';
+import type { ElementAnimationCssWriter } from '@core/elements/services/css/ElementAnimationCssWriter';
 import type { ProjectRepository } from '@core/projects/domain/ProjectRepository';
 import type { UnsavedWorkPolicy } from '@core/projects/domain/UnsavedWorkPolicy';
 import { IndexedDbProjectRepository } from '@core/projects/infrastructure/repositories/IndexedDbProjectRepository';
@@ -17,6 +22,7 @@ import { ProjectFromEditorStateBuilder } from '@core/projects/services/ProjectFr
 import { EditorStateUnsavedWorkPolicy } from '@core/projects/services/EditorStateUnsavedWorkPolicy';
 import { CreateProjectAction } from '@core/projects/actions/CreateProjectAction';
 import { SaveProjectAction } from '@core/projects/actions/SaveProjectAction';
+import { NonBlockingFailureReporter } from '@core/errors/services/NonBlockingFailureReporter';
 import { LoadProjectAction } from '@core/projects/actions/LoadProjectAction';
 import { DeleteProjectAction } from '@core/projects/actions/DeleteProjectAction';
 import { ListProjectsAction } from '@core/projects/actions/ListProjectsAction';
@@ -31,6 +37,12 @@ import type { VideoBlobCache } from '@core/videos/domain/VideoBlobCache';
 import type { PersonSegmentationCacheRepository } from '@core/person-segmentation/domain/PersonSegmentationCacheRepository';
 import type { PreviewModule } from '@bootstrap/wiring/preview';
 import type { VideosModule } from '@bootstrap/wiring/videos';
+import type { TelemetryModule } from '@bootstrap/wiring/telemetry';
+import type { AppNoticeChannel } from '@core/errors/services/AppNoticeChannel';
+import type { AppErrorClassifier } from '@core/errors/services/AppErrorClassifier';
+import type { AppErrorTelemetryDescriber } from '@core/errors/services/AppErrorTelemetryDescriber';
+import type { StorageFootprintProbe } from '@core/_shared/infrastructure/StorageFootprintProbe';
+import type { FileDownloader } from '@core/_shared/domain/FileDownloader';
 
 export interface ProjectsDependencies {
   readonly templateRepository: TemplateRepository;
@@ -38,11 +50,20 @@ export interface ProjectsDependencies {
   readonly exportStore: ExportStore;
   readonly refresh: RefreshDocumentAction;
   readonly templateSupportChecker: TemplateBrowserSupportChecker;
+  readonly styledElementCatalog: StyledElementCatalog;
+  readonly controlCssWriter: ElementControlCssWriter;
+  readonly animationCssWriter: ElementAnimationCssWriter;
   readonly indexedDb: IndexedDbClient;
   readonly videoBlobCache: VideoBlobCache;
   readonly videos: VideosModule;
   readonly preview: PreviewModule;
   readonly personSegmentationCacheRepository: PersonSegmentationCacheRepository;
+  readonly telemetry: TelemetryModule;
+  readonly appNoticeChannel: AppNoticeChannel;
+  readonly errorClassifier: AppErrorClassifier;
+  readonly errorTelemetryDescriber: AppErrorTelemetryDescriber;
+  readonly storageFootprintProbe: StorageFootprintProbe;
+  readonly fileDownloader: FileDownloader;
 }
 
 export type ProjectsModule = ReturnType<typeof bootProjects>;
@@ -57,7 +78,17 @@ export function bootProjects(deps: ProjectsDependencies) {
     deps.templateRepository,
     templateSubstitutionNotifier,
   );
-  const serializer = new ProjectSerializer(templateReferenceResolver, new ProjectMigrator());
+  const serializer = new ProjectSerializer(
+    templateReferenceResolver,
+    new ProjectMigrator(
+      deps.styledElementCatalog,
+      deps.controlCssWriter,
+      new HorizontalPlacementResolver(new HorizontalSideResolver()),
+      deps.animationCssWriter,
+    ),
+    new StrongCharacterMajorityTextDirectionDetector(new BidiJsCharacterClassifier()),
+    new DocumentElementIdCollector(),
+  );
 
   const projectBuilder = new ProjectFromEditorStateBuilder();
   const editorStatePolicy = new EditorStateUnsavedWorkPolicy(deps.store);
@@ -66,6 +97,14 @@ export function bootProjects(deps: ProjectsDependencies) {
   const unsavedWorkPolicy: UnsavedWorkPolicy = editorStatePolicy;
 
   const thumbnails = new ThumbnailGenerator();
+  const saveFailureReporter = new NonBlockingFailureReporter(
+    deps.telemetry.telemetry,
+    deps.appNoticeChannel,
+    deps.errorClassifier,
+    deps.errorTelemetryDescriber,
+    deps.storageFootprintProbe,
+    'project_save_failed',
+  );
   const originalVideoDownloadStore = new OriginalVideoDownloadStore();
   const startOriginalVideoDownload = new StartOriginalVideoDownloadAction(
     deps.store,
@@ -76,6 +115,7 @@ export function bootProjects(deps: ProjectsDependencies) {
     repository,
     serializer,
     thumbnails,
+    saveFailureReporter,
     originalVideoDownloadStore,
     unsavedWorkPolicy,
     actions: {
@@ -96,7 +136,7 @@ export function bootProjects(deps: ProjectsDependencies) {
       ),
       delete: new DeleteProjectAction(repository),
       list: new ListProjectsAction(repository),
-      export: new ExportProjectAction(repository, serializer),
+      export: new ExportProjectAction(repository, serializer, deps.fileDownloader),
       import: new ImportProjectAction(repository, serializer),
       recoverVideo: new RecoverProjectVideoAction(
         deps.store,

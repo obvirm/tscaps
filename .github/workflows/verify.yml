@@ -1,0 +1,68 @@
+name: Verify
+
+# The whole battery, in one place, so both publish workflows gate on the
+# same thing. Runs on every pull request and every push to main as well,
+# which is where a contribution meets it first.
+
+on:
+  workflow_call:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Cheapest first: a broken engine stops the run before a browser
+      # download is paid for. Its tests need one, so they wait below.
+      - name: Engine typecheck and lint
+        run: |
+          pnpm --filter ./packages/engine typecheck
+          pnpm --filter ./packages/engine lint
+
+      - name: Web typecheck and lint
+        run: |
+          pnpm --filter ./apps/studio typecheck
+          pnpm --filter ./apps/studio lint
+
+      # Everything below needs a browser. Some web tests ask a real CSS
+      # engine whether the caption stylesheet says what it means, and one
+      # engine test asks it what the export's tile cache can see. One
+      # cache serves both, since every package pins the same Playwright.
+      - name: Install Playwright browsers
+        run: pnpm --filter ./apps/studio exec playwright install --with-deps chromium
+
+      - name: Engine unit tests
+        run: pnpm --filter ./packages/engine test
+
+      - name: Web unit tests
+        run: pnpm --filter ./apps/studio test
+
+      - name: Build web
+        run: pnpm --filter ./apps/studio build
+
+      - name: Run E2E
+        run: pnpm --filter ./apps/studio e2e
+
+      - name: Upload E2E artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: apps/studio/.playwright-out/
+          if-no-files-found: ignore

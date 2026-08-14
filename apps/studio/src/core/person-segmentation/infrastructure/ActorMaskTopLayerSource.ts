@@ -1,13 +1,11 @@
 import type {
   DecodedVideoFrame,
-  Document,
   OverlayFrame,
-  SubtitleStyle,
+  TimeFragment,
   TopLayerSource,
 } from '@tscaps/engine';
 import type { MaskCache } from '@core/person-segmentation/domain/MaskCache';
 import { ActorMaskCanvasBuilder } from '@core/person-segmentation/infrastructure/ActorMaskCanvasBuilder';
-import { BehindActorEffectQuery } from '@core/person-segmentation/infrastructure/BehindActorEffectQuery';
 
 const NEAREST_MASK_TOLERANCE_SEC = 0.15;
 
@@ -15,30 +13,31 @@ const NEAREST_MASK_TOLERANCE_SEC = 0.15;
  * Emits a per-frame overlay that carries only the actor's pixels
  * (source frame ANDed with the mask). Painted above the caption
  * raster, it occludes the caption text everywhere the actor sits in
- * front of it. Frames whose timestamp lands outside any scene-valid
- * segment — or with no cached mask within the tolerance — return
- * `null`, so the compositor skips the top layer entirely.
+ * front of it.
+ *
+ * `activeRanges` are the time ranges — in the render document's
+ * timebase — where the effect is active; the caller resolves them per
+ * segment up front from the same decision that publishes the
+ * activation class. Frames outside every range — or with no cached
+ * mask within the tolerance — return `null`, so the compositor skips
+ * the top layer entirely.
  *
  * The working canvas and mask canvas are allocated on `open` and
  * reused across every `frameAt` call; `close` releases them.
  */
 export class ActorMaskTopLayerSource implements TopLayerSource {
-  private effectQuery: BehindActorEffectQuery | null = null;
   private maskCanvasBuilder: ActorMaskCanvasBuilder | null = null;
   private compositeCanvas: OffscreenCanvas | null = null;
   private compositeContext: OffscreenCanvasRenderingContext2D | null = null;
   private compositeWidth = 0;
   private compositeHeight = 0;
 
-  constructor(private readonly maskCache: MaskCache) {}
+  constructor(
+    private readonly maskCache: MaskCache,
+    private readonly activeRanges: ReadonlyArray<TimeFragment>,
+  ) {}
 
-  async open(
-    doc: Document,
-    styles: Readonly<Record<string, SubtitleStyle>>,
-    width: number,
-    height: number,
-  ): Promise<void> {
-    this.effectQuery = new BehindActorEffectQuery(doc, styles);
+  async open(width: number, height: number): Promise<void> {
     this.maskCanvasBuilder = new ActorMaskCanvasBuilder();
     this.compositeCanvas = new OffscreenCanvas(width, height);
     this.compositeContext = this.requireContext(this.compositeCanvas);
@@ -47,12 +46,11 @@ export class ActorMaskTopLayerSource implements TopLayerSource {
   }
 
   async frameAt(time: number, videoFrame: DecodedVideoFrame): Promise<OverlayFrame | null> {
-    const query = this.effectQuery;
     const builder = this.maskCanvasBuilder;
     const context = this.compositeContext;
     const canvas = this.compositeCanvas;
-    if (query === null || builder === null || context === null || canvas === null) return null;
-    if (!query.hasActiveEffectAt(time)) return null;
+    if (builder === null || context === null || canvas === null) return null;
+    if (!this.isWithinActiveRange(time)) return null;
     const mask = this.maskCache.nearest(time, NEAREST_MASK_TOLERANCE_SEC);
     if (mask === null) return null;
     this.paintCutout(context, videoFrame, builder.ensure(mask));
@@ -60,12 +58,15 @@ export class ActorMaskTopLayerSource implements TopLayerSource {
   }
 
   close(): void {
-    this.effectQuery = null;
     this.maskCanvasBuilder = null;
     this.compositeCanvas = null;
     this.compositeContext = null;
     this.compositeWidth = 0;
     this.compositeHeight = 0;
+  }
+
+  private isWithinActiveRange(time: number): boolean {
+    return this.activeRanges.some((range) => range.contains(time));
   }
 
   private paintCutout(

@@ -2,7 +2,6 @@ import { useEffect, useState, type ReactElement } from 'react';
 import { ChevronsUp, ChevronsDown, Clock3, Trash2, Palette, Plus, Check, SwatchBook, UserRound, RotateCcw, Loader2 } from 'lucide-react';
 import type { Document, Segment } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
-import type { SegmentStyleOverrides } from '@core/captions/domain/SegmentStyleOverrides';
 import type { BehindActorSegmentOverride } from '@core/person-segmentation/domain/BehindActorSegmentOverride';
 import type { PersonSegmentationResult } from '@core/person-segmentation/domain/PersonSegmentationResult';
 import type { LoadedPersonSegmentationCacheStore } from '@core/person-segmentation/store/LoadedPersonSegmentationCacheStore';
@@ -15,7 +14,7 @@ import { useCaptions } from '@ui/_shared/contexts/modules/CaptionsContext';
 import { usePersonSegmentation } from '@ui/_shared/contexts/modules/PersonSegmentationContext';
 import { POPOVER_MENU_SHAPE, POPOVER_ITEM, POPOVER_ITEM_MOVE, POPOVER_ITEM_DANGER } from '@ui/pages/editor/features/transcript/transcript-classes';
 import { PromptDialog } from '@ui/_shared/components/Dialog/PromptDialog';
-import { SegmentStyleOverridesPanel } from '@ui/pages/editor/features/transcript/components/segments/SegmentStyleOverridesPanel';
+import { SegmentStyleScreen } from '@ui/pages/editor/features/transcript/components/element-style/SegmentStyleScreen';
 import { SegmentTimeScreen } from '@ui/pages/editor/features/transcript/components/segments/SegmentTimeScreen';
 
 interface SegmentSettingsData {
@@ -26,7 +25,6 @@ interface SegmentSettingsData {
   isLastSegment: boolean;
   sheet: Sheet | null;
   sheets: Sheet[];
-  currentOverrides: SegmentStyleOverrides;
   behindActorOverride: BehindActorSegmentOverride;
   /** Lower/upper bounds for the timing screen (immediate neighbors). */
   prevSegmentEnd: number;
@@ -35,7 +33,6 @@ interface SegmentSettingsData {
   onApplyStructureEdit: (doc: Document) => void;
   onAssignSegmentSheet: (segment: Segment, sheetId: string) => void;
   onCreateSheet: (name: string) => string | null;
-  onCommitStyleOverrides: (overrides: SegmentStyleOverrides) => void;
   onCommitSegmentTime: (start: number, end: number) => void;
   onRedistributeWords: () => void;
 }
@@ -109,7 +106,10 @@ function SegmentMenuScreen({
     && personSegmentation.previewSupportChecker.isSupported();
   const validWindows = detectorResult?.windows ?? [];
   const behindActorOn = showBehindActor
-    && personSegmentation.gatingService.isEffectivelyOn(segment, behindActorOverride, validWindows);
+    && sheet !== null
+    && personSegmentation.gatingService.isEffectivelyOn(
+      segment, behindActorOverride, validWindows, sheet.template.behindActor,
+    );
 
   const handleToggleBehindActor = () => {
     const next: BehindActorSegmentOverride = behindActorOn ? 'force-off' : 'force-on';
@@ -227,13 +227,12 @@ function SegmentSheetPickerScreen({
   );
 }
 
-function SegmentStylesScreen({ sheet, currentOverrides, onCommitStyleOverrides }: SegmentSettingsData) {
+function SegmentStylesScreen({ sheet, segment }: SegmentSettingsData) {
   if (!sheet) return null;
   return (
-    <SegmentStyleOverridesPanel
+    <SegmentStyleScreen
       sheet={sheet}
-      currentOverrides={currentOverrides}
-      onCommit={onCommitStyleOverrides}
+      segmentId={segment.id}
     />
   );
 }

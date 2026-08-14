@@ -4,6 +4,8 @@ A TypeScript engine that adds captions to a video and burns them in — all in t
 
 Captions are HTML elements styled with CSS. On export, the engine rasterizes that DOM at each frame's timestamp into a bitmap and composites it with the video frame. The browser renders the captions.
 
+**See it running:** [tscaps.io/local](https://tscaps.io/local) is a full caption editor built on this engine, transcription and export included, running entirely in the browser with no account and no upload. It is the fastest way to see what the engine does before writing any code against it.
+
 ## Install
 
 ```bash
@@ -254,17 +256,19 @@ Document
 
 The pipeline restructures the same `Word`s into different `Segment`s and `Line`s through `SegmentSplitter` and `LineSplitter`; the underlying word data (`text`, `time`, `tags`) does not change.
 
-The render layer exposes that document to CSS through three surfaces: a flat set of CSS classes per element, a flat set of CSS custom properties per element, and a tag system that adds more classes via taggers. Everything the examples above target — `.word`, `.word-being-narrated`, `--on-segment-starts`, `var(--on-line-being-narrated-starts)` — comes from these surfaces.
+The render layer exposes that document to CSS through four surfaces: a flat set of CSS classes per element, a flat set of CSS custom properties per element, a tag system that adds more classes via taggers, and an opt-in `data-tscaps-el` attribute for reaching one element by id. Everything the examples above target — `.word`, `.word-being-narrated`, `--on-segment-starts`, `var(--on-line-being-narrated-starts)` — comes from these surfaces.
+
+`Section` never renders as an element: it is the grouping that decides which splitter and tagger chain a run of segments goes through, and the rendered subtree starts at `.segment`.
 
 ### CSS classes the engine emits
 
 Every rendered element carries its element class:
 
-- `.section` — the root of the active Section
-- `.segment` — a caption block
+- `.segment` — a caption block, the root of the rendered subtree
 - `.line` — a visible line within a segment
 - `.word` — a single word within a line
 - `.letter` — a single letter within a word, emitted only when `rendering.splitWordsIntoLetters` is `true`
+- `.word-decoration` — a decoration attached to a word (an emoji, for instance)
 
 State classes — computed per frame from the current playback time and attached to the matching `.word` / `.line`:
 
@@ -279,17 +283,36 @@ Positional tags from `StructureTagger`, assigned once after splitting:
 - `first-line-in-segment`, `last-line-in-segment`
 - `first-line-in-section`, `last-line-in-section`
 - `first-segment-in-section`, `last-segment-in-section`
-- `first-section-in-document`, `last-section-in-document`
+- `first-segment-in-document`, `last-segment-in-document`
+
+Classes on elements the renderer creates rather than on document nodes, collected in the `CssClass` enum:
+
+- `behind-actor-active` — on `.segment` while the text-behind-actor effect is active for it
+- `tscaps-video-frame-layer` — the layer holding the video frame, emitted inside `.segment` when `rendering.videoFrame.required` is set
+- `segment-decorations-above`, `segment-decorations-below` — the containers of decorations lifted out of line flow
 
 Semantic tag classes come from `Tagger` implementations you add to the pipeline (see *Tags and taggers* below) and are entirely consumer-defined.
+
+### Addressing one element
+
+A class reaches every element of its kind. To reach a single one, name its id in `SubtitleStyle.addressableElementIds` and the renderer stamps `data-tscaps-el="<id>"` (`DataAttribute.ELEMENT_ID`) on it:
+
+```ts
+.withSubtitleStyles({ default: { ...style, addressableElementIds: new Set([word.id]) } })
+```
+
+```css
+[data-tscaps-el="<id>"] { color: #ff5c8a; }
+```
+
+Any element id qualifies — segment, line, word or decoration. A word the bidirectional algorithm paints in two places gets the attribute on both pieces. The attribute is serialized once per element per rendered tile, so a caption with every word addressed grows the batch by a double-digit percentage; address nothing and it costs nothing.
 
 ### CSS custom properties
 
 Each rendered element exposes timing values relative to the current frame, so you can drive `animation-delay`, `animation-duration`, or any other CSS value from the narration timeline. `--on-…-starts` and `--on-…-ends` are seconds until the event; they go negative once the event is in the past. `--…-duration` is a span.
 
-Element-level timing:
+Segment-level timing:
 
-- `--on-section-starts`, `--on-section-ends`, `--section-duration`
 - `--on-segment-starts`, `--on-segment-ends`, `--segment-duration`
 
 Per-state timing, for both `.line` and `.word` (substitute `<elem>` with `line` or `word`):
@@ -302,10 +325,24 @@ Letter-level, when splitting into letters:
 
 - `--letter-index`, `--letter-count`
 
+Structural metadata — unitless integers, so a rule can stagger, scale or branch by an element's position and size without randomness. No `on-` prefix, because they are not events:
+
+- `--segment-index` — the segment's 0-based position within its section
+- `--segment-char-count` — character length of the segment's full text, the input for auto-shrink rules
+- `--word-index` — the word's 0-based position within its line
+- `--word-count` — on `.segment` and on `.line`; the nearest ancestor wins for a `.word` reading it
+- `--word-char-count` — code-point length of the word's display text
+- `--last-word-char-count` — on `.segment` and on `.line`; the length of the closing word, without traversing to it
+
 Layout and frame:
 
 - `--subtitle-region-width`, `--subtitle-region-height`, `--subtitle-region-x`, `--subtitle-region-y` — the caption region's box, useful when positioning relative to the video frame
 - `--video-frame` — the underlying video frame as `url("data:image/jpeg;base64,…")`, only set when `rendering.videoFrame.required` is `true` (see [docs/RENDERING_INTERNALS.md](docs/RENDERING_INTERNALS.md))
+- `--segment-padding-top`, `--segment-padding-bottom` — the padding the renderer put on the segment to give a filter room to spread
+
+Read by the engine's own baseline rules, so a stylesheet writes them rather than reading them:
+
+- `--decoration-font-size-multiplier`, `--decoration-gap-multiplier` — how large a decoration renders next to its word, and how far from it
 
 ### Tags and taggers
 
@@ -321,7 +358,10 @@ Tags map one-to-one onto CSS classes through `Tag.toCssClass()`. Unknown tag cla
 
 The examples above cover the common cases. The pipeline exposes more knobs you'll reach for as your needs grow:
 
-- **Built-in transcribers**: `WhisperTranscriber` (the default, in-browser Whisper), `SrtTranscriber` (parses SubRip), `PassthroughTranscriber` (wraps a pre-built `Document`). Or implement your own by satisfying the `Transcriber` interface.
+- **Built-in transcribers**: `WhisperTranscriber` (the default, in-browser Whisper, with a `tiny` / `base` / `small` / `medium` model ladder), `SrtTranscriber` and `VttTranscriber` (parse SubRip and WebVTT, reading per-word timings where the file carries them), `PassthroughTranscriber` (wraps a pre-built `Document`). Or implement your own by satisfying the `Transcriber` interface.
+- **Writing subtitle files**: `SubtitleFileSerializer` is the inverse of the parsers. `SrtSubtitleFileSerializer`, `VttSubtitleFileSerializer`, `AssSubtitleFileSerializer`, `SbvSubtitleFileSerializer`, `TtmlSubtitleFileSerializer` and `TextSubtitleFileSerializer` each declare their own media type and extension, and `granularity: 'word'` asks for per-word timing where the format can express it.
+- **Right-to-left and mixed-script text**: each line is resolved through the Unicode bidirectional algorithm and its words are emitted in painting order. `RenderingConfig.textDirection` supplies the paragraph direction, `TextDirectionDetector` infers it from a text, and `AlignmentConfig.horizontalAlign` additionally accepts `start` / `end` so one declaration can follow the reading direction.
+- **Cuts**: time ranges declared on a `Document` are removed from the exported video, and captions realign to the shortened timeline.
 - **Segment splitters**: the default `CompositeSegmentSplitter` chains a sentence-boundary cut with a scaled-character budget. Individual strategies are exposed for custom chains — `BoundarySegmentSplitter`, `LimitByWordsSegmentSplitter`, `LimitByScaledCharsSegmentSplitter`, `PauseBasedSegmentSplitter`, `SpeakerChangeSegmentSplitter`.
 - **Line splitters**: `BalancedLineSplitter` (char-balanced, no measurer needed) and `BalancedPixelWidthLineSplitter` (pixel-balanced, backed by a `TextMeasurer` — `DomProbeCanvasTextMeasurer` is the default measurer).
 - **Replace any stage**: `withTranscriber`, `withSegmentSplitter`, `withLineSplitter`, `withVideoRenderer`, `withSubtitleFrameRenderer`, `withOverlayFrameRenderer`. Defaults stay in place until explicitly replaced.

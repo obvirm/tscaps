@@ -14,6 +14,20 @@ import { TimeFragment } from '@modules/document/TimeFragment';
  * `segmentFilter` scopes which segments get extended; non-matching
  * segments are still treated as barriers when looking for the next
  * boundary.
+ *
+ * Padding is measured from the segment's last word and written to
+ * `effectTime`, which the effect never reads back. Both halves of that
+ * matter: reading `time.end` would fold the previous stamp into the
+ * computation and add another `maxGapMs` on every re-run, and writing
+ * to `customTime` would make the stamp indistinguishable from a window
+ * a caller named — at which point the only way to avoid overwriting the
+ * caller is to refuse to shrink, and the padding can never follow the
+ * words back down again. Owning a field of its own lets the result be
+ * recomputed from nothing but word boundaries, so it grows, shrinks and
+ * disappears as the words move.
+ *
+ * A segment carrying an explicit `customTime` is left alone: a caller
+ * who named a window outranks this pass.
  */
 export class GapFreeEffect implements Effect {
   constructor(
@@ -38,11 +52,17 @@ export class GapFreeEffect implements Effect {
 
     for (let i = 0; i < ordered.length; i++) {
       const seg = ordered[i]!;
-      if (!this.segmentFilter(seg)) continue;
+      if (!this.segmentFilter(seg) || seg.customTime) continue;
       const next = ordered[i + 1];
-      const newEnd = this.computeNewEnd(seg.time.end, next?.time.start, maxGapSeconds);
-      if (newEnd === null) continue;
-      replacements.set(seg.id, seg.with({ customTime: new TimeFragment(seg.time.start, newEnd) }));
+      const wordTime = seg.wordTime;
+      const newEnd = this.computeNewEnd(wordTime.end, next?.time.start, maxGapSeconds);
+      // Null means there is no room to pad — the next segment already
+      // starts at or before this one's last word. The previous stamp is
+      // cleared rather than left standing: it was computed against word
+      // boundaries that have since moved.
+      const effectTime = newEnd === null ? null : new TimeFragment(wordTime.start, newEnd);
+      if (this.sameTime(effectTime, seg.effectTime)) continue;
+      replacements.set(seg.id, seg.with({ effectTime }));
     }
 
     if (replacements.size === 0) return document;
@@ -52,6 +72,11 @@ export class GapFreeEffect implements Effect {
       return section.with({ segments: newSegments });
     });
     return document.with({ sections: newSections });
+  }
+
+  private sameTime(a: TimeFragment | null, b: TimeFragment | null): boolean {
+    if (a === null || b === null) return a === b;
+    return a.start === b.start && a.end === b.end;
   }
 
   private computeNewEnd(segEnd: number, nextStart: number | undefined, maxGapSeconds: number): number | null {

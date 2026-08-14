@@ -27,21 +27,24 @@
       "label": "Text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "blend-color",
       "label": "Big word",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "big-word-font-family",
       "label": "Big word font",
       "type": "font",
       "default": "Anton",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     }
   ],
   "segmentSplitters": [
@@ -68,13 +71,20 @@
     "horizontalOffset": 0.5
   },
   "effects": [
-    { "type": "gap_free", "enabled": true },
-    { "type": "remove_punctuation", "enabled": true }
+    {
+      "type": "gap_free",
+      "enabled": true
+    },
+    {
+      "type": "remove_punctuation",
+      "enabled": true
+    }
   ],
   "features": {
     "rotation": {
       "segment": false,
       "word": false
-    }
+    },
+    "animation": { "segment": false, "line": false }
   }
 }

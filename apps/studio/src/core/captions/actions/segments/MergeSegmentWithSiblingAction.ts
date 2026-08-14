@@ -57,10 +57,10 @@ export class MergeSegmentWithSiblingAction {
     // `mergeSegmentWithNext` keeps the lead segment's id, so we know
     // exactly which id survived.
     const mergedSegmentId = flat[leadIdx]!.id;
-    const segmentOverrides = snap.segmentOverrides.withFreeze(mergedSegmentId);
+    const frozenSegments = snap.frozenSegments.withStructurallyEdited([mergedSegmentId]);
 
     this.store.commit();
-    this.store.patch({ document: withEffects, segmentOverrides });
+    this.store.patch({ document: withEffects, frozenSegments });
   }
 
   private _neighborWindow(flat: ReadonlyArray<Segment>, flatIdx: number): NeighborWindow {

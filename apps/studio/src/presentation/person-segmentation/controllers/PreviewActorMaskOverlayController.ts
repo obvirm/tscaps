@@ -1,4 +1,4 @@
-import { CssVariable, Segment } from '@tscaps/engine';
+import { CssClass, Segment } from '@tscaps/engine';
 import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { PersonSegmentationMask } from '@core/person-segmentation/domain/PersonSegmentationMask';
 import { ActorMaskCanvasBuilder } from '@core/person-segmentation/infrastructure/ActorMaskCanvasBuilder';
@@ -15,11 +15,10 @@ const NEAREST_MASK_TOLERANCE_SEC = 0.15;
  * actor cutout onto its own overlay canvas so the caption text
  * underneath is occluded wherever the actor sits.
  *
- * The activation gate is the computed `--behind-actor-active` value
- * on the `.segment` elements under `segmentDomRoot` — the same CSS
- * resolution the template composes, so forced overrides and
- * template-specific activation rules apply without the controller
- * re-deriving them.
+ * The activation gate is the `behind-actor-active` class on the
+ * `.segment` elements under `segmentDomRoot` — the same class the
+ * template's stylesheet reacts to, so the cutout and the caption's
+ * styling always flip together.
  *
  * Sample and overlay canvases stay sized to the preview canvas'
  * intrinsic pixels; on each tick the controller re-syncs the overlay
@@ -101,8 +100,7 @@ export class PreviewActorMaskOverlayController {
 
   private hasActiveSegmentInDom(): boolean {
     for (const segmentElement of this.segmentDomRoot.querySelectorAll(`.${Segment.CSS_CLASS}`)) {
-      const active = getComputedStyle(segmentElement).getPropertyValue(CssVariable.BEHIND_ACTOR_ACTIVE);
-      if (active.trim() === '1') return true;
+      if (segmentElement.classList.contains(CssClass.BEHIND_ACTOR_ACTIVE)) return true;
     }
     return false;
   }

@@ -25,32 +25,31 @@
       "label": "Text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "highlight-bg-color",
-      "label": "Highlight",
+      "label": "Highlight background",
       "type": "color",
       "default": "#c8392c",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "highlight-text-color",
       "label": "Highlight text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "shadow-color",
-      "label": "Shadow",
-      "type": "color",
-      "default": "#000000",
-      "advanced": true,
-      "group": "colors"
+      "default": "#000000"
     },
     {
-      "id": "bg-padding-x",
+      "id": "highlight-bg-padding-x",
       "label": "Pill width",
       "type": "float",
       "default": 0.2,
@@ -58,10 +57,11 @@
       "max": 0.8,
       "step": 0.01,
       "unit": "em",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
-      "id": "bg-padding-y",
+      "id": "highlight-bg-padding-y",
       "label": "Pill height",
       "type": "float",
       "default": 0.08,
@@ -69,10 +69,11 @@
       "max": 0.4,
       "step": 0.01,
       "unit": "em",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
-      "id": "bg-radius",
+      "id": "highlight-bg-radius",
       "label": "Pill radius",
       "type": "float",
       "default": 0.16,
@@ -80,7 +81,8 @@
       "max": 0.6,
       "step": 0.01,
       "unit": "em",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "outline-thickness",
@@ -91,7 +93,8 @@
       "max": 0.24,
       "step": 0.01,
       "unit": "em",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "pill-grow",
@@ -101,7 +104,20 @@
       "min": 0,
       "max": 0.3,
       "step": 0.01,
-      "group": "appearance"
+      "group": "motion",
+      "subgroup": "words"
+    },
+    {
+      "id": "pill-grow-duration",
+      "label": "Pop duration",
+      "type": "float",
+      "default": 0.16,
+      "min": 0.05,
+      "max": 0.6,
+      "step": 0.01,
+      "unit": "s",
+      "group": "motion",
+      "subgroup": "words"
     },
     {
       "id": "shadow-scale",
@@ -111,8 +127,8 @@
       "min": 0,
       "max": 3,
       "step": 0.1,
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     }
   ],
   "segmentSplitters": [

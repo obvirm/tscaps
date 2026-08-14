@@ -9,7 +9,7 @@
     "fontSize": 2.81,
     "letterSpacing": 0.01,
     "wordSpacing": 0.19,
-    "textAlign": "left"
+    "textAlign": "start"
   },
   "rendering": {
     "splitWordsIntoLetters": true
@@ -20,46 +20,48 @@
       "label": "Text",
       "type": "color",
       "default": "#d4d4d4",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "window-bg",
       "label": "Editor background",
       "type": "color",
       "default": "#1e1e1e",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "titlebar-bg",
       "label": "Title bar",
       "type": "color",
       "default": "#252526",
-      "advanced": true,
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "titlebar-text",
       "label": "Filename",
       "type": "color",
       "default": "#cccccc",
-      "advanced": true,
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "gutter-color",
       "label": "Line numbers",
       "type": "color",
       "default": "#858585",
-      "advanced": true,
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "caret-color",
-      "label": "Caret",
+      "label": "Caret color",
       "type": "color",
       "default": "#aeafad",
-      "advanced": true,
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "chrome-scale",
@@ -69,17 +71,9 @@
       "min": 0.5,
       "max": 2,
       "step": 0.05,
-      "group": "appearance",
+      "group": "style",
+      "subgroup": "appearance",
       "legend": "Scales the title bar, traffic lights, and line numbers together."
-    },
-    {
-      "id": "show-caret",
-      "label": "Caret",
-      "type": "toggle",
-      "default": false,
-      "valueOn": "block",
-      "valueOff": "none",
-      "group": "appearance"
     },
     {
       "id": "show-line-numbers",
@@ -88,7 +82,8 @@
       "default": true,
       "valueOn": "1",
       "valueOff": "0",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "tag-bold",
@@ -97,7 +92,8 @@
       "default": true,
       "valueOn": "900",
       "valueOff": "inherit",
-      "group": "appearance",
+      "group": "style",
+      "subgroup": "appearance",
       "legend": "Bolds tagged words."
     },
     {
@@ -107,7 +103,8 @@
       "default": false,
       "valueOn": "80.5cqw",
       "valueOff": "0cqw",
-      "group": "appearance",
+      "group": "style",
+      "subgroup": "appearance",
       "legend": "Locks the editor width so the chrome stays the same across scenes."
     },
     {
@@ -115,7 +112,8 @@
       "label": "Filename",
       "type": "text",
       "default": "caption.md",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     }
   ],
   "segmentSplitters": [

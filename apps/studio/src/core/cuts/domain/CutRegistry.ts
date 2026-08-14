@@ -41,6 +41,14 @@ export class CutRegistry {
     return this.ranges;
   }
 
+  /**
+   * How much of the video the stored ranges take away, in seconds. A
+   * plain sum is exact because the ranges never overlap.
+   */
+  totalSec(): number {
+    return this.ranges.reduce((total, range) => total + (range.endSec - range.startSec), 0);
+  }
+
   add(range: CutRange): CutRegistry {
     if (range.endSec <= range.startSec) return this;
     if (this.ranges.some((c) => c.startSec <= range.startSec && c.endSec >= range.endSec)) {

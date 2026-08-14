@@ -10,29 +10,32 @@
     "letterSpacing": 0,
     "wordSpacing": 0.13,
     "lineSpacing": 0.2,
-    "textAlign": "left"
+    "textAlign": "start"
   },
   "styleControls": [
     {
-      "id": "bubble-color",
+      "id": "bg-color",
       "label": "Bubble",
       "type": "color",
       "default": "#2997ff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "primary-color",
       "label": "Text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "tag-font-family",
       "label": "Tag font",
       "type": "font",
       "default": "Inter Variable",
-      "group": "appearance",
+      "group": "style",
+      "subgroup": "appearance",
       "legend": "Used for tagged words."
     },
     {
@@ -43,10 +46,11 @@
       "min": 100,
       "max": 900,
       "step": 100,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
-      "id": "bubble-radius",
+      "id": "bg-radius",
       "label": "Bubble radius",
       "type": "float",
       "default": 0.6,
@@ -54,11 +58,11 @@
       "max": 1.5,
       "step": 0.01,
       "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
-      "id": "bubble-padding-x",
+      "id": "bg-padding-x",
       "label": "Bubble padding X",
       "type": "float",
       "default": 0.47,
@@ -66,11 +70,11 @@
       "max": 1.5,
       "step": 0.01,
       "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
-      "id": "bubble-padding-y",
+      "id": "bg-padding-y",
       "label": "Bubble padding Y",
       "type": "float",
       "default": 0.3,
@@ -78,8 +82,8 @@
       "max": 1.0,
       "step": 0.01,
       "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "show-tail",
@@ -88,7 +92,8 @@
       "default": true,
       "valueOn": "block",
       "valueOff": "none",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     }
   ],
   "segmentSplitters": [

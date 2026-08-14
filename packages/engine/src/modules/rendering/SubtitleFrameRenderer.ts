@@ -34,6 +34,8 @@ export interface SubtitleStyle {
   svgFilters?: SvgFilterBundle;
   /** Decorations lifted out of line flow, keyed by decoration id. Decorations absent from the map render inline next to their host word. */
   decorationPlacements?: ReadonlyMap<string, DecorationPlacementSide>;
+  /** Ids of elements `css` addresses individually, so the renderer stamps `DataAttribute.ELEMENT_ID` on them. Any element id qualifies — segment, line, word or decoration. Omit when the stylesheet addresses only classes. */
+  addressableElementIds?: ReadonlySet<string>;
 }
 
 /**

@@ -1,22 +1,32 @@
-import { memo, useMemo, type CSSProperties, type ReactNode } from 'react';
-import type { DecorationPlacementSide, Decoration, Segment, Word, WordSplitter } from '@tscaps/engine';
-import type { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
+import { memo, useCallback, useMemo, useRef, type ReactNode, type Ref } from 'react';
+import type { DecorationPlacementSide, Decoration, Segment, TextDirection, Word, WordFragmenter, WordSplitter } from '@tscaps/engine';
 import { LineView } from '@ui/pages/editor/features/overlay/components/LineView';
 import { WordDecorationSpan } from '@ui/pages/editor/features/overlay/components/words/WordDecorationSpan';
 import { useBoundSegment } from '@ui/pages/editor/features/overlay/hooks/useOverlayBinding';
+import { CAPTION_ELEMENT_ID_ATTRIBUTE } from '@presentation/editor/services/CaptionElementAttribute';
 
 interface SegmentViewProps {
   segment: Segment;
   /** Zero-based position of `segment` inside its owning section, published as `--segment-index`. */
   indexInSection: number;
   letterSplitter: WordSplitter | null;
-  wordStyleOverrides: WordStyleOverrideRegistry;
+  wordFragmenter: WordFragmenter;
+  /** Paragraph direction every line of the segment is resolved against. */
+  textDirection: TextDirection;
+  /** Per-word `font-family` values keyed by word id. Words that inherit the cascade are absent. */
+  wordFontFamilies: ReadonlyMap<string, string>;
   /** Decoration ids whose inline `<span>` should be omitted — either because the glyph paints out of flow at its own anchor, or because the emoji effect is disabled on the host sheet. */
   inlineSuppressedDecorationIds: ReadonlySet<string>;
+  /** Words painted out of flow at their own anchor, so the line leaves a gap rather than a duplicate. */
+  placedWordIds: ReadonlySet<string>;
   /** Decorations the sheet promotes out of line flow, keyed by decoration id. Absent ids stay inline. */
   decorationPlacements: ReadonlyMap<string, DecorationPlacementSide>;
   /** Optional element rendered as the segment's first child — clipped by its `overflow` / `border-radius`. */
   layer?: ReactNode;
+  /** When set, the segment element is interactive: it carries `data-tscaps-segment-id` and the given ref points at it. Measurement code (hitzone, chrome, drop zones) reads its bounds; the element itself stays pointer-transparent. Omit for passive previews. */
+  interactionRef?: Ref<HTMLDivElement>;
+  /** Time-independent classes appended to the segment element's class list (memoized by the caller). */
+  extraSegmentClasses?: ReadonlyArray<string>;
 }
 
 interface PlacedDecoration {
@@ -24,21 +34,38 @@ interface PlacedDecoration {
   word: Word;
 }
 
-// React must not set `className` on the segment element — the overlay
-// controller writes the time-driven class list there and would be
-// clobbered on every React update if React owned the prop.
-const PAUSED_ANIMATION_STYLE: CSSProperties = { animationPlayState: 'paused', animationFillMode: 'both' };
+const EMPTY_EXTRA_CLASSES: ReadonlyArray<string> = [];
+
+function forwardRefTo<T>(target: Ref<T> | undefined, element: T | null): void {
+  if (!target) return;
+  if (typeof target === 'function') target(element);
+  else (target as { current: T | null }).current = element;
+}
 
 export const SegmentView = memo(function SegmentView({
   segment,
   indexInSection,
   letterSplitter,
-  wordStyleOverrides,
+  wordFragmenter,
+  textDirection,
+  wordFontFamilies,
   inlineSuppressedDecorationIds,
+  placedWordIds,
   decorationPlacements,
   layer,
+  interactionRef,
+  extraSegmentClasses,
 }: SegmentViewProps) {
-  const ref = useBoundSegment(segment, indexInSection);
+  const classes = extraSegmentClasses ?? EMPTY_EXTRA_CLASSES;
+  const segmentRef = useRef<HTMLDivElement | null>(null);
+  useBoundSegment(segmentRef, segment, indexInSection, classes);
+  const attachRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      segmentRef.current = element;
+      forwardRefTo(interactionRef, element);
+    },
+    [interactionRef],
+  );
   const promotedAbove = useMemo(
     () => collectPromotedDecorations(segment, decorationPlacements, 'above'),
     [segment, decorationPlacements],
@@ -48,13 +75,19 @@ export const SegmentView = memo(function SegmentView({
     [segment, decorationPlacements],
   );
   return (
-    <div ref={ref} style={PAUSED_ANIMATION_STYLE}>
+    // React must not set `className` here — the overlay controller writes
+    // the time-driven class list on this element and would be clobbered on
+    // every React update if React owned the prop.
+    <div
+      ref={attachRef}
+      data-tscaps-segment-id={interactionRef ? segment.id : undefined}
+      {...{ [CAPTION_ELEMENT_ID_ATTRIBUTE]: segment.id }}
+    >
       {layer}
       <PromotedDecorationsContainer
         side="above"
         segment={segment}
         decorations={promotedAbove}
-        wordStyleOverrides={wordStyleOverrides}
       />
       {[...segment.lines].map((line, idx) => (
         <LineView
@@ -62,7 +95,10 @@ export const SegmentView = memo(function SegmentView({
           line={line}
           segment={segment}
           letterSplitter={letterSplitter}
-          wordStyleOverrides={wordStyleOverrides}
+          wordFragmenter={wordFragmenter}
+          textDirection={textDirection}
+          wordFontFamilies={wordFontFamilies}
+          placedWordIds={placedWordIds}
           inlineSuppressedDecorationIds={inlineSuppressedDecorationIds}
         />
       ))}
@@ -70,7 +106,6 @@ export const SegmentView = memo(function SegmentView({
         side="below"
         segment={segment}
         decorations={promotedBelow}
-        wordStyleOverrides={wordStyleOverrides}
       />
     </div>
   );
@@ -80,10 +115,9 @@ interface PromotedDecorationsContainerProps {
   side: DecorationPlacementSide;
   segment: Segment;
   decorations: ReadonlyArray<PlacedDecoration>;
-  wordStyleOverrides: WordStyleOverrideRegistry;
 }
 
-function PromotedDecorationsContainer({ side, segment, decorations, wordStyleOverrides }: PromotedDecorationsContainerProps) {
+function PromotedDecorationsContainer({ side, segment, decorations }: PromotedDecorationsContainerProps) {
   if (decorations.length === 0) return null;
   const className = side === 'above' ? 'segment-decorations-above' : 'segment-decorations-below';
   return (
@@ -94,7 +128,6 @@ function PromotedDecorationsContainer({ side, segment, decorations, wordStyleOve
           decoration={decoration}
           segment={segment}
           word={word}
-          inlineStyle={wordStyleOverrides.buildInlineStyles(decoration.id)}
         />
       ))}
     </div>

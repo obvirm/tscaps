@@ -13,7 +13,10 @@
   "scripts": {
     "build": "pnpm --filter ./packages/engine build && pnpm --filter ./apps/studio build",
     "typecheck": "pnpm -r typecheck",
-    "lint": "pnpm -r lint"
+    "lint": "pnpm -r lint",
+    "templates:build": "pnpm --filter ./apps/studio templates:build",
+    "templates:contract": "pnpm --filter ./apps/studio templates:contract",
+    "postinstall": "pnpm templates:build"
   },
   "engines": {
     "node": ">=20"

@@ -18,7 +18,7 @@ export class AssignSegmentSheetAction {
   ) {}
 
   execute(derivedSegment: Segment, sheetId: string): void {
-    const { sheets, document, video, segmentOverrides, decorationOverrides } = this.store.snapshot();
+    const { sheets, document, video, frozenSegments, decorationOverrides } = this.store.snapshot();
     if (!document) return;
     if (!video.layout) return;
 
@@ -30,7 +30,7 @@ export class AssignSegmentSheetAction {
       videoWidth: video.layout.width,
       videoHeight: video.layout.height,
       videoDurationSeconds: video.duration,
-      segmentOverrides,
+      frozenSegments,
       decorationOverrides,
     };
     const piped = this.deriver.runSheetPipeline([derivedSegment], targetSheet, ctx);
@@ -65,7 +65,7 @@ export class AssignSegmentSheetAction {
 
     const next: Section[] = [...doc.sections];
     next[sectionIdx] = section.with({ segments: piped });
-    return new Document({ sections: next });
+    return doc.with({ sections: next });
   }
 
   private _sectionKindOf(document: Document, segmentId: string): string | null {

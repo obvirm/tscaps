@@ -1,14 +1,20 @@
-import type { AlignmentConfig } from '@tscaps/engine';
+import type { AlignmentConfig, TextDirection } from '@tscaps/engine';
+import type { FontScript } from '@core/fonts/domain/FontCatalog';
 import type { Template } from '@core/templates/domain/Template';
 import type { SegmentSplitterConfig } from '@core/segment-splitter/domain/SegmentSplitterConfig';
 import type { LineSplitterConfig } from '@core/line-splitter/domain/LineSplitterConfig';
 import type { EffectConfig } from '@core/effect/domain/EffectConfig';
 import type { TypographyConfig } from '@core/sheets/domain/TypographyConfig';
 import type { RotationConfig } from '@core/sheets/domain/RotationConfig';
+import type { SheetRole } from '@core/sheets/domain/SheetRole';
+import { SheetAnimationSet } from '@core/sheets/domain/SheetAnimationSet';
 import { StyleValues } from '@core/sheets/domain/StyleValues';
 
 export const MAIN_SHEET_ID = 'main';
 export const HOOK_SHEET_ID = 'hook';
+
+export const MAIN_SHEET_COLOR = '#94a3b8';
+export const HOOK_SHEET_COLOR = '#EBB85C';
 
 export interface SheetProps {
   readonly id: string;
@@ -23,8 +29,13 @@ export interface SheetProps {
   readonly lineSplitterConfig: LineSplitterConfig;
   readonly alignmentConfig: AlignmentConfig;
   readonly effectConfigs: ReadonlyArray<EffectConfig>;
+  readonly animations?: SheetAnimationSet | undefined;
   readonly cssOverride?: string | null | undefined;
   readonly filtersSvgOverride?: string | null | undefined;
+  readonly linkGroupId?: string | null | undefined;
+  readonly role?: SheetRole | null | undefined;
+  readonly textDirection?: TextDirection | undefined;
+  readonly textScript?: FontScript | null | undefined;
 }
 
 /**
@@ -53,8 +64,34 @@ export class Sheet {
   readonly lineSplitterConfig: LineSplitterConfig;
   readonly alignmentConfig: AlignmentConfig;
   readonly effectConfigs: ReadonlyArray<EffectConfig>;
+  /** How everything under this sheet moves, unless an element says otherwise. */
+  /** How everything under this sheet moves, unless an element says otherwise. */
+  readonly animations: SheetAnimationSet;
   readonly cssOverride: string | null;
   readonly filtersSvgOverride: string | null;
+  readonly linkGroupId: string | null;
+  /**
+   * Narrative role this sheet plays in the video's caption structure,
+   * or `null` for a plain sheet. Roles are not singletons — several
+   * sheets may carry the same one. Survives template and variant
+   * switches: it states what the sheet is for, not how it looks.
+   */
+  readonly role: SheetRole | null;
+  /**
+   * Paragraph direction the bidirectional algorithm resolves this
+   * sheet's lines against. It states the language of the captions, not
+   * a look, which is why switching template or resetting the typography
+   * slice leaves it untouched.
+   */
+  readonly textDirection: TextDirection;
+  /**
+   * Writing system of the captions this sheet renders, or `null` when
+   * none is known. Derived state, never persisted: it is re-classified
+   * from the document every time the document is re-derived, so it
+   * cannot go stale — unlike `textDirection`, there is no user choice
+   * to respect. It decides which face leads the sheet's font stack.
+   */
+  readonly textScript: FontScript | null;
 
   constructor(props: SheetProps) {
     this.id = props.id;
@@ -69,8 +106,13 @@ export class Sheet {
     this.lineSplitterConfig = props.lineSplitterConfig;
     this.alignmentConfig = props.alignmentConfig;
     this.effectConfigs = props.effectConfigs;
+    this.animations = props.animations ?? SheetAnimationSet.empty();
     this.cssOverride = props.cssOverride ?? null;
     this.filtersSvgOverride = props.filtersSvgOverride ?? null;
+    this.linkGroupId = props.linkGroupId ?? null;
+    this.role = props.role ?? null;
+    this.textDirection = props.textDirection ?? 'ltr';
+    this.textScript = props.textScript ?? null;
   }
 
   with(changes: Partial<SheetProps>): Sheet {
@@ -87,8 +129,13 @@ export class Sheet {
       lineSplitterConfig: this.lineSplitterConfig,
       alignmentConfig: this.alignmentConfig,
       effectConfigs: this.effectConfigs,
+      animations: this.animations,
       cssOverride: this.cssOverride,
       filtersSvgOverride: this.filtersSvgOverride,
+      linkGroupId: this.linkGroupId,
+      role: this.role,
+      textDirection: this.textDirection,
+      textScript: this.textScript,
       ...changes,
     });
   }
@@ -116,6 +163,7 @@ export class Sheet {
       lineSplitterConfig: template.lineSplitter,
       alignmentConfig: template.alignment,
       effectConfigs: template.effectConfigs,
+      animations: SheetAnimationSet.empty(),
       cssOverride: null,
       filtersSvgOverride: null,
     });
@@ -203,21 +251,16 @@ export class Sheet {
    * Template. Centralises these literals so every entry point that resets
    * the editing session — startup, new-video upload, video clear — produces
    * an identical baseline.
-   *
-   * The color is a mid-neutral (slate-400) so the swatch and any chip/edge
-   * accents painted with it stay legible on both the cream light theme and
-   * the near-black dark theme — the previous slate-200 disappeared on cream.
    */
   static createMain(template: Template): Sheet {
-    return Sheet.fromTemplate(MAIN_SHEET_ID, 'Main', '#94a3b8', template);
+    return Sheet.fromTemplate(MAIN_SHEET_ID, 'Main', MAIN_SHEET_COLOR, template);
   }
 
   /**
-   * Builds the canonical `hook` Sheet (id, name, and color fixed) from a
-   * Template. The color is a warm amber so the chip stands out from the
-   * slate Main swatch on both themes.
+   * Builds the canonical `hook` Sheet (id, name, color, and role fixed)
+   * from a Template.
    */
   static createHook(template: Template): Sheet {
-    return Sheet.fromTemplate(HOOK_SHEET_ID, 'Hook', '#EBB85C', template);
+    return Sheet.fromTemplate(HOOK_SHEET_ID, 'Hook', HOOK_SHEET_COLOR, template).with({ role: 'hook' });
   }
 }

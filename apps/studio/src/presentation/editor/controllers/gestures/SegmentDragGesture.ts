@@ -1,164 +1,78 @@
 import type { AlignmentConfig } from '@tscaps/engine';
-import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { UpdateAlignmentAction } from '@core/sheets/actions/style/UpdateAlignmentAction';
-import type { SetSegmentStyleOverrideAction } from '@core/captions/actions/segments/SetSegmentStyleOverrideAction';
-import type { SegmentStyleOverrides } from '@core/captions/domain/SegmentStyleOverrides';
-import type { SnapZoneResolver } from '@presentation/editor/services/SnapZoneResolver';
-import type { DragGeometryResolver } from '@presentation/editor/services/DragGeometryResolver';
+import type { SetElementPlacementAction } from '@core/elements/actions/SetElementPlacementAction';
+import type { SnapBandsInFrame, SnapZoneResolver } from '@presentation/editor/services/SnapZoneResolver';
+import type { HorizontalPlacementResolver } from '@tscaps/engine';
+import type { DragCentroid, DragGeometryResolver } from '@presentation/editor/services/DragGeometryResolver';
+import type { AlignmentGeometryResolver } from '@presentation/editor/services/AlignmentGeometryResolver';
+import type { SegmentDragPlan, SegmentDragPlanner } from '@presentation/editor/services/SegmentDragPlanner';
 import type { DragTransformPainter } from '@presentation/editor/services/DragTransformPainter';
 import { DragSession } from '@presentation/editor/controllers/DragSession';
-import type { SegmentBindingRegistry } from '@presentation/editor/controllers/SegmentBindingRegistry';
 import {
   DRAG_ACTIVATION_THRESHOLD_PX,
   type OverlayGestureHost,
-  type SegmentBindInput,
   type SegmentDragState,
   type SegmentDragTarget,
 } from '@presentation/editor/controllers/OverlayManipulationTypes';
 
 /**
- * Gesture: drag a segment to commit a new sheet-level alignment.
- * Visual feedback during the drag is a CSS translate painted onto
- * every segment wrapper (the sibling segments share the alignment),
- * cleared on release before the commit lands. Holding Alt at
- * pointerdown flips the gesture: writes land on the dragged segment's
- * offset override only, the sheet's anchor stays inherited, and only
- * the dragged wrapper paints during the drag.
+ * Gesture: drag a segment to commit a new alignment on its sheet.
+ *
+ * Visual feedback is the position each affected segment will actually
+ * land on once the drop commits, painted per segment: the segments that
+ * share the alignment travel with the dragged one, the rest stand still,
+ * and a snapped drag shows the snapped landing rather than the raw
+ * cursor. Holding Alt at pointerdown flips the gesture: writes land on
+ * the dragged segment's offset override only, the sheet's anchor stays
+ * inherited, and no other segment moves.
  */
 export class SegmentDragGesture {
   /** True when Alt was held at pointerdown: writes land on the
    *  segment offset override instead of the sheet's alignment. */
   private scopedToSegment = false;
+  /** Geometry snapshot of the segments in flight; `null` between gestures. */
+  private activePlan: SegmentDragPlan | null = null;
+  /** Bands the dragged box can land on; fixed for the gesture, its size being fixed too. */
+  private activeBands: SnapBandsInFrame | null = null;
 
   constructor(
     private readonly host: OverlayGestureHost,
-    private readonly segments: SegmentBindingRegistry,
-    private readonly editorStore: EditorStore,
     private readonly updateAlignment: UpdateAlignmentAction,
-    private readonly setSegmentStyleOverride: SetSegmentStyleOverrideAction,
+    private readonly setElementPlacement: SetElementPlacementAction,
     private readonly snapResolver: SnapZoneResolver,
+    private readonly horizontalPlacementResolver: HorizontalPlacementResolver,
     private readonly geometryResolver: DragGeometryResolver,
+    private readonly alignmentGeometry: AlignmentGeometryResolver,
+    private readonly planner: SegmentDragPlanner,
     private readonly transformPainter: DragTransformPainter,
   ) {}
 
-  bind(input: SegmentBindInput): () => void {
-    const target: SegmentDragTarget = { kind: 'segment', ...input };
-    this.segments.register(target);
-    const onPointerDown = (event: PointerEvent): void => this.tryStart(target, event);
-    target.hitzone.addEventListener('pointerdown', onPointerDown);
-    return () => {
-      target.hitzone.removeEventListener('pointerdown', onPointerDown);
-      this.segments.unregister(target.segmentId);
-    };
-  }
-
-  computeState(session: DragSession, target: SegmentDragTarget, clientX: number, clientY: number): SegmentDragState {
-    const { dx, dy } = session.delta(clientX, clientY);
-    const centroid = this.geometryResolver.centroid(session.anchorRect, session.scalerRect, dx, dy);
-    const resolution = this.scopedToSegment
-      ? this.resolveScoped(centroid)
-      : this.snapResolver.resolve(
-          centroid.centroidXFrac,
-          centroid.centroidYFrac,
-          centroid.boxWidthFrac,
-          centroid.boxHeightFrac,
-        );
-    return {
-      kind: 'segment',
-      segmentId: target.segmentId,
-      deltaX: dx,
-      deltaY: dy,
-      vertical: resolution.vertical,
-      horizontal: resolution.horizontal,
-      scopedToSegment: this.scopedToSegment,
-    };
-  }
-
-  applyMoveSideEffects(_session: DragSession, state: SegmentDragState): void {
-    if (state.scopedToSegment) {
-      const binding = this.segments.get(state.segmentId);
-      if (!binding) return;
-      this.transformPainter.applyTranslate([binding.wrapper], state.deltaX, state.deltaY);
-      return;
-    }
-    this.transformPainter.applyTranslate(this.wrappers(), state.deltaX, state.deltaY);
-  }
-
-  commit(state: SegmentDragState): void {
-    if (state.scopedToSegment) {
-      this.commitSegmentOffset(state);
-      return;
-    }
-    this.clearSegmentOffsetOverride(state.segmentId);
-    const alignment: AlignmentConfig = {
-      verticalAlign: state.vertical.align,
-      verticalOffset: state.vertical.offset,
-      horizontalAlign: state.horizontal.align,
-      horizontalOffset: state.horizontal.offset,
-    };
-    this.updateAlignment.execute(alignment);
-  }
-
-  cleanupOnEnd(): void {
-    this.transformPainter.clear(this.wrappers());
-  }
-
-  private resolveScoped(centroid: ReturnType<DragGeometryResolver['centroid']>): {
-    vertical: SegmentDragState['vertical'];
-    horizontal: SegmentDragState['horizontal'];
-  } {
-    const sheet = this.editorStore.activeSheet();
-    const anchor = sheet?.alignmentConfig;
-    if (!anchor) {
-      return this.snapResolver.resolve(
-        centroid.centroidXFrac,
-        centroid.centroidYFrac,
-        centroid.boxWidthFrac,
-        centroid.boxHeightFrac,
-      );
-    }
-    return this.snapResolver.resolveForAnchor(
-      anchor.verticalAlign,
-      anchor.horizontalAlign,
-      centroid.centroidXFrac,
-      centroid.centroidYFrac,
-      centroid.boxWidthFrac,
-      centroid.boxHeightFrac,
-    );
-  }
-
-  private commitSegmentOffset(state: SegmentDragState): void {
-    const previous = this.editorStore.snapshot().segmentOverrides.getStyle(state.segmentId);
-    this.setSegmentStyleOverride.execute(state.segmentId, {
-      ...previous,
-      verticalOffset: state.vertical.offset,
-      horizontalOffset: state.horizontal.offset,
-    });
-  }
-
-  private clearSegmentOffsetOverride(segmentId: string): void {
-    const previous = this.editorStore.snapshot().segmentOverrides.getStyle(segmentId);
-    if (previous.verticalOffset === undefined && previous.horizontalOffset === undefined) return;
-    const next: Record<string, unknown> = { ...previous };
-    delete next.verticalOffset;
-    delete next.horizontalOffset;
-    this.setSegmentStyleOverride.execute(segmentId, next as SegmentStyleOverrides);
-  }
-
-  private *wrappers(): IterableIterator<HTMLElement> {
-    for (const target of this.segments.all()) yield target.wrapper;
-  }
-
-  private tryStart(target: SegmentDragTarget, event: PointerEvent): void {
+  /**
+   * Starts a drag session for `target` from a primary-button
+   * pointerdown. No-op when another gesture already owns the active
+   * session, no scaler is mounted, or the segment's sheet is gone.
+   * Latches the Alt modifier: held at pointerdown, the whole gesture
+   * writes to the segment's offset override instead of the sheet
+   * alignment.
+   */
+  tryStart(target: SegmentDragTarget, event: PointerEvent): void {
     if (event.button !== 0) return;
     if (this.host.isSessionActive()) return;
     const scaler = this.host.scaler();
     if (!scaler) return;
+    const scalerRect = scaler.getBoundingClientRect();
+    const plan = this.planner.plan(target, { width: scalerRect.width, height: scalerRect.height }, event.altKey);
+    if (!plan) return;
     this.scopedToSegment = event.altKey;
+    this.activePlan = plan;
+    this.activeBands = this.snapResolver.bandsFor({
+      widthFrac: plan.dragged.box.width / plan.frame.width,
+      heightFrac: plan.dragged.box.height / plan.frame.height,
+    });
     const session = new DragSession(
       target,
-      this.anchorRectOf(target.wrapper),
-      scaler.getBoundingClientRect(),
+      target.wrapper.getBoundingClientRect(),
+      scalerRect,
       event.clientX,
       event.clientY,
       event.pointerId,
@@ -167,21 +81,121 @@ export class SegmentDragGesture {
     this.host.activateSession(session);
   }
 
-  /**
-   * The wrapper's box with its own `translate` removed. The commit
-   * writes an anchor position, and the behind-actor lift is a
-   * `translate` the wrapper re-applies on top of that anchor —
-   * measuring the lifted box would bake the lift into the committed
-   * anchor and the caption would land one lift above the drop point.
-   */
-  private anchorRectOf(wrapper: HTMLElement): DOMRect {
-    const rect = wrapper.getBoundingClientRect();
-    const translate = getComputedStyle(wrapper).translate;
-    if (!translate || translate === 'none') return rect;
-    const [x = '0', y = '0'] = translate.split(' ');
-    const offsetX = parseFloat(x) || 0;
-    const offsetY = parseFloat(y) || 0;
-    if (offsetX === 0 && offsetY === 0) return rect;
-    return new DOMRect(rect.x - offsetX, rect.y - offsetY, rect.width, rect.height);
+  computeState(session: DragSession, target: SegmentDragTarget, clientX: number, clientY: number): SegmentDragState {
+    const plan = this.planInFlight();
+    const { dx, dy } = session.delta(clientX, clientY);
+    const centroid = this.centroidOf(plan, dx, dy);
+    const resolution = this.scopedToSegment
+      ? this.resolveScoped(plan, centroid)
+      : this.snapResolver.resolve(
+          centroid.centroidXFrac,
+          centroid.centroidYFrac,
+          centroid.boxWidthFrac,
+          centroid.boxHeightFrac,
+        );
+    const bands = this.bandsInFlight();
+    return {
+      kind: 'segment',
+      segmentId: target.segmentId,
+      vertical: resolution.vertical,
+      horizontal: resolution.horizontal,
+      verticalGuides: bands.vertical,
+      horizontalGuides: bands.horizontal,
+      scopedToSegment: this.scopedToSegment,
+    };
+  }
+
+  applyMoveSideEffects(_session: DragSession, state: SegmentDragState): void {
+    const plan = this.planInFlight();
+    const committed = this.committedAlignment(state);
+    for (const target of plan.targets) {
+      const shift = this.alignmentGeometry.shift(
+        target.alignmentBefore,
+        { ...committed, ...target.keptOverride },
+        target.box,
+        plan.frame,
+        target.textDirection,
+      );
+      this.transformPainter.applyTranslate(target.wrapper, shift.deltaX, shift.deltaY);
+    }
+  }
+
+  commit(state: SegmentDragState): void {
+    if (state.scopedToSegment) {
+      this.commitSegmentOffset(state);
+      return;
+    }
+    this.clearSegmentOffsetOverride(state.segmentId);
+    // A position placed with a pointer is a position on the screen, so the
+    // commit stores it in screen terms even when the template declared its
+    // anchor relative to reading order.
+    this.updateAlignment.execute(this.planInFlight().sheet.id, this.committedAlignment(state));
+  }
+
+  cleanupOnEnd(): void {
+    for (const target of this.activePlan?.targets ?? []) this.transformPainter.clear(target.wrapper);
+    this.activePlan = null;
+    this.activeBands = null;
+  }
+
+  // The host activates a session only after `tryStart` has stored a
+  // plan, and drops the session before `cleanupOnEnd` clears it.
+  private planInFlight(): SegmentDragPlan {
+    if (!this.activePlan) throw new Error('Segment drag ran outside an active session');
+    return this.activePlan;
+  }
+
+  private bandsInFlight(): SnapBandsInFrame {
+    if (!this.activeBands) throw new Error('Segment drag ran outside an active session');
+    return this.activeBands;
+  }
+
+  // Derived from the segment's alignment rather than from a measured
+  // rect: the wrapper carries the segment's rotation and its
+  // behind-actor lift, and both would bake into the committed anchor.
+  private centroidOf(plan: SegmentDragPlan, deltaX: number, deltaY: number): DragCentroid {
+    const { alignmentBefore, box, textDirection } = plan.dragged;
+    const origin = this.alignmentGeometry.origin(alignmentBefore, box, plan.frame, textDirection);
+    return this.geometryResolver.centroidFromOrigin(origin, box, plan.frame, deltaX, deltaY);
+  }
+
+  private committedAlignment(state: SegmentDragState): AlignmentConfig {
+    return {
+      verticalAlign: state.vertical.align,
+      verticalOffset: state.vertical.offset,
+      horizontalAlign: state.horizontal.align,
+      horizontalOffset: state.horizontal.offset,
+    };
+  }
+
+  // Anchored against where the segment already sits, not against the
+  // sheet: a segment moved this way before carries its own anchor, and
+  // re-reading the sheet's would drop it somewhere it never was.
+  private resolveScoped(plan: SegmentDragPlan, centroid: DragCentroid): {
+    vertical: SegmentDragState['vertical'];
+    horizontal: SegmentDragState['horizontal'];
+  } {
+    const anchor = plan.dragged.alignmentBefore;
+    return this.snapResolver.resolveForAnchor(
+      anchor.verticalAlign,
+      this.horizontalPlacementResolver.resolve(anchor.horizontalAlign, anchor.horizontalOffset, plan.dragged.textDirection).side,
+      centroid.centroidXFrac,
+      centroid.centroidYFrac,
+      centroid.boxWidthFrac,
+      centroid.boxHeightFrac,
+    );
+  }
+
+  private commitSegmentOffset(state: SegmentDragState): void {
+    this.setElementPlacement.execute(state.segmentId, 'segment', {
+      verticalAlign: state.vertical.align,
+      verticalOffset: state.vertical.offset,
+      horizontalAlign: state.horizontal.align,
+      horizontalOffset: state.horizontal.offset,
+    });
+  }
+
+  private clearSegmentOffsetOverride(segmentId: string): void {
+    this.setElementPlacement.clear(segmentId, 'segment');
   }
 }

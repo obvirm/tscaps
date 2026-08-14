@@ -36,9 +36,17 @@ export class SvgFilterDefinitionsParser {
       }
       this.assertNoSmil(el, id);
       const body = Array.from(el.childNodes).map((n) => serializer.serializeToString(n)).join('');
-      return new SvgFilter(id, body);
+      return new SvgFilter(id, this.attributesExceptId(el), body);
     });
     return new SvgFilterDefinitions(filters);
+  }
+
+  private attributesExceptId(filterEl: Element): ReadonlyMap<string, string> {
+    const attributes = new Map<string, string>();
+    for (const attribute of Array.from(filterEl.attributes)) {
+      if (attribute.name !== 'id') attributes.set(attribute.name, attribute.value);
+    }
+    return attributes;
   }
 
   private assertNoSmil(filterEl: Element, filterId: string): void {

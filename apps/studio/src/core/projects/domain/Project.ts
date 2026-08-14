@@ -2,8 +2,9 @@ import type { Document } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 import type { VideoLayout } from '@core/editor/domain/VideoState';
 import type { ProjectVideo } from '@core/projects/domain/ProjectVideo';
-import { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
-import { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
+import { BehindActorSegmentOverrideRegistry } from '@core/person-segmentation/domain/BehindActorSegmentOverrideRegistry';
+import { FrozenSegmentSet } from '@core/captions/domain/FrozenSegmentSet';
+import { ElementStyles } from '@core/elements/domain/ElementStyles';
 import { DecorationOverrideRegistry } from '@core/captions/domain/DecorationOverrideRegistry';
 import { CutRegistry } from '@core/cuts/domain/CutRegistry';
 
@@ -30,8 +31,9 @@ export class Project {
     readonly document: Document | null,
     readonly sheets: ReadonlyArray<Sheet>,
     readonly activeSheetId: string | null,
-    readonly wordStyleOverrides: WordStyleOverrideRegistry,
-    readonly segmentOverrides: SegmentOverrides,
+    readonly behindActorOverrides: BehindActorSegmentOverrideRegistry,
+    readonly frozenSegments: FrozenSegmentSet,
+    readonly elementStyles: ElementStyles,
     readonly decorationOverrides: DecorationOverrideRegistry,
     readonly cuts: CutRegistry,
     readonly thumbnail: Blob | null,
@@ -54,8 +56,9 @@ export class Project {
       null,
       [],
       null,
-      WordStyleOverrideRegistry.empty(),
-      SegmentOverrides.empty(),
+      BehindActorSegmentOverrideRegistry.empty(),
+      FrozenSegmentSet.empty(),
+      ElementStyles.empty(),
       DecorationOverrideRegistry.empty(),
       CutRegistry.empty(),
       null,

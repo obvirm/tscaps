@@ -2,6 +2,7 @@ import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { RefreshDocumentAction } from '@core/editor/actions/RefreshDocumentAction';
 import type { Sheet, SheetProps } from '@core/sheets/domain/Sheet';
 import { StyleValues } from '@core/sheets/domain/StyleValues';
+import type { LinkedSheetsSync } from '@core/sheets/services/LinkedSheetsSync';
 
 export type SheetSlice = 'typography' | 'style' | 'position' | 'effects' | 'layout' | 'code';
 
@@ -21,6 +22,7 @@ export class ResetSheetSliceAction {
   constructor(
     private readonly store: EditorStore,
     private readonly refresh: RefreshDocumentAction,
+    private readonly linkedSheetsSync: LinkedSheetsSync,
   ) {}
 
   execute(slice: SheetSlice): void {
@@ -30,8 +32,9 @@ export class ResetSheetSliceAction {
     const patch = this.buildPatch(active, slice);
     if (patch === null) return;
 
+    const updated = active.with(patch);
     this.store.commit(`reset:${active.id}:${slice}`);
-    this.store.patch({ sheets: this.store.replaceSheet(active.with(patch)) });
+    this.store.patch({ sheets: this.linkedSheetsSync.applyStyleEdit(updated, this.store.snapshot().sheets) });
     if (slice !== 'position') this.refresh.execute();
   }
 

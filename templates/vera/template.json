@@ -5,11 +5,11 @@
     "multi-speakers"
   ],
   "variants": [
-    { "label": "Blue pill", "overrides": { "highlight-color": "#2563eb" } },
-    { "label": "Pink pill", "overrides": { "highlight-color": "#eb2563" } },
-    { "label": "Green pill", "overrides": { "highlight-color": "#25b86e" } },
-    { "label": "Amber pill", "overrides": { "highlight-color": "#eb9525" } },
-    { "label": "Purple pill", "overrides": { "highlight-color": "#a525eb" } }
+    { "label": "Blue pill", "overrides": { "highlight-bg-color": "#2563eb" } },
+    { "label": "Pink pill", "overrides": { "highlight-bg-color": "#eb2563" } },
+    { "label": "Green pill", "overrides": { "highlight-bg-color": "#25b86e" } },
+    { "label": "Amber pill", "overrides": { "highlight-bg-color": "#eb9525" } },
+    { "label": "Purple pill", "overrides": { "highlight-bg-color": "#a525eb" } }
   ],
   "typography": {
     "fontFamily": "Inter Variable",
@@ -23,31 +23,35 @@
       "label": "Text",
       "type": "color",
       "default": "#ffffff",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "upcoming-color",
       "label": "Upcoming word",
       "type": "color",
       "default": "#d8d8d8",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
-      "id": "highlight-color",
+      "id": "highlight-bg-color",
       "label": "Active word background",
       "type": "color",
       "default": "#2563eb",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
       "id": "bg-color",
       "label": "Background",
       "type": "color",
       "default": "#000000",
-      "group": "colors"
+      "group": "style",
+      "subgroup": "colors"
     },
     {
-      "id": "highlight-radius",
+      "id": "highlight-bg-radius",
       "label": "Highlight radius",
       "type": "float",
       "default": 0.08,
@@ -55,10 +59,11 @@
       "max": 1.5,
       "step": 0.01,
       "unit": "em",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
-      "id": "highlight-padding-x",
+      "id": "highlight-bg-padding-x",
       "label": "Highlight padding X",
       "type": "float",
       "default": 0.18,
@@ -66,11 +71,11 @@
       "max": 1.0,
       "step": 0.01,
       "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
-      "id": "highlight-padding-y",
+      "id": "highlight-bg-padding-y",
       "label": "Highlight padding Y",
       "type": "float",
       "default": 0.1,
@@ -78,8 +83,8 @@
       "max": 0.8,
       "step": 0.01,
       "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "bg-opacity",
@@ -89,7 +94,8 @@
       "min": 0,
       "max": 1,
       "step": 0.05,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "bg-radius",
@@ -100,19 +106,20 @@
       "max": 1.5,
       "step": 0.01,
       "unit": "em",
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "bg-padding-x",
       "label": "Background padding X",
       "type": "float",
-      "default": 0.20,
+      "default": 0.2,
       "min": 0,
       "max": 3.0,
       "step": 0.01,
       "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     },
     {
       "id": "bg-padding-y",
@@ -123,8 +130,8 @@
       "max": 1.0,
       "step": 0.01,
       "unit": "em",
-      "advanced": true,
-      "group": "appearance"
+      "group": "style",
+      "subgroup": "appearance"
     }
   ],
   "segmentSplitters": [

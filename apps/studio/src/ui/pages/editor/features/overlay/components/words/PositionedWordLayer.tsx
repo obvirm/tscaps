@@ -1,16 +1,17 @@
-import { memo, useMemo, type CSSProperties } from 'react';
+import { memo, useMemo, useRef, type CSSProperties } from 'react';
 import type { AlignmentConfig, Line, Segment, Word, WordSplitter } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
-import type { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
 import { WordView } from '@ui/pages/editor/features/overlay/components/words/WordView';
+import { CAPTION_ELEMENT_ID_ATTRIBUTE } from '@presentation/editor/services/CaptionElementAttribute';
 import { VideoFrameLayer } from '@ui/pages/editor/features/overlay/components/video-frame/VideoFrameLayer';
 import { useBoundLine, useBoundSegment } from '@ui/pages/editor/features/overlay/hooks/useOverlayBinding';
 import { useWordDragPreview } from '@ui/pages/editor/features/overlay/hooks/useWordDragPreview';
 import { AlignmentCssBuilder } from '@presentation/editor/services/AlignmentCssBuilder';
+import { useEditorState } from '@ui/_shared/hooks/useEditorState';
 import { useSheetOverlayArtifactsBuilder } from '@ui/pages/editor/contexts/SheetOverlayArtifactsContext';
-import { useWordStyleBaselineResolver } from '@ui/pages/editor/contexts/WordStyleBaselineContext';
+import { useElementAlignmentResolver } from '@ui/pages/editor/contexts/ElementAlignmentContext';
+import { useRendering } from '@ui/_shared/contexts/modules/RenderingContext';
 
-const alignmentCssBuilder = new AlignmentCssBuilder();
 
 interface PositionedWordLayerProps {
   sheet: Sheet;
@@ -23,16 +24,15 @@ interface PositionedWordLayerProps {
   indexInLine: number;
   segmentAlignment: AlignmentConfig;
   letterSplitter: WordSplitter | null;
-  wordStyleOverrides: WordStyleOverrideRegistry;
+  /** Resolved `font-family` the word declares because its script differs from its surroundings, or `undefined` to inherit the cascade. */
+  fontFamily: string | undefined;
   /** Sheet- and segment-level inline styles the wrapper inherits — minus its alignment-dependent vars. */
   wrapperBaseStyles: CSSProperties;
   /** Decoration ids whose inline `<span>` should be omitted — the glyph either paints out of flow at its own anchor, or the emoji effect is disabled on the host sheet. */
   inlineSuppressedDecorationIds: ReadonlySet<string>;
 }
 
-const PAUSED_ANIMATION_STYLE: CSSProperties = { animationPlayState: 'paused', animationFillMode: 'both' };
 const EMPTY_VARS: Readonly<Record<string, string>> = {};
-const EMPTY_DECORATION_STYLE: Readonly<Record<string, string>> = {};
 
 /** Sibling anchor for a word with a per-word alignment override. Mirrors the main `<anchor><wrapper><segment><line><word>` chain so template rules and animations apply identically. */
 export const PositionedWordLayer = memo(function PositionedWordLayer({
@@ -44,46 +44,45 @@ export const PositionedWordLayer = memo(function PositionedWordLayer({
   indexInLine,
   segmentAlignment,
   letterSplitter,
-  wordStyleOverrides,
+  fontFamily,
   wrapperBaseStyles,
   inlineSuppressedDecorationIds,
 }: PositionedWordLayerProps) {
-  const segRef = useBoundSegment(segment, indexInSection);
+  const segRef = useRef<HTMLDivElement>(null);
+  useBoundSegment(segRef, segment, indexInSection);
   const lineRef = useBoundLine(line, segment);
-  const baselineResolver = useWordStyleBaselineResolver();
+  const baselineResolver = useElementAlignmentResolver();
+  const { elementStyles } = useEditorState();
   const sheetOverlayArtifactsBuilder = useSheetOverlayArtifactsBuilder();
+  const { wordFragmenter } = useRendering();
 
   const savedAlignment = useMemo<AlignmentConfig>(
-    () => baselineResolver.wordEffectiveAlignment(segmentAlignment, wordStyleOverrides, word.id),
-    [baselineResolver, segmentAlignment, wordStyleOverrides, word.id],
+    () => baselineResolver.wordEffectiveAlignment(segmentAlignment, elementStyles, word.id),
+    [baselineResolver, segmentAlignment, elementStyles, word.id],
   );
   const dragPreview = useWordDragPreview(word.id);
   const effectiveAlignment = dragPreview ?? savedAlignment;
 
+  const { horizontalPlacementResolver } = useRendering();
+  const alignmentCssBuilder = useMemo(
+    () => new AlignmentCssBuilder(horizontalPlacementResolver),
+    [horizontalPlacementResolver],
+  );
+
   const anchorStyle = useMemo<CSSProperties>(
-    () => alignmentCssBuilder.buildAnchorStyle(effectiveAlignment),
-    [effectiveAlignment],
+    () => alignmentCssBuilder.buildAnchorStyle(effectiveAlignment, sheet.textDirection),
+    [alignmentCssBuilder, effectiveAlignment, sheet.textDirection],
   );
 
   const videoFrameRequired = sheet.template.rendering.videoFrame.required;
   const subtitleRegionVars = useMemo<Readonly<Record<string, string>>>(
-    () => videoFrameRequired ? alignmentCssBuilder.buildSubtitleRegionVars(effectiveAlignment) : EMPTY_VARS,
-    [videoFrameRequired, effectiveAlignment],
+    () => videoFrameRequired ? alignmentCssBuilder.buildSubtitleRegionVars(effectiveAlignment, sheet.textDirection) : EMPTY_VARS,
+    [alignmentCssBuilder, videoFrameRequired, effectiveAlignment, sheet.textDirection],
   );
 
   const wrapperStyle = useMemo<CSSProperties>(
     () => ({ ...wrapperBaseStyles, ...subtitleRegionVars }),
     [wrapperBaseStyles, subtitleRegionVars],
-  );
-
-  const wordInlineStyle = useMemo(
-    () => wordStyleOverrides.buildInlineStyles(word.id),
-    [wordStyleOverrides, word.id],
-  );
-
-  const decorationInlineStyle = useMemo(
-    () => word.decoration ? wordStyleOverrides.buildInlineStyles(word.decoration.id) : EMPTY_DECORATION_STYLE,
-    [wordStyleOverrides, word.decoration],
   );
 
   const suppressInlineDecoration = word.decoration !== null && inlineSuppressedDecorationIds.has(word.decoration.id);
@@ -97,18 +96,23 @@ export const PositionedWordLayer = memo(function PositionedWordLayer({
         style={wrapperStyle}
         data-tscaps-segment-id={segment.id}
       >
-        <div ref={segRef} style={PAUSED_ANIMATION_STYLE}>
+        <div ref={segRef} {...{ [CAPTION_ELEMENT_ID_ATTRIBUTE]: segment.id }}>
           {liveVideoFrame && <VideoFrameLayer />}
-          <div ref={lineRef} style={PAUSED_ANIMATION_STYLE}>
-            <WordView
-              word={word}
-              segment={segment}
-              indexInLine={indexInLine}
-              letterSplitter={letterSplitter}
-              inlineStyle={wordInlineStyle}
-              decorationInlineStyle={decorationInlineStyle}
-              suppressInlineDecoration={suppressInlineDecoration}
-            />
+          <div ref={lineRef} {...{ [CAPTION_ELEMENT_ID_ATTRIBUTE]: line.id }}>
+            {wordFragmenter.fragment([word.displayText], sheet.textDirection).map((fragment, index, all) => (
+              <WordView
+                key={index}
+                word={word}
+                fragment={fragment}
+                closeGapAfter={all[index + 1]?.joinedToPrevious ?? false}
+                segment={segment}
+                indexInLine={indexInLine}
+                letterSplitter={letterSplitter}
+                fontFamily={fontFamily}
+                suppressInlineDecoration={suppressInlineDecoration || !fragment.carriesWordTail}
+                carriesTrail={fragment.carriesWordTail}
+              />
+            ))}
           </div>
         </div>
       </div>

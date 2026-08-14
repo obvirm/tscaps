@@ -1,6 +1,7 @@
 import { SvgFilterScope, type SvgFilterRenderContext, type SvgFilterScopeProvider, type SvgFilterLengthFactors } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 import { SvgFilterRuntimeVariable } from '@core/templates/domain/definition/SvgFilterRuntimeVariable';
+import { ControlCssVariable } from '@core/templates/domain/definition/ControlCssVariable';
 
 /**
  * Resolves the variable scope SVG filters in this sheet's template
@@ -38,7 +39,7 @@ export class SheetSvgFilterScopeProvider implements SvgFilterScopeProvider {
   }
 
   private styleControlEntries(): ReadonlyArray<readonly [string, string]> {
-    return Object.entries(this.sheet.styleValues.values).map(([id, value]) => [`--tscaps-${id}`, String(value)] as const);
+    return Object.entries(this.sheet.styleValues.values).map(([id, value]) => [ControlCssVariable.nameFor(id), String(value)] as const);
   }
 
   private runtimeEntries(currentTime: number): ReadonlyArray<readonly [string, string]> {

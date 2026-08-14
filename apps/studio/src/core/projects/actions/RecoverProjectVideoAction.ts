@@ -60,11 +60,14 @@ export class RecoverProjectVideoAction {
   private async publishPreviewProxy(projectId: string, source: Blob): Promise<void> {
     const cached = await this.previewProxyResolver.fromRepository(projectId);
     if (cached) {
-      this.store.patchVideo({ previewFile: cached.blob });
+      this.store.patchVideo({ previewFile: cached.blob, previewIsProxy: true });
       return;
     }
     const resolution = await this.previewProxyResolver.fromSource(source);
-    this.store.patchVideo({ previewFile: resolution.previewBlob });
+    this.store.patchVideo({
+      previewFile: resolution.previewBlob,
+      previewIsProxy: resolution.freshProxy !== null,
+    });
     if (resolution.freshProxy) this.dispatchProxyStore(projectId, resolution.freshProxy);
   }
 

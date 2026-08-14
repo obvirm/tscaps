@@ -2,9 +2,8 @@ import { memo, useCallback, useLayoutEffect, useMemo, useState } from 'react';
 import { Loader2, Lock, MoreHorizontal, Trash2 } from 'lucide-react';
 import type { Document, Segment } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
-import type { SegmentStyleOverrides } from '@core/captions/domain/SegmentStyleOverrides';
-import type { SegmentOverrides } from '@core/captions/domain/SegmentOverrides';
-import type { WordStyleOverrideRegistry } from '@core/captions/domain/WordStyleOverrideRegistry';
+import type { BehindActorSegmentOverrideRegistry } from '@core/person-segmentation/domain/BehindActorSegmentOverrideRegistry';
+import type { ElementStyles } from '@core/elements/domain/ElementStyles';
 import type { DecorationOverrideRegistry } from '@core/captions/domain/DecorationOverrideRegistry';
 import type { CutRegistry } from '@core/cuts/domain/CutRegistry';
 import type { CutAwareDocumentBuilder } from '@core/cuts/services/CutAwareDocumentBuilder';
@@ -43,8 +42,10 @@ export interface SceneCardProps {
   isActive: boolean;
   sheet: Sheet | null;
   sheets: Sheet[];
-  wordStyleOverrides: WordStyleOverrideRegistry;
-  segmentOverrides: SegmentOverrides;
+  elementStyles: ElementStyles;
+  behindActorOverrides: BehindActorSegmentOverrideRegistry;
+  /** Whether the segment is excluded from reflow — a rule with more inputs than `segmentOverrides` carries, so it arrives resolved. */
+  isFrozen: boolean;
   decorationOverrides: DecorationOverrideRegistry;
   cuts: CutRegistry;
   cutAwareDocumentBuilder: CutAwareDocumentBuilder;
@@ -56,24 +57,22 @@ export interface SceneCardProps {
   onDeleteWords: (wordIds: string[]) => void;
   onAssignSegmentSheet: (segment: Segment, sheetId: string) => void;
   onCreateSheet: (name: string) => string | null;
-  onSetSegmentStyleOverride: (segmentId: string, overrides: SegmentStyleOverrides) => void;
   onResetSegmentLayout: (segmentId: string) => void;
 }
 
 export const SceneCard = memo(function SceneCard(props: SceneCardProps) {
   const {
     doc, segment, segIdx, isFirstSegment, isLastSegment, isActive,
-    sheet, sheets, wordStyleOverrides, segmentOverrides, decorationOverrides,
+    sheet, sheets, elementStyles, behindActorOverrides, isFrozen, decorationOverrides,
     cuts, cutAwareDocumentBuilder, captions,
     prevSegmentEnd, nextSegmentStart,
     onSeek, onApplyStructureEdit, onDeleteWords,
-    onAssignSegmentSheet, onCreateSheet, onSetSegmentStyleOverride, onResetSegmentLayout,
+    onAssignSegmentSheet, onCreateSheet, onResetSegmentLayout,
   } = props;
 
   const { documentEditor } = useEngine();
   const timeMap = useRenderTimeMap();
-  const isFrozen = segmentOverrides.isFrozen(segment.id);
-  const hasOverride = segmentOverrides.hasStyleFor(segment.id);
+  const hasOverride = elementStyles.has(segment.id);
   const isComputingActorMasks = useSegmentMaskBackfillPending(segment.id);
 
   // Header time, textarea seed and recompile edits operate on the
@@ -158,8 +157,6 @@ export const SceneCard = memo(function SceneCard(props: SceneCardProps) {
           <SceneDecorationsRow
             segment={segment}
             sheet={sheet}
-            wordStyleOverrides={wordStyleOverrides}
-            segmentOverrides={segmentOverrides}
             decorationOverrides={decorationOverrides}
           />
           {isMobile ? (
@@ -191,15 +188,13 @@ export const SceneCard = memo(function SceneCard(props: SceneCardProps) {
               isLastSegment={isLastSegment}
               sheet={sheet}
               sheets={sheets}
-              currentOverrides={segmentOverrides.getStyle(segment.id)}
-              behindActorOverride={segmentOverrides.behindActorOverrideFor(segment.id)}
+              behindActorOverride={behindActorOverrides.get(segment.id)}
               prevSegmentEnd={prevSegmentEnd}
               nextSegmentStart={nextSegmentStart}
               onDeleteWords={onDeleteWords}
               onApplyStructureEdit={onApplyStructureEdit}
               onAssignSegmentSheet={onAssignSegmentSheet}
               onCreateSheet={onCreateSheet}
-              onCommitStyleOverrides={(o) => onSetSegmentStyleOverride(segment.id, o)}
               onCommitSegmentTime={handleCommitSegmentTime}
               onRedistributeWords={handleRedistributeWords}
             />
@@ -210,6 +205,7 @@ export const SceneCard = memo(function SceneCard(props: SceneCardProps) {
       <textarea
         ref={textareaRef}
         data-segment-id={segment.id}
+        dir="auto"
         value={value}
         onChange={onChange}
         onKeyDown={onKeyDown}

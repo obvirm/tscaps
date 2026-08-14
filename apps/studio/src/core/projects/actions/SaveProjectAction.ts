@@ -3,6 +3,7 @@ import type { Project } from '@core/projects/domain/Project';
 import type { ProjectRepository } from '@core/projects/domain/ProjectRepository';
 import type { ProjectFromEditorStateBuilder } from '@core/projects/services/ProjectFromEditorStateBuilder';
 import type { ProjectSerializer } from '@core/projects/services/ProjectSerializer';
+import { ProjectSaveFailedError } from '@core/projects/domain/errors/ProjectSaveFailedError';
 
 /**
  * Persists the current editor state into the active Project's record.
@@ -15,6 +16,10 @@ import type { ProjectSerializer } from '@core/projects/services/ProjectSerialize
  *
  * Does not re-cache the video blob — that is owned by CreateProjectAction
  * and never changes for the lifetime of a project.
+ *
+ * Every failure leaves as a `ProjectSaveFailedError` carrying the
+ * original error in `cause`, so callers report a failed save without
+ * inspecting whatever the storage layer threw.
  */
 export class SaveProjectAction {
   constructor(
@@ -28,7 +33,11 @@ export class SaveProjectAction {
     const projectAtStart = this.projectBuilder.build(this.store.snapshot());
     if (!projectAtStart) return;
     const signatureAtStart = this.signatureOf(projectAtStart);
-    await this.repository.save(projectAtStart);
+    try {
+      await this.repository.save(projectAtStart);
+    } catch (cause) {
+      throw new ProjectSaveFailedError({ cause });
+    }
     if (this.currentStateMatches(signatureAtStart)) {
       this.store.markClean();
     }

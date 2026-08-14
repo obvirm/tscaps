@@ -131,7 +131,7 @@ export class LoadProjectAction {
     const proxy = await this.previewProxyResolver.fromRepository(project.id);
     signal?.throwIfAborted();
     if (!proxy) return false;
-    this.editorStore.patchVideo({ previewFile: proxy.blob });
+    this.editorStore.patchVideo({ previewFile: proxy.blob, previewIsProxy: true });
     this.commitProject(project, null, substitutedTemplateIds.length > 0);
     this.refresh.execute();
     void this.startOriginalDownload.execute(signal);
@@ -182,12 +182,15 @@ export class LoadProjectAction {
     const cached = await this.previewProxyResolver.fromRepository(projectId);
     signal?.throwIfAborted();
     if (cached) {
-      this.editorStore.patchVideo({ previewFile: cached.blob });
+      this.editorStore.patchVideo({ previewFile: cached.blob, previewIsProxy: true });
       return;
     }
     const resolution = await this.previewProxyResolver.fromSource(source);
     signal?.throwIfAborted();
-    this.editorStore.patchVideo({ previewFile: resolution.previewBlob });
+    this.editorStore.patchVideo({
+      previewFile: resolution.previewBlob,
+      previewIsProxy: resolution.freshProxy !== null,
+    });
     if (resolution.freshProxy) this.dispatchProxyStore(projectId, resolution.freshProxy);
   }
 
@@ -216,13 +219,15 @@ export class LoadProjectAction {
         size: project.video.size,
         layout: project.videoLayout,
         duration: project.video.duration,
+        isProbing: false,
         currentTime: 0,
       },
       document: project.document,
       sheets: [...project.sheets],
       activeSheetId: project.activeSheetId,
-      wordStyleOverrides: project.wordStyleOverrides,
-      segmentOverrides: project.segmentOverrides,
+      behindActorOverrides: project.behindActorOverrides,
+      frozenSegments: project.frozenSegments,
+      elementStyles: project.elementStyles,
       decorationOverrides: project.decorationOverrides,
       cuts: project.cuts,
       projectId: project.id,

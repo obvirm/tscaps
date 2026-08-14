@@ -5,6 +5,7 @@ import { Slider } from '@ui/_shared/components/controls/fields/Slider';
 import { Tooltip } from '@ui/_shared/components/Tooltip/Tooltip';
 
 interface PositionSectionProps {
+  /** Horizontal axis is expected in screen terms — the picker is a map of the frame. */
   config: AlignmentConfig;
   onChange: (patch: Partial<AlignmentConfig>) => void;
   /** When true, the Section header is omitted (the surrounding tab provides the title). */

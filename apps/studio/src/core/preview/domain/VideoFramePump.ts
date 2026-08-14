@@ -7,6 +7,10 @@
  * output position. `paintSingleFrameAt` pulls one frame at a paused
  * position without starting a continuous loop.
  *
+ * `paintNoFurtherThan` holds the picture at an output position: no
+ * frame scheduled past it is painted, whatever the clock says, and
+ * `null` lifts the limit again.
+ *
  * Scrub session: `beginScrubSession` opens a persistent decoder
  * dedicated to drag interaction. While the session is open,
  * `paintScrubFrameAt` pushes the latest target through that
@@ -17,6 +21,7 @@
 export interface VideoFramePump {
   startFromOutputTime(outputSec: number): void;
   cancel(): void;
+  paintNoFurtherThan(outputSec: number | null): void;
   paintSingleFrameAt(outputSec: number): Promise<void>;
   beginScrubSession(): void;
   paintScrubFrameAt(outputSec: number): void;
