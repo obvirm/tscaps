@@ -325,6 +325,11 @@ export function EditorHost({
     [state.sheets],
   );
 
+  // The stream is owned by an external capture controller, so the effect is
+  // its lifecycle: subscribing publishes the stream, and losing the container
+  // or the need for one has to publish its absence. Clearing it lazily would
+  // leave a dead MediaStream in the tree for a render.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!containerEl || !needsLiveStream) {
       setMainVideoStream(null);
@@ -340,6 +345,7 @@ export function EditorHost({
       capture.stop();
     };
   }, [containerEl, needsLiveStream, previewSurface]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const playback = useMemo<PlaybackActions>(() => ({
     togglePlay: () => controllerRef.current?.togglePlay(),
