@@ -20,6 +20,15 @@ test('video without an audio track warns, starts, and opens the editor', async (
   await setVideoBytes(page, videoBuf);
 
   await expect(page.getByTestId('no-audio-track-notice')).toBeVisible();
+
+  // Picked rather than left to the dialog's default, because the default is
+  // not the same on both surfaces: only a transcriber that can detect the
+  // language from the audio offers Auto-detect, and the in-browser one
+  // cannot, so it refuses to start until a language is chosen. Choosing one
+  // is valid either way; relying on the default only exercises one surface.
+  await page.getByLabel('Language').fill('English');
+  await page.getByRole('option', { name: 'English' }).first().click();
+
   const start = page.getByTestId('start-flow-primary');
   await expect(start).toBeEnabled();
   await start.click();

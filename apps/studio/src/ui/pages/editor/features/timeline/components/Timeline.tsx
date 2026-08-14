@@ -109,7 +109,6 @@ export const Timeline = memo(function Timeline({
     [rows, hasWaveform],
   );
 
-  // eslint-disable-next-line react-hooks/incompatible-library -- @tanstack/react-virtual is not analyzable by the React Compiler.
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollEl,

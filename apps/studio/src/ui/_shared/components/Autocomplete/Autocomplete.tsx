@@ -237,7 +237,6 @@ export const Autocomplete = memo(function Autocomplete<T extends AutocompleteOpt
   // does not clip or double-scroll it. Position is recomputed on any
   // scroll or resize so a scrolling dialog keeps the panel anchored to
   // the input; capture-phase `scroll` catches ancestor scrollers too.
-  /* eslint-disable react-hooks/set-state-in-effect */
   useLayoutEffect(() => {
     if (!open) {
       setPanelPosition(null);
@@ -262,18 +261,15 @@ export const Autocomplete = memo(function Autocomplete<T extends AutocompleteOpt
       window.removeEventListener('scroll', update, true);
     };
   }, [open]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Reset scroll when the filter changes — yesterday's scrollTop has no
   // meaning against today's filtered rows, and would otherwise leave the
   // active row off-screen. The setState mirrors the DOM scrollTop reset
   // so virtual-list math reads the same value.
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = 0;
     setScrollTop(0);
   }, [query]);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Keep the keyboard-active row in view. `useLayoutEffect` because we
   // need to compute scroll before paint, otherwise arrow-key navigation

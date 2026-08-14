@@ -143,8 +143,9 @@ async function setSizeField(page: Page, value: string): Promise<void> {
   await setField(page, 'Size value', value);
 }
 
+// The inspector is not a mode: picking the element is what opens it, and
+// it opens on its Style tab, so there is nothing to click on the way in.
 async function setField(page: Page, label: string, value: string): Promise<void> {
-  await page.getByRole('tab', { name: 'Properties' }).click();
   const chip = page.getByLabel(label).first();
   await chip.fill(value);
   await chip.press('Enter');

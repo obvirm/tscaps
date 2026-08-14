@@ -120,7 +120,6 @@ export const FreeTranscriptView = memo(function FreeTranscriptView({
   const pickSelection = useEffectivePickSelection(pickSnapshot, orderedSceneIds);
 
   const [parentRef, scrollEl] = useScrollParent();
-  // eslint-disable-next-line react-hooks/incompatible-library -- @tanstack/react-virtual is not analyzable by the React Compiler.
   const virtualizer = useVirtualizer({
     count: sorted.length,
     getScrollElement: () => scrollEl,

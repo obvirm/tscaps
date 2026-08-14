@@ -36,7 +36,6 @@ export function ScrollFade({ scrollRef }: ScrollFadeProps) {
 function useScrollAtBottom(ref: RefObject<HTMLElement | null>): boolean {
   const [atBottom, setAtBottom] = useState(true);
   // setState mirrors a live DOM scroll signal (an external system).
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     const el = ref.current;
     if (!el) {
@@ -60,6 +59,5 @@ function useScrollAtBottom(ref: RefObject<HTMLElement | null>): boolean {
       ro.disconnect();
     };
   }, [ref]);
-  /* eslint-enable react-hooks/set-state-in-effect */
   return atBottom;
 }
