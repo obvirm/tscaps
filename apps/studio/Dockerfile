@@ -5,7 +5,13 @@
 #   docker build -f apps/studio/Dockerfile -t tscaps-web .
 # from the repo root.
 
-FROM node:22-alpine AS build
+# Debian rather than Alpine, and only here: installing compiles the
+# templates, which reaches `onnxruntime-node`'s native binding through the
+# engine's entry point, and that library is linked against glibc. The
+# runtime stage below is untouched, so the published image is the same
+# Alpine one either way — this buys the build a libc and costs the
+# artifact nothing.
+FROM node:22-slim AS build
 
 RUN corepack enable
 
