@@ -7,6 +7,11 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The engine (`@tscaps/engine`) is versioned separately; see its own release
 notes on npm.
 
+## [0.2.1] - 2026-08-14
+
+### Fixed
+- In-browser transcription no longer fails the moment the speech model finishes downloading. The published build was resolving an older inference runtime than the current model weights can be read by, so the session never opened.
+
 ## [0.2.0] - 2026-08-14
 
 ### Added

@@ -1,4 +1,9 @@
 import type { EditorStore } from '@core/editor/store/EditorStore';
+import { KeyboardShortcut } from '@presentation/editor/services/KeyboardShortcut';
+
+const UNDO = new KeyboardShortcut('z', true);
+const REDO = new KeyboardShortcut('z', true, true);
+const REDO_ALTERNATE = new KeyboardShortcut('y', true);
 
 /**
  * Listens for global editor keyboard shortcuts and dispatches them to the
@@ -23,15 +28,14 @@ export class KeyboardShortcutsController {
   }
 
   private readonly onKey = (e: KeyboardEvent): void => {
-    if (!(e.ctrlKey || e.metaKey)) return;
-    const key = e.key.toLowerCase();
-    if (key === 'z') {
-      e.preventDefault();
-      if (e.shiftKey) this.store.redo();
-      else this.store.undo();
-    } else if (key === 'y') {
+    if (REDO.matches(e) || REDO_ALTERNATE.matches(e)) {
       e.preventDefault();
       this.store.redo();
+      return;
+    }
+    if (UNDO.matches(e)) {
+      e.preventDefault();
+      this.store.undo();
     }
   };
 }

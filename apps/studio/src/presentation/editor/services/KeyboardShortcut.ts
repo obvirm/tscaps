@@ -17,6 +17,10 @@ export class KeyboardShortcut {
   ) {}
 
   matches(event: KeyboardEvent): boolean {
+    // A window-level listener sees every keydown on the page, including
+    // ones the browser synthesizes with no `key` at all — the type says
+    // string, the runtime does not. Nothing names a key it does not have.
+    if (typeof event.key !== 'string') return false;
     if (event.key.toLowerCase() !== this.key.toLowerCase()) return false;
     const primaryDown = event.ctrlKey || event.metaKey;
     if (this.cmdOrCtrl !== primaryDown) return false;
