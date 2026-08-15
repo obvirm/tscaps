@@ -1,5 +1,6 @@
-import { pipeline, env, WhisperTextStreamer } from '@huggingface/transformers';
+import type { pipeline, WhisperTextStreamer, LogitsProcessorList } from '@huggingface/transformers';
 import { Document, Section, Segment, Line, Word, TimeFragment } from '@modules/document/index';
+import { TransformersRuntime } from '@modules/transcription/TransformersRuntime';
 import type { AudioDecoder } from '@modules/transcription/AudioDecoder';
 import type { ModelFileCache } from '@modules/transcription/ModelFileCache';
 import type {
@@ -13,7 +14,7 @@ import { WhisperInferenceFailedError } from '@modules/transcription/WhisperInfer
 import { WhisperInferenceProgressTracker } from '@modules/transcription/WhisperInferenceProgressTracker';
 import { WhisperWindowCoverage, type CoverageGap } from '@modules/transcription/WhisperWindowCoverage';
 import { WhisperLoopAbortLogitsProcessor } from '@modules/transcription/WhisperLoopAbortLogitsProcessor';
-import { ReplacingLogitsProcessorList } from '@modules/transcription/ReplacingLogitsProcessorList';
+import { LogitsProcessorListFactory } from '@modules/transcription/LogitsProcessorListFactory';
 import { WhisperChunkStitcher, type WhisperChunk } from '@modules/transcription/WhisperChunkStitcher';
 import { WhisperModelLoadFailedError } from '@modules/transcription/WhisperModelLoadFailedError';
 
@@ -159,6 +160,8 @@ export class WhisperTranscriber implements Transcriber {
   private readonly model: WhisperModel;
   private readonly device: WhisperDevice;
   private readonly chunkStitcher: WhisperChunkStitcher;
+  private readonly transformers: TransformersRuntime;
+  private processorLists: LogitsProcessorListFactory | null = null;
   private pipelinePromise: ReturnType<typeof pipeline> | null = null;
 
   constructor(
@@ -170,37 +173,7 @@ export class WhisperTranscriber implements Transcriber {
     this.device = device;
     const { chunk_length_s, stride_length_s } = CHUNK_CONFIG[model];
     this.chunkStitcher = new WhisperChunkStitcher(chunk_length_s, stride_length_s);
-    env.allowLocalModels = false;
-    this.installModelFileCache(modelFileCache);
-    this.configureWasmThreading();
-  }
-
-  /**
-   * Takes over where the downloaded model files are kept.
-   *
-   * Left to itself the library picks a store from the environment and
-   * discards a refused write with nothing but a console warning, so a
-   * caller that wants to know when the files did not survive the run
-   * has to own the store. Without one, that default stands.
-   */
-  private installModelFileCache(cache: ModelFileCache | undefined): void {
-    if (!cache) return;
-    env.useCustomCache = true;
-    env.customCache = cache;
-  }
-
-  /**
-   * Raises the WASM thread count above ORT's built-in ceiling when the
-   * runtime supports it. ORT locks the count to 1 without cross-origin
-   * isolation, and even with isolation its own default caps at 4 no matter
-   * the machine — Whisper's encoder scales past that. On a WebGPU run this
-   * has no effect; the WASM backend is not touched.
-   */
-  private configureWasmThreading(): void {
-    if (typeof self === 'undefined' || !self.crossOriginIsolated) return;
-    const wasm = env.backends.onnx.wasm;
-    if (!wasm) return;
-    wasm.numThreads = Math.min(navigator.hardwareConcurrency || 4, 8);
+    this.transformers = new TransformersRuntime(modelFileCache);
   }
 
   onProgress?: (event: TranscriberProgressEvent) => void;
@@ -215,7 +188,7 @@ export class WhisperTranscriber implements Transcriber {
     const coverage = tracker ? new WhisperWindowCoverage() : null;
     const loopGuard = this.buildLoopGuard(transcriber);
     const streamer = tracker && coverage
-      ? this.buildProgressStreamer(transcriber, tracker, coverage, loopGuard)
+      ? await this.buildProgressStreamer(transcriber, tracker, coverage, loopGuard)
       : null;
     const rawChunks = await this.runInferenceOrFail(transcriber, pcm, options, streamer, loopGuard);
     const mainChunks = this.chunkStitcher.stitch(rawChunks, durationSeconds);
@@ -253,12 +226,13 @@ export class WhisperTranscriber implements Transcriber {
    * It is deliberately not wired to progress: the terminal `progress: 1`
    * can only come from the caller, after the whole call returns.
    */
-  private buildProgressStreamer(
+  private async buildProgressStreamer(
     transcriber: Awaited<ReturnType<typeof pipeline>>,
     tracker: WhisperInferenceProgressTracker,
     coverage: WhisperWindowCoverage,
     loopGuard: WhisperLoopAbortLogitsProcessor | null,
-  ): WhisperTextStreamer {
+  ): Promise<WhisperTextStreamer> {
+    const { WhisperTextStreamer } = await this.transformers.load();
     const tokenizer = (transcriber as unknown as { tokenizer: never }).tokenizer;
     return new WhisperTextStreamer(tokenizer, {
       on_chunk_start: (timeWithinChunk: number) => coverage.recordTimestamp(timeWithinChunk),
@@ -315,7 +289,7 @@ export class WhisperTranscriber implements Transcriber {
       console.time('whisper.inference');
       const result = (await (transcriber as CallableFunction)(
         pcm,
-        this.buildPipelineOptions(options, streamer, loopGuard),
+        await this.buildPipelineOptions(options, streamer, loopGuard),
       )) as WhisperResult;
       console.timeEnd('whisper.inference');
       return result.chunks ?? [];
@@ -336,6 +310,7 @@ export class WhisperTranscriber implements Transcriber {
   private loadPipeline(): ReturnType<typeof pipeline> {
     if (this.pipelinePromise === null) {
       const attempt = (async () => {
+        const { pipeline } = await this.transformers.load();
         const device = await this.resolveDevice();
         console.log(`Using device "${device}" for Whisper model "${this.model}".`);
         const dtype = DTYPE_BY_DEVICE[this.model][device]!;
@@ -388,7 +363,7 @@ export class WhisperTranscriber implements Transcriber {
     }
   }
 
-  private buildPipelineOptions(
+  private async buildPipelineOptions(
     options?: TranscriberOptions,
     streamer?: WhisperTextStreamer | null,
     loopGuard?: WhisperLoopAbortLogitsProcessor | null,
@@ -401,14 +376,22 @@ export class WhisperTranscriber implements Transcriber {
       task: 'transcribe' as const,
       ...CHUNK_CONFIG[this.model],
       ...(streamer ? { streamer } : {}),
-      ...(loopGuard ? { logits_processor: this.buildProcessorList(loopGuard) } : {}),
+      ...(loopGuard ? { logits_processor: await this.buildProcessorList(loopGuard) } : {}),
     };
   }
 
-  private buildProcessorList(loopGuard: WhisperLoopAbortLogitsProcessor): ReplacingLogitsProcessorList {
-    const list = new ReplacingLogitsProcessorList();
-    list.push(loopGuard);
-    return list;
+  /**
+   * The factory is built from the loaded library, so it is reached
+   * through the same load the pipeline came from rather than held from
+   * construction. By the time any generation runs, that load is settled.
+   */
+  private async buildProcessorList(
+    loopGuard: WhisperLoopAbortLogitsProcessor,
+  ): Promise<LogitsProcessorList> {
+    if (this.processorLists === null) {
+      this.processorLists = new LogitsProcessorListFactory(await this.transformers.load());
+    }
+    return this.processorLists.build(loopGuard);
   }
 
   private handleLoadProgress(data: LoadProgressEvent): void {
@@ -511,7 +494,7 @@ export class WhisperTranscriber implements Transcriber {
       const rescueGuard = this.buildLoopGuard(transcriber);
       const result = (await (transcriber as CallableFunction)(
         slice,
-        this.buildPipelineOptions(options, null, rescueGuard),
+        await this.buildPipelineOptions(options, null, rescueGuard),
       )) as WhisperResult;
       if (rescueGuard?.consumeFired()) {
         console.warn(`[whisper] rescue for ${label} degenerated as well; leaving the region untranscribed.`);

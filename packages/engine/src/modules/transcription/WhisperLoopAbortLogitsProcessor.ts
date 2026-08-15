@@ -1,4 +1,4 @@
-import { LogitsProcessor, type Tensor } from '@huggingface/transformers';
+import type { Tensor } from '@huggingface/transformers';
 
 // Full repetitions the tail must show before the pattern is trusted as
 // degenerate. Two verbatim repetitions of a phrase can be legitimate
@@ -27,15 +27,24 @@ const MIN_REPETITION_TOKENS = 50;
  *
  * The guard only ends generations early; it never alters the content
  * of a healthy one.
+ *
+ * Deliberately not a subclass of the inference library's processor base.
+ * Extending it would make this file load the library, and none of the
+ * detection below needs anything from it — `apply` is the whole of it.
+ * A thin subclass built once the library is loaded adapts this to what
+ * the pipeline expects.
  */
-export class WhisperLoopAbortLogitsProcessor extends LogitsProcessor {
+export class WhisperLoopAbortLogitsProcessor {
   private fired = false;
 
-  constructor(private readonly endOfSequenceTokenId: number) {
-    super();
-  }
+  constructor(private readonly endOfSequenceTokenId: number) {}
 
-  _call(inputIds: bigint[][], logits: Tensor): Tensor {
+  /**
+   * Inspects one generation step and, on a detected loop, rewrites the
+   * logits so the next token can only be end-of-sequence. Returns the
+   * same tensor it was given, rewritten in place or untouched.
+   */
+  apply(inputIds: bigint[][], logits: Tensor): Tensor {
     for (let batch = 0; batch < inputIds.length; batch++) {
       if (!this.endsInRepetitionLoop(inputIds[batch] ?? [])) continue;
       this.fired = true;

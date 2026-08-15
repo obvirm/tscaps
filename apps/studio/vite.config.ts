@@ -7,6 +7,13 @@ export default defineConfig({
   build: {
     target: 'es2022',
   },
+  // `es` rather than the `iife` default, because a worker whose graph
+  // contains a dynamic import has to be split across chunks and an IIFE
+  // cannot be. Every `new Worker` here already passes `{ type: 'module' }`,
+  // so the app requires module workers whatever the bundle's shape.
+  worker: {
+    format: 'es',
+  },
   resolve: {
     alias: {
       '@tscaps/engine': resolve(__dirname, '../../packages/engine/src/index.ts'),

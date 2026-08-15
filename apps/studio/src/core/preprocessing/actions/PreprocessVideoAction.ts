@@ -85,6 +85,7 @@ export class PreprocessVideoAction {
       return;
     }
 
+
     // Everything from here on writes something the browser is free to
     // throw away later: the transcription model, the preview proxy,
     // the project itself. Asking at this point ties the prompt that

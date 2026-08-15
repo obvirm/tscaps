@@ -12,7 +12,7 @@ function guardFires(tokens: number[]): boolean {
   const guard = new WhisperLoopAbortLogitsProcessor(END_OF_SEQUENCE_TOKEN_ID);
   const inputIds = [tokens.map((token) => BigInt(token))];
   const logits = [{ data: new Float32Array(100) }] as unknown as Tensor;
-  guard._call(inputIds, logits);
+  guard.apply(inputIds, logits);
   return guard.consumeFired();
 }
 
@@ -73,7 +73,7 @@ describe('WhisperLoopAbortLogitsProcessor', () => {
     const inputIds = [loop.map((token) => BigInt(token))];
     const row = { data: new Float32Array(100).fill(1.5) };
     const logits = [row] as unknown as Tensor;
-    guard._call(inputIds, logits);
+    guard.apply(inputIds, logits);
     expect(row.data[END_OF_SEQUENCE_TOKEN_ID]).toBe(0);
     expect(row.data[END_OF_SEQUENCE_TOKEN_ID + 1]).toBe(-Infinity);
     expect(row.data[99]).toBe(-Infinity);
@@ -84,7 +84,7 @@ describe('WhisperLoopAbortLogitsProcessor', () => {
     const loop = repeat([1, 2, 3], 17);
     const inputIds = [loop.map((token) => BigInt(token))];
     const logits = [{ data: new Float32Array(100) }] as unknown as Tensor;
-    guard._call(inputIds, logits);
+    guard.apply(inputIds, logits);
     expect(guard.consumeFired()).toBe(true);
     expect(guard.consumeFired()).toBe(false);
   });
