@@ -7,7 +7,7 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The engine (`@tscaps/engine`) is versioned separately; see its own release
 notes on npm.
 
-## [Unreleased]
+## [0.2.0] - 2026-08-14
 
 ### Added
 - Style one element on its own. Click a word, a scene or an emoji in the preview and a panel opens over the editor with that element's own typeface, size, weight, colour, rotation and place in the frame. Setting a field further out takes it back from everything inside, so painting a whole caption yellow reaches the word you had made blue. Beside the fields is the CSS they write, editable: anything the fields do not cover, you write yourself, and a field whose declaration your own line has taken over dims and says so rather than pretending to still be in charge.
