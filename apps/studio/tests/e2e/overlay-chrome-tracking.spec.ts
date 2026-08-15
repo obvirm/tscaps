@@ -88,12 +88,18 @@ test('word chrome follows the word when a field turns it', async ({ page }) => {
  */
 test('chrome follows a caption the playhead is animating', async ({ page }) => {
   await bootEditor(page);
-  await givePaintedSegmentsAnEntrance(page);
 
+  // Picked before the entrance exists, because a caption caught at the
+  // start of one is 120px outside the video and the click lands on the
+  // stage behind it. Which of the two the click meets depends on where
+  // the playhead sits when the style goes in, so selecting first is the
+  // difference between a test that asserts tracking and one that races.
   const hitzone = page.locator('.subtitle-overlay-segment-hitzone').first();
   await hitzone.click({ position: { x: CORONA_CLICK_OFFSET_PX, y: CORONA_CLICK_OFFSET_PX } });
   const chrome = page.locator('.subtitle-overlay-segment-chrome.is-selected');
   await expect(chrome).toBeVisible();
+
+  await givePaintedSegmentsAnEntrance(page);
 
   const segment = page.locator('.subtitle-overlay-scaler .segment').first();
 

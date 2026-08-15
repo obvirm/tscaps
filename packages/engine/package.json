@@ -1,6 +1,6 @@
 {
   "name": "@tscaps/engine",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Burn subtitles into video in the browser. CSS-styled captions, frame-accurate export, no server.",
   "keywords": [
     "subtitles",
@@ -55,6 +55,9 @@
     "@huggingface/transformers": "^4.2.0",
     "bidi-js": "^1.0.3",
     "mediabunny": "^1.51.0"
+  },
+  "peerDependencies": {
+    "onnxruntime-web": "^1.27.0"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

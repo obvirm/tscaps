@@ -7,6 +7,28 @@ package uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Prior 0.1.x releases shipped without a tracked changelog; consult the
 git history for their contents.
 
+## [0.3.1] - 2026-08-15
+
+### Added
+- `onnxruntime-web` is declared as a peer dependency (`^1.27.0`). **Transcription does not work without it, and until now nothing said so until the model weights had already downloaded.**
+
+  `@huggingface/transformers@4.2.0` pins `onnxruntime-web` to an exact `1.26.0-dev` build, and that build cannot open a quantized session against the current `_timestamped` Whisper exports. It fails with `TransposeDQWeightsForMatMulNBits ... Missing required scale`. The runtime side was fixed in ORT 1.27 ([microsoft/onnxruntime#28306](https://github.com/microsoft/onnxruntime/issues/28306), closed 2026-05-12); bundling that fix is tracked in [huggingface/transformers.js#1707](https://github.com/huggingface/transformers.js/issues/1707), where the maintainer places it in transformers.js v4.3.0.
+
+  An exact pin cannot be lifted by a dependency range, so until 4.3.0 ships, a consumer that transcribes has to force the version at the root of their own tree:
+
+  ```yaml
+  # pnpm-workspace.yaml
+  overrides:
+    onnxruntime-web: 1.27.0
+  ```
+
+  ```jsonc
+  // package.json, npm "overrides" or yarn "resolutions"
+  "overrides": { "onnxruntime-web": "1.27.0" }
+  ```
+
+  The peer declaration only makes the mismatch visible while the tree is being installed. Resolving it is the consumer's override, and nothing this package can declare replaces it.
+
 ## [0.3.0] - 2026-08-14
 
 ### Added
