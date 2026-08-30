@@ -117,6 +117,10 @@ element's position and size without randomness. No `on-` prefix: they are not ev
 |---|---|---|
 | `--segment-index` | `.segment` | the segment's 0-based position within its section, for varying an effect per caption |
 | `--segment-char-count` | `.segment` | character length of the segment's full text, the input for auto-shrink rules |
+| `--line-char-count` | `.line` | code points the line paints, one separator counted between adjacent words |
+| `--line-width-em` | `.line` | the line's **measured** rendered width as a multiple of its font size — divide a target width by it to get the size that fills exactly. Only emitted when the stylesheet reads it, and measured with the segment in its behind-actor state. Prefer it over `--line-char-count` for anything about width: the same character count is half again as wide in round letters as in narrow ones |
+| `--segment-anchor-y` | `.segment` | where the caption's anchor landed, as a fraction of the frame's height |
+| `--segment-anchor-origin-y` | `.segment` | share of the caption's own height placed on that anchor — `0%`, `50%` or `100%`. Inside a `translate` it resolves against the box, so undoing both variables converts any anchor to a top-edge one without knowing how tall the caption grew |
 | `--word-index` | `.word` | the word's 0-based position within its line |
 | `--word-count` | `.segment` and `.line` | number of words in each; the nearest ancestor wins for a `.word` reading it |
 | `--word-char-count` | `.word` | code-point length of the word's display text; a surrogate-paired emoji counts as 1 |

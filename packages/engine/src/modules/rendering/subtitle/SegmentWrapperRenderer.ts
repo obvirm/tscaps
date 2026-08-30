@@ -5,6 +5,9 @@ import type { HorizontalPlacementResolver } from '@modules/rendering/HorizontalP
 import type { InlineStyleMap } from '@modules/rendering/types/InlineStyleMap';
 import type { SegmentSubtreeHtmlBuilder, SegmentSubtreeStyleInput } from '@modules/rendering/subtitle/SegmentSubtreeHtmlBuilder';
 import type { VideoFrameVarsBuilder } from '@modules/rendering/subtitle/VideoFrameVarsBuilder';
+import type { SegmentAnchorVarsBuilder } from '@modules/rendering/subtitle/SegmentAnchorVarsBuilder';
+import type { ElementWidthMeasurer } from '@modules/rendering/subtitle/ElementWidthMeasurer';
+import { ElementWidths } from '@modules/rendering/subtitle/ElementWidths';
 import type { SvgFilterMaterializer } from '@modules/rendering/subtitle/SvgFilterMaterializer';
 import type { PreparedStyle } from '@modules/rendering/subtitle/PreparedStyle';
 import type {
@@ -20,6 +23,8 @@ export interface WrapperRender {
 }
 
 interface ResolvedAlignment {
+  /** The unrounded fraction behind `yPx`, for consumers that need frame-relative terms. */
+  verticalOffset: number;
   yPx: number;
   xPx: number;
   vAnchorPct: number;
@@ -45,6 +50,8 @@ export class SegmentWrapperRenderer {
     private readonly subtreeDecomposer: SegmentSubtreeDecomposer,
     private readonly filterMaterializer: SvgFilterMaterializer,
     private readonly videoFrameVarsBuilder: VideoFrameVarsBuilder,
+    private readonly segmentAnchorVarsBuilder: SegmentAnchorVarsBuilder,
+    private readonly elementWidthMeasurer: ElementWidthMeasurer,
     private readonly horizontalPlacementResolver: HorizontalPlacementResolver,
     private readonly width: number,
     private readonly height: number,
@@ -114,12 +121,16 @@ export class SegmentWrapperRenderer {
     nextUid: () => number,
   ): Promise<WrapperRender> {
     const resolved = this.resolveAlignment(alignment, style.rendering.textDirection);
-    const engineVars = await this.videoFrameVarsBuilder.build(style, seg, resolved, t);
+    const engineVars = await this.buildEngineVars(style, seg, resolved, t);
     const { defs, bindings } = profiler.time('SegmentWrapperRenderer.filterDefs', () =>
       this.filterMaterializer.materialize(style, t, engineVars, nextUid),
     );
 
-    const styleInput = this.composeStyleInput(style, this.mergeExtras(engineVars, bindings, baseInlineStyles), segmentClasses);
+    const unmeasured = this.composeStyleInput(style, this.mergeExtras(engineVars, bindings, baseInlineStyles), segmentClasses);
+    const styleInput = {
+      ...unmeasured,
+      elementWidths: this.elementWidthMeasurer.widthsFor(style, unmeasured, seg, t, indexInSection),
+    };
     const subtreeHtml = profiler.time('SegmentWrapperRenderer.subtreeHtml', () =>
       this.subtreeBuilder.buildSegmentSubtree(styleInput, seg, t, excludedWordIds, indexInSection),
     );
@@ -139,7 +150,7 @@ export class SegmentWrapperRenderer {
     nextUid: () => number,
   ): Promise<WrapperRender> {
     const resolved = this.resolveAlignment(alignment, style.rendering.textDirection);
-    const engineVars = await this.videoFrameVarsBuilder.build(style, seg, resolved, t);
+    const engineVars = await this.buildEngineVars(style, seg, resolved, t);
     const { defs, bindings } = profiler.time('SegmentWrapperRenderer.filterDefs', () =>
       this.filterMaterializer.materialize(style, t, engineVars, nextUid),
     );
@@ -166,7 +177,7 @@ export class SegmentWrapperRenderer {
     nextUid: () => number,
   ): Promise<WrapperRender> {
     const resolved = this.resolveAlignment(alignment, style.rendering.textDirection);
-    const engineVars = await this.videoFrameVarsBuilder.build(style, seg, resolved, t);
+    const engineVars = await this.buildEngineVars(style, seg, resolved, t);
     const { defs, bindings } = profiler.time('SegmentWrapperRenderer.filterDefs', () =>
       this.filterMaterializer.materialize(style, t, engineVars, nextUid),
     );
@@ -180,6 +191,19 @@ export class SegmentWrapperRenderer {
     const anchorStyle = this.composeAnchorStyle(resolved);
 
     return { html: `<div style="${anchorStyle}">${subtreeHtml}</div>`, defs };
+  }
+
+  /** Every variable the engine publishes onto one subtree's wrapper. */
+  private async buildEngineVars(
+    style: PreparedStyle,
+    seg: Segment,
+    resolved: ResolvedAlignment,
+    t: number,
+  ): Promise<InlineStyleMap> {
+    return {
+      ...(await this.videoFrameVarsBuilder.build(style, seg, resolved, t)),
+      ...this.segmentAnchorVarsBuilder.build(resolved),
+    };
   }
 
   // Zero-sized grid anchor places the wrapper via `place-items`
@@ -209,6 +233,7 @@ export class SegmentWrapperRenderer {
       extraSegmentClasses,
       decorationPlacements: style.decorationPlacements,
       addressableElementIds: style.addressableElementIds,
+      elementWidths: ElementWidths.empty(),
       inlineStyleEmitter: style.inlineStyleEmitter,
     };
   }
@@ -228,6 +253,7 @@ export class SegmentWrapperRenderer {
       textDirection,
     );
     return {
+      verticalOffset: alignment.verticalOffset,
       yPx: Math.round(alignment.verticalOffset * this.height),
       xPx: Math.round(horizontal.offsetFromLeft * this.width),
       vAnchorPct: alignment.verticalAlign === 'top' ? 0 : alignment.verticalAlign === 'center' ? 50 : 100,

@@ -52,6 +52,9 @@ importers:
       '@fontsource-variable/fraunces':
         specifier: ^5.2.9
         version: 5.2.9
+      '@fontsource-variable/gabarito':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@fontsource-variable/heebo':
         specifier: ^5.3.0
         version: 5.3.0
@@ -112,6 +115,9 @@ importers:
       '@fontsource/dm-serif-display':
         specifier: ^5.2.8
         version: 5.2.8
+      '@fontsource/im-fell-english':
+        specifier: ^5.3.0
+        version: 5.3.0
       '@fontsource/lalezar':
         specifier: ^5.3.0
         version: 5.3.0
@@ -805,6 +811,9 @@ packages:
   '@fontsource-variable/fraunces@5.2.9':
     resolution: {integrity: sha512-Y6IjunlN9Ni723np+GIgAaKzCDBrPRrqNi01TZxHs5wtHYROWFM9W6yiT+/gGwSjWIRD18oX17kD/BRWekc/Lw==}
 
+  '@fontsource-variable/gabarito@5.3.0':
+    resolution: {integrity: sha512-p7ROuY70ufLI5/hVvdgo4iJo17Dz2OfQXgdkaeS0U/B2wMqNIPt+/2WWWaAzrUYvcrNquL7farT2MY/vVo2ENw==}
+
   '@fontsource-variable/heebo@5.3.0':
     resolution: {integrity: sha512-gaCKIbnx83+Za844O2dn4XYoAitS2jjBSj08bELHfCIL5gKMBDWl82oWte2CEBrnXwNMVJNd3ojZqFOd9+mCFg==}
 
@@ -864,6 +873,9 @@ packages:
 
   '@fontsource/dm-serif-display@5.2.8':
     resolution: {integrity: sha512-GYSDSlGU6vyhv9a5MwaiVNf9HCuSVpK8hEFRyG4NNDHCDeHiX7YHDAcWsaoLKKcfXLgWG9YkBkk9T3SxM4rAjQ==}
+
+  '@fontsource/im-fell-english@5.3.0':
+    resolution: {integrity: sha512-FcgdWfY9WeUM2gQkfmwhn4Ed9LVtlll8LSSZvHfbsUrnHK5tHHnGg6BgwAfHogp52adU3eE89J/3B52qV3b+Vw==}
 
   '@fontsource/lalezar@5.3.0':
     resolution: {integrity: sha512-ptwEfWP7OlucVaRHpuMo6tfvw9xDcBEoaiIvzSDUb7z5pih+DZIRKLarulkJunVR+DnQ5VaJVjuVVOwrqiq7Cw==}
@@ -3407,6 +3419,8 @@ snapshots:
 
   '@fontsource-variable/fraunces@5.2.9': {}
 
+  '@fontsource-variable/gabarito@5.3.0': {}
+
   '@fontsource-variable/heebo@5.3.0': {}
 
   '@fontsource-variable/inter@5.2.8': {}
@@ -3446,6 +3460,8 @@ snapshots:
   '@fontsource/bungee@5.2.7': {}
 
   '@fontsource/dm-serif-display@5.2.8': {}
+
+  '@fontsource/im-fell-english@5.3.0': {}
 
   '@fontsource/lalezar@5.3.0': {}
 

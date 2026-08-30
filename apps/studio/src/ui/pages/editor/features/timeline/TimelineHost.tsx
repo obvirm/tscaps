@@ -61,6 +61,7 @@ import { ChannelMoveToast } from '@ui/pages/editor/features/timeline/components/
 import { SearchToggleButton } from '@ui/pages/editor/components/SearchToggleButton';
 import { SegmentSearchInputBar } from '@ui/pages/editor/components/SegmentSearchInputBar';
 import { CutsMenuPopover } from '@ui/pages/editor/features/timeline/components/CutsMenuPopover';
+import { PrecisePreviewControl } from '@ui/pages/editor/features/timeline/components/PrecisePreviewControl';
 import {
   CutsActionToast,
   type CutsActionToastState,
@@ -390,6 +391,7 @@ function TimelineBody({
             channels={channels}
             sheets={sheets}
             readChannelId={channel?.id ?? null}
+            isActive={activeMode === 'timeline'}
           />
           <CutsActionToast state={cutsToast} onDismiss={() => setCutsToast(null)} />
           <div className={TOPBAR_GROUP_CLASS}>
@@ -413,6 +415,7 @@ function TimelineBody({
             />
           </div>
           <div className={TOPBAR_GROUP_CLASS}>
+            <PrecisePreviewControl />
             <LocateButton
               disabled={!search.canLocate}
               shortcutLabel={locateShortcutLabel}

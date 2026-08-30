@@ -7,10 +7,28 @@ import type {
 } from '@core/segment-splitter/domain/SegmentSplitterDescriptor';
 import type { BoundaryPreset, BoundarySegmentConfig } from '@core/segment-splitter/domain/SegmentSplitterConfig';
 
+// Closing quotation marks that may follow a delimiter without breaking it:
+// ASCII straight double, curly right double (U+201D), curly right single
+// (U+2019), and the French/Spanish/Russian closing guillemet (U+00BB).
+const CLOSING_QUOTES: readonly string[] = ['"', '”', '’', '»'];
+
+// Bases that end a sentence across the scripts we care about: Latin,
+// Arabic/Persian/Urdu (؟, ۔), and CJK fullwidth (。？！). '…' is the real
+// ellipsis codepoint, distinct from three ASCII dots.
+const SENTENCE_BASES: readonly string[] = ['.', '?', '!', '...', '…', '؟', '۔', '。', '？', '！'];
+
+// Bases that end a clause but not a sentence: Latin comma/semicolon/colon,
+// Arabic comma/semicolon (،؛), CJK ideographic comma (、) and fullwidth
+// comma/semicolon/colon.
+const CLAUSE_ONLY_BASES: readonly string[] = [',', ';', ':', '،', '؛', '、', '，', '；', '：'];
+
+const withClosingQuotes = (bases: readonly string[]): string[] =>
+  bases.flatMap((base) => [base, ...CLOSING_QUOTES.map((quote) => base + quote)]);
+
 const PRESET_CHARS: Record<BoundaryPreset, readonly string[]> = {
   none: [],
-  sentence: ['.', '?', '!', '...', '."', '?"', '!"', '..."'],
-  clause: ['.', '?', '!', '...', ',', ';', ':', '."', '?"', '!"', '..."', ',"', ';"', ':"'],
+  sentence: withClosingQuotes(SENTENCE_BASES),
+  clause: withClosingQuotes([...SENTENCE_BASES, ...CLAUSE_ONLY_BASES]),
 };
 
 const PRESET_OPTIONS: readonly SelectOption[] = [

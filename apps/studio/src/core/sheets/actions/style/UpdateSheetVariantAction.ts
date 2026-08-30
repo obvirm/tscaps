@@ -10,8 +10,12 @@ import type { RefreshDocumentAction } from '@core/editor/actions/RefreshDocument
  * and triggers a document re-derivation because variant overrides
  * commonly touch font size and other layout-affecting controls.
  *
- * No-ops when no sheet is active, when the picked index equals the
- * current one, or when the template ships fewer than two variants.
+ * No-ops when no sheet is active, when the picked variant is the one the
+ * sheet already reads, or when the template ships fewer than two
+ * variants. Picking the variant already showing therefore leaves the
+ * sheet's stored preference alone, even when that preference names a
+ * slot this template does not have; picking a different one replaces it,
+ * because an explicit choice outranks an inherited one.
  */
 export class UpdateSheetVariantAction {
   constructor(
@@ -23,7 +27,7 @@ export class UpdateSheetVariantAction {
     const active = this.store.activeSheet();
     if (!active) return;
     if (active.template.variants.length < 2) return;
-    if (active.variantIndex === variantIndex) return;
+    if (active.resolveVariantIndex() === variantIndex) return;
     const updated = active.withVariant(variantIndex);
     this.store.commit(`variant:${active.id}`);
     this.store.patch({ sheets: this.store.replaceSheet(updated) });

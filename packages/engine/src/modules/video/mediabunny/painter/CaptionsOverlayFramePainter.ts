@@ -1,12 +1,11 @@
 import type { Document } from '@modules/document/Document';
 import type { OverlayFrame, OverlayFrameRenderer } from '@modules/rendering/OverlayFrameRenderer';
 import type { SubtitleStyle } from '@modules/rendering/SubtitleFrameRenderer';
-import type { DecodedVideoFrame } from '@modules/video/mediabunny/frame/VideoFrameDecoder';
 import type { FrameCompositor } from '@modules/video/mediabunny/frame/FrameCompositor';
 import type { SubtitleLayerSource } from '@modules/video/mediabunny/caption/SubtitleLayerSource';
 import type { TopLayerSource } from '@modules/video/mediabunny/painter/TopLayerSource';
 import type { PaintFrame } from '@modules/video/mediabunny/encoder/VideoTrackEncoder';
-import type { FramePainter } from '@modules/video/mediabunny/painter/FramePainter';
+import type { FramePainter, FramePaintRequest } from '@modules/video/mediabunny/painter/FramePainter';
 
 /**
  * Caption ticks step at the source's frame rate up to this cap. Past
@@ -54,19 +53,41 @@ export class CaptionsOverlayFramePainter implements FramePainter {
     }
   }
 
-  async paint(frame: DecodedVideoFrame, _outputTimestamp: number): Promise<PaintFrame> {
-    const captions = await this.subtitleLayer.frameAt(frame.timestamp, frame);
-    const topLayer = this.topLayer === null ? null : await this.topLayer.frameAt(frame.timestamp, frame);
-    return (ctx) => {
+  lookAhead(): number {
+    return this.subtitleLayer.lookAhead();
+  }
+
+  async paint(requests: ReadonlyArray<FramePaintRequest>): Promise<PaintFrame[]> {
+    const captions = await this.subtitleLayer.framesFor(
+      requests.map(({ frame }) => ({ time: frame.timestamp, videoFrame: frame })),
+    );
+    const topLayers = await this.paintTopLayers(requests);
+    return requests.map(({ frame }, i) => (ctx) => {
       this.frameCompositor.compose(ctx, {
         frame,
-        captions,
+        captions: captions[i] ?? null,
         overlay: this.overlay,
-        topLayer,
+        topLayer: topLayers[i] ?? null,
         width: this.width,
         height: this.height,
       });
-    };
+    });
+  }
+
+  /**
+   * One per request, or all null when no top layer is configured. Kept
+   * frame by frame because the top layer reads the frame it occludes
+   * and has no batch of its own to amortize.
+   */
+  private async paintTopLayers(
+    requests: ReadonlyArray<FramePaintRequest>,
+  ): Promise<Array<OverlayFrame | null>> {
+    if (this.topLayer === null) return requests.map(() => null);
+    const layers: Array<OverlayFrame | null> = [];
+    for (const { frame } of requests) {
+      layers.push(await this.topLayer.frameAt(frame.timestamp, frame));
+    }
+    return layers;
   }
 
   end(): void {

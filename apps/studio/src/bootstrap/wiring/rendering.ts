@@ -52,6 +52,7 @@ export function bootRendering(deps: RenderingDependencies) {
   const horizontalSideResolver = new HorizontalSideResolver();
   const horizontalPlacementResolver = new HorizontalPlacementResolver(horizontalSideResolver);
   const fontScriptClassifier = new FontScriptClassifier();
+  const captionTextCollector = new SheetCaptionTextCollector();
   const fontStackResolver = new FontStackResolver();
   const captionFontFamilyResolver = new CaptionFontFamilyResolver(fontStackResolver, fontScriptClassifier);
   const segmentFontStylesBuilder = new SegmentFontStylesBuilder(captionFontFamilyResolver);
@@ -98,9 +99,11 @@ export function bootRendering(deps: RenderingDependencies) {
     horizontalSideResolver,
     horizontalPlacementResolver,
     fontStackResolver,
+    fontScriptClassifier,
+    captionTextCollector,
     segmentFontStylesBuilder,
     captionFontOverridesBuilder: new CaptionFontOverridesBuilder(segmentFontStylesBuilder),
-    sheetTextScriptSynchronizer: new SheetTextScriptSynchronizer(fontScriptClassifier, new SheetCaptionTextCollector()),
+    sheetTextScriptSynchronizer: new SheetTextScriptSynchronizer(fontScriptClassifier, captionTextCollector),
     segmentColorRotation: new SegmentColorRotation(),
     wordFragmenter: new WordFragmenter(new BidiJsAnalyzer(), new CursiveScriptDetector()),
     segmentPaddingCssRuleBuilder: new SegmentPaddingCssRuleBuilder(),

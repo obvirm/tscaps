@@ -1,5 +1,6 @@
 import type { ElementAnimationCatalog } from '@core/elements/domain/ElementAnimationCatalog';
 import type { ElementAnimation } from '@core/elements/domain/ElementAnimation';
+import type { ElementAnimationPreset } from '@core/elements/domain/ElementAnimationPreset';
 import {
   ANSWERED_BY_KIND,
   CAPTION_NODE_KINDS,
@@ -44,15 +45,24 @@ export class ElementAnimationCssBuilder {
    */
   build(animation: ElementAnimation, kind: ElementKind, scope: ElementAnimationScope): string {
     const reached = ANIMATED_KIND_BY_SCOPE[scope];
-    const silenced = reached === null
-      ? this.silencedUnder('&', kind)
-      : this.silencedUnder(`& :where(.${CSS_CLASS_BY_NODE_KIND[reached]})`, reached);
-    if (animation.presetId === null) return `${this.aimedAt(NO_ANIMATION, scope)}\n${silenced}`;
+    const subject = reached === null ? '&' : `& :where(.${CSS_CLASS_BY_NODE_KIND[reached]})`;
+    const answered = reached ?? kind;
+    if (animation.presetId === null) {
+      return `${this.aimedAt(NO_ANIMATION, scope)}\n${this.silencedUnder(subject, answered, null)}`;
+    }
     const preset = this.catalog.byId(animation.presetId);
     if (!preset) return '';
-    const declarations = this.catalog.declarationsFor(preset, this.timingVariableResolver.resolve(kind, scope));
+    const timingVariable = this.timingVariableResolver.resolve(kind, scope);
+    const declarations = this.catalog.declarationsFor(preset, timingVariable);
     const tuned = this.withParams(declarations, preset.controls, animation.params);
-    return `${this.aimedAt(tuned, scope)}\n${silenced}\n\n${preset.keyframes}`;
+    const silenced = this.silencedUnder(subject, answered, preset.generatedBox?.pseudo ?? null);
+    return [
+      this.aimedAt(tuned, scope),
+      silenced,
+      this.generatedBoxUnder(subject, preset, timingVariable),
+      '',
+      this.keyframesOf(preset),
+    ].filter((part) => part !== null).join('\n');
   }
 
   /**
@@ -81,13 +91,22 @@ export class ElementAnimationCssBuilder {
   buildForEveryElement(animation: ElementAnimation, scope: ElementAnimationScope): string {
     const kind = ANIMATED_KIND_BY_SCOPE[scope];
     if (kind === null) return '';
-    const silenced = this.silencedUnder(`.${CSS_CLASS_BY_NODE_KIND[kind]}`, kind);
-    if (animation.presetId === null) return `${this.asOwnRule(NO_ANIMATION, kind)}\n\n${silenced}`;
+    const subject = `.${CSS_CLASS_BY_NODE_KIND[kind]}`;
+    if (animation.presetId === null) {
+      return `${this.asOwnRule(NO_ANIMATION, kind)}\n\n${this.silencedUnder(subject, kind, null)}`;
+    }
     const preset = this.catalog.byId(animation.presetId);
     if (!preset) return '';
-    const declarations = this.catalog.declarationsFor(preset, this.timingVariableResolver.resolve(kind, scope));
+    const timingVariable = this.timingVariableResolver.resolve(kind, scope);
+    const declarations = this.catalog.declarationsFor(preset, timingVariable);
     const tuned = this.withParams(declarations, preset.controls, animation.params);
-    return `${this.asOwnRule(tuned, kind)}\n\n${silenced}\n\n${preset.keyframes}`;
+    const silenced = this.silencedUnder(subject, kind, preset.generatedBox?.pseudo ?? null);
+    return [
+      this.asOwnRule(tuned, kind),
+      silenced,
+      this.generatedBoxUnder(subject, preset, timingVariable),
+      this.keyframesOf(preset),
+    ].filter((part) => part !== null).join('\n\n');
   }
 
   /**
@@ -104,15 +123,48 @@ export class ElementAnimationCssBuilder {
    * and no class matches a node the document does not emit, so this
    * reaches nothing on a caption that has none.
    */
-  private silencedUnder(answered: string, kind: ElementKind): string {
+  private silencedUnder(answered: string, kind: ElementKind, ownedBox: string | null): string {
     const subjects = [answered];
     for (const node of CAPTION_NODE_KINDS) {
       if (node === kind || ANSWERED_BY_KIND[node] !== kind) continue;
       subjects.push(`${answered} .${CSS_CLASS_BY_NODE_KIND[node]}`);
     }
-    const selectors = subjects.flatMap((subject) => [`${subject}::before`, `${subject}::after`]);
+    const selectors = subjects.flatMap((subject) => {
+      const boxes = [`${subject}::before`, `${subject}::after`];
+      // Only the answered element's own box may be spared, and only the
+      // one the entrance paints. A box under a node further in belongs
+      // to whatever drew it, which this is here to stop.
+      if (subject !== answered || ownedBox === null) return boxes;
+      return boxes.filter((selector) => selector !== `${subject}${ownedBox}`);
+    });
     for (const subject of subjects.slice(1)) selectors.push(subject);
     return `${selectors.join(', ')} {\n${INDENT}${NO_ANIMATION}\n}`;
+  }
+
+  /**
+   * The rule for the box an entrance paints of its own, or `null` where
+   * it paints none.
+   *
+   * Written under the same selector the entrance's own declarations
+   * landed on, so the two reach the same elements — and after the
+   * silencing, which spares this box by name rather than by order.
+   */
+  private generatedBoxUnder(
+    subject: string,
+    preset: ElementAnimationPreset,
+    timingVariable: string,
+  ): string | null {
+    const box = preset.generatedBox;
+    if (box === null) return null;
+    const declarations = box.declarationsByTimingVariable[timingVariable];
+    if (declarations === undefined) return null;
+    return `${subject}${box.pseudo} {\n${this.indented(declarations)}\n}`;
+  }
+
+  /** Every `@keyframes` block the entrance moves, its own box's included. */
+  private keyframesOf(preset: ElementAnimationPreset): string {
+    if (preset.generatedBox === null) return preset.keyframes;
+    return `${preset.keyframes}\n\n${preset.generatedBox.keyframes}`;
   }
 
   /**

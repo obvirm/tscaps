@@ -1,7 +1,7 @@
 import type { PoseLandmark } from '@core/person-segmentation/domain/PoseLandmark';
 import type { PersonSegmentationMask } from '@core/person-segmentation/domain/PersonSegmentationMask';
 import { PendingWorkerRequests } from '@core/person-segmentation/infrastructure/PendingWorkerRequests';
-import { PersonSegmenterModelUrls } from '@core/person-segmentation/infrastructure/PersonSegmenterModelUrls';
+import type { PersonSegmenterModelLocations } from '@core/person-segmentation/infrastructure/PersonSegmenterModelLocations';
 import type {
   PersonSegmenterWorkerInbound,
   PersonSegmenterWorkerOutbound,
@@ -19,7 +19,10 @@ export class PersonSegmenterWorkerClient {
   private initialized = false;
   private initializing: Promise<void> | null = null;
 
-  constructor(private readonly worker: Worker) {
+  constructor(
+    private readonly worker: Worker,
+    private readonly modelLocations: PersonSegmenterModelLocations,
+  ) {
     this.worker.addEventListener('message', this.handleMessage);
     this.worker.addEventListener('error', this.handleWorkerError);
     this.worker.addEventListener('messageerror', () => {
@@ -67,9 +70,10 @@ export class PersonSegmenterWorkerClient {
     const message: PersonSegmenterWorkerInbound = {
       type: 'init',
       requestId,
-      wasmPath: PersonSegmenterModelUrls.WASM_PATH,
-      poseModelUrl: PersonSegmenterModelUrls.POSE_LANDMARKER,
-      segmenterModelUrl: PersonSegmenterModelUrls.SELFIE_SEGMENTER,
+      wasmPath: this.modelLocations.wasmPath,
+      poseModelUrl: this.modelLocations.poseModelUrl,
+      segmenterModelUrl: this.modelLocations.segmenterModelUrl,
+      delegate: this.modelLocations.delegate,
       maskMaxSide,
     };
     this.worker.postMessage(message);

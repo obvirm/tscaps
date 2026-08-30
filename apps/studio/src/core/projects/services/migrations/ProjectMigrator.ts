@@ -15,6 +15,7 @@ import { ProjectV13ToV14Migration } from '@core/projects/services/migrations/Pro
 import { ProjectV14ToV15Migration } from '@core/projects/services/migrations/ProjectV14ToV15Migration';
 import { ProjectV15ToV16Migration } from '@core/projects/services/migrations/ProjectV15ToV16Migration';
 import { ProjectV16ToV17Migration } from '@core/projects/services/migrations/ProjectV16ToV17Migration';
+import { ProjectV17ToV18Migration } from '@core/projects/services/migrations/ProjectV17ToV18Migration';
 import { StoredCaptionElementScanner } from '@core/projects/services/migrations/StoredCaptionElementScanner';
 import { StoredTypographyReader } from '@core/projects/services/migrations/StoredTypographyReader';
 import type { StyledElementCatalog } from '@core/elements/domain/StyledElementCatalog';
@@ -65,6 +66,7 @@ export class ProjectMigrator {
     this.register(new ProjectV14ToV15Migration(captionElementScanner, horizontalPlacementResolver));
     this.register(new ProjectV15ToV16Migration(animationCssWriter));
     this.register(new ProjectV16ToV17Migration());
+    this.register(new ProjectV17ToV18Migration());
   }
 
   /**

@@ -52,6 +52,7 @@ export class MediaBunnyVideoRenderer implements VideoRenderer {
       ...(onProgress ? { onProgress } : {}),
       ...(job.onAudioDiscarded ? { onAudioDiscarded: job.onAudioDiscarded } : {}),
       ...(job.confirmFallbackDecoder ? { confirmFallbackDecoder: job.confirmFallbackDecoder } : {}),
+      ...(job.onVideoFrameDecoderSelected ? { onVideoFrameDecoderSelected: job.onVideoFrameDecoderSelected } : {}),
     });
     return { blob: result.blob, mimeType: result.mimeType };
   }

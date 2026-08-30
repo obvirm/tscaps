@@ -39,7 +39,10 @@ const FONT_SIZE_STEP = 0.1;
 const FONT_WEIGHT_MIN = 100;
 const FONT_WEIGHT_MAX = 900;
 const FONT_WEIGHT_STEP = 100;
-const LETTER_SPACING_MIN = -0.05;
+// The negative end reaches -0.08 because a heavy face set large and in caps
+// wants the letters closer than a text face ever would, and a template
+// shipping such a default has to leave the user able to return to it.
+const LETTER_SPACING_MIN = -0.08;
 const LETTER_SPACING_MAX = 0.2;
 const LETTER_SPACING_STEP = 0.005;
 const WORD_SPACING_MIN = -0.5;

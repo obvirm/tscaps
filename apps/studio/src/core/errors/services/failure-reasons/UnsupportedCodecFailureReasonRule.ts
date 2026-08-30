@@ -14,9 +14,13 @@ import type { FailureReasonRule } from '@core/errors/domain/FailureReasonRule';
  * format"). Matching is by error name because messages are localised
  * and worded differently per engine.
  *
- * The `cause` chain is followed, so the condition stays recognisable
- * after an operation has wrapped the underlying browser error in one
- * of its own.
+ * Both `cause` and the `errors` of an `AggregateError` are followed,
+ * so the condition stays recognisable after an operation has wrapped
+ * the underlying browser error in one of its own, and after a step
+ * that tried several strategies reported all of their failures side
+ * by side. Recognising it through any branch is deliberate: one
+ * strategy refusing the codec while another dies of something else
+ * still leaves the codec as the reason the user can act on.
  */
 export class UnsupportedCodecFailureReasonRule implements FailureReasonRule {
 
@@ -25,18 +29,28 @@ export class UnsupportedCodecFailureReasonRule implements FailureReasonRule {
     'EncodingError',
   ];
 
-  private static readonly MAX_CAUSE_DEPTH = 8;
+  private static readonly MAX_DEPTH = 8;
 
   readonly reason: FailureReason = 'codec-unsupported';
 
   matches(error: unknown): boolean {
-    let candidate = error;
-    for (let depth = 0; depth < UnsupportedCodecFailureReasonRule.MAX_CAUSE_DEPTH; depth += 1) {
-      if (typeof candidate !== 'object' || candidate === null) return false;
-      if (this.describesUnsupportedCodec(candidate)) return true;
-      candidate = (candidate as { cause?: unknown }).cause;
-    }
-    return false;
+    return this.matchesWithin(error, 0, new Set<object>());
+  }
+
+  private matchesWithin(candidate: unknown, depth: number, seen: Set<object>): boolean {
+    if (depth >= UnsupportedCodecFailureReasonRule.MAX_DEPTH) return false;
+    if (typeof candidate !== 'object' || candidate === null) return false;
+    if (seen.has(candidate)) return false;
+    seen.add(candidate);
+    if (this.describesUnsupportedCodec(candidate)) return true;
+    return this.linkedTo(candidate).some((linked) => this.matchesWithin(linked, depth + 1, seen));
+  }
+
+  private linkedTo(candidate: object): unknown[] {
+    const branches = (candidate as { errors?: unknown }).errors;
+    const linked = Array.isArray(branches) ? [...branches] : [];
+    linked.push((candidate as { cause?: unknown }).cause);
+    return linked;
   }
 
   private describesUnsupportedCodec(candidate: object): boolean {

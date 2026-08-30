@@ -1,7 +1,42 @@
 {
   "name": "Anya",
-  "categories": [
-    "clean"
+  "category": "classic",
+  "variants": [
+    {
+      "label": "Cream",
+      "overrides": {
+        "primary-color": "#fff8e7",
+        "highlight-color": "#f5c982"
+      }
+    },
+    {
+      "label": "Sky",
+      "overrides": {
+        "primary-color": "#eef6ff",
+        "highlight-color": "#9ec9f5"
+      }
+    },
+    {
+      "label": "Mint",
+      "overrides": {
+        "primary-color": "#f0fff4",
+        "highlight-color": "#a0e6b8"
+      }
+    },
+    {
+      "label": "Blush",
+      "overrides": {
+        "primary-color": "#fff0f6",
+        "highlight-color": "#f5a8c8"
+      }
+    },
+    {
+      "label": "Lilac",
+      "overrides": {
+        "primary-color": "#f6f0ff",
+        "highlight-color": "#c3a8f5"
+      }
+    }
   ],
   "typography": {
     "fontFamily": "Playfair Display Variable",

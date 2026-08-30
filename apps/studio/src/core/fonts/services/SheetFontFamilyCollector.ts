@@ -2,7 +2,11 @@ import type { Document } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 import type { ElementStyles } from '@core/elements/domain/ElementStyles';
 import { ElementFieldId } from '@core/elements/domain/fields/ElementFieldId';
+import type { FontScript } from '@core/fonts/domain/FontCatalog';
+import type { DrawableFamilyResolver } from '@core/fonts/services/DrawableFamilyResolver';
+import type { FontScriptClassifier } from '@core/fonts/services/FontScriptClassifier';
 import type { FontStackResolver } from '@core/fonts/services/FontStackResolver';
+import type { SheetCaptionTextCollector } from '@core/sheets/services/SheetCaptionTextCollector';
 import { TemplateCssVariable } from '@core/templates/domain/definition/TemplateCssVariable';
 
 const FONT_FAMILY_DECLARATION = /font-family\s*:\s*([^;}]+)/g;
@@ -32,47 +36,77 @@ export interface SheetFontFamilyCollectorInput {
  *     unused fonts would bundle ~50–200 KB of payload per rendered
  *     frame for nothing.
  *
+ * A stack's stand-ins are kept only for the scripts the sheet's text
+ * actually holds. The one for a script nobody wrote a character of
+ * cannot be selected to draw anything, and the same payload argument
+ * applies to it.
+ *
  * The result is meant to feed `FontFaceCssBuilder.build` so each
  * frame's embedded stylesheet ships only the `@font-face` blocks the
  * captions actually use.
  */
 export class SheetFontFamilyCollector {
 
-  constructor(private readonly fontStackResolver: FontStackResolver) {}
+  constructor(
+    private readonly fontStackResolver: FontStackResolver,
+    private readonly drawableFamilyResolver: DrawableFamilyResolver,
+    private readonly scriptClassifier: FontScriptClassifier,
+    private readonly captionTextCollector: SheetCaptionTextCollector,
+  ) {}
 
   collect(input: SheetFontFamilyCollectorInput): Set<string> {
     const families = new Set<string>();
-    this.addPrimaryFamily(input.inlineStyles, families);
-    this.addPerElementFamilies(input, families);
-    this.addFontControlFamilies(input.sheet, input.inlineStyles, families);
+    const scripts = this.scriptsOf(input);
+    this.addPrimaryFamily(input.inlineStyles, scripts, families);
+    this.addPerElementFamilies(input, scripts, families);
+    this.addFontControlFamilies(input.sheet, input.inlineStyles, scripts, families);
     this.addCssLiteralFamilies(input.sheetCss, families);
     this.addElementCssLiteralFamilies(input.elementStyles, families);
     return families;
   }
 
-  private addPrimaryFamily(inlineStyles: Record<string, string>, out: Set<string>): void {
-    this.addStack(inlineStyles[TemplateCssVariable.FONT_FAMILY], out);
+  private scriptsOf(input: SheetFontFamilyCollectorInput): ReadonlySet<FontScript> {
+    return this.scriptClassifier.scriptsIn(
+      this.captionTextCollector.collect(input.document, input.sheet.id),
+    );
+  }
+
+  private addPrimaryFamily(
+    inlineStyles: Record<string, string>,
+    scripts: ReadonlySet<FontScript>,
+    out: Set<string>,
+  ): void {
+    this.addStack(inlineStyles[TemplateCssVariable.FONT_FAMILY], scripts, out);
   }
 
   // A chosen face is collected as its full stack: the element renders
   // with that face's stand-ins when its text is in a script the face
   // cannot draw, and those are not necessarily in the sheet's own stack.
-  private addPerElementFamilies(input: SheetFontFamilyCollectorInput, out: Set<string>): void {
+  private addPerElementFamilies(
+    input: SheetFontFamilyCollectorInput,
+    scripts: ReadonlySet<FontScript>,
+    out: Set<string>,
+  ): void {
     for (const section of input.document.sections) {
       if (section.kind !== input.sheet.id) continue;
       for (const segment of section.segments) {
-        this.addChosenFace(input.elementStyles, segment.id, out);
+        this.addChosenFace(input.elementStyles, segment.id, scripts, out);
         for (const word of segment.getWords()) {
-          this.addChosenFace(input.elementStyles, word.id, out);
+          this.addChosenFace(input.elementStyles, word.id, scripts, out);
         }
       }
     }
   }
 
-  private addChosenFace(elementStyles: ElementStyles, elementId: string, out: Set<string>): void {
+  private addChosenFace(
+    elementStyles: ElementStyles,
+    elementId: string,
+    scripts: ReadonlySet<FontScript>,
+    out: Set<string>,
+  ): void {
     const family = elementStyles.fieldText(elementId, ElementFieldId.FONT_FAMILY);
     if (family === null) return;
-    this.addStack(this.fontStackResolver.resolve(family), out);
+    this.addStack(this.fontStackResolver.resolve(family), scripts, out);
   }
 
   // Every element's CSS is scanned, not only the ones a field wrote:
@@ -85,10 +119,15 @@ export class SheetFontFamilyCollector {
     }
   }
 
-  private addFontControlFamilies(sheet: Sheet, inlineStyles: Record<string, string>, out: Set<string>): void {
+  private addFontControlFamilies(
+    sheet: Sheet,
+    inlineStyles: Record<string, string>,
+    scripts: ReadonlySet<FontScript>,
+    out: Set<string>,
+  ): void {
     for (const control of sheet.template.styleControls) {
       if (control.type !== 'font') continue;
-      this.addStack(inlineStyles[`--tscaps-${control.id}`], out);
+      this.addStack(inlineStyles[`--tscaps-${control.id}`], scripts, out);
     }
   }
 
@@ -133,31 +172,12 @@ export class SheetFontFamilyCollector {
     return i;
   }
 
-  /**
-   * Adds every family of a `font-family` stack. A chosen font arrives with
-   * the stand-ins that cover the scripts it cannot draw appended to it, and
-   * a caption mixing scripts renders in more than one of them — collecting
-   * only the first would leave those faces out of the exported frames while
-   * the preview, which loads the whole catalog, kept showing them.
-   */
-  private addStack(value: string | undefined, out: Set<string>): void {
+  private addStack(
+    value: string | undefined,
+    scripts: ReadonlySet<FontScript>,
+    out: Set<string>,
+  ): void {
     if (!value) return;
-    for (const family of value.split(',')) {
-      const name = this.unquote(family.trim());
-      if (name) out.add(name);
-    }
-  }
-
-  /**
-   * Strips wrapping single/double quotes. Sheet inline-style values
-   * for font controls arrive quoted (`'Press Start 2P'`) since
-   * digit-leading idents are otherwise invalid CSS; the bare name is
-   * what matches the bundled `@font-face` declarations.
-   */
-  private unquote(value: string): string {
-    if ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"'))) {
-      return value.slice(1, -1);
-    }
-    return value;
+    for (const family of this.drawableFamilyResolver.resolve(value, scripts)) out.add(family);
   }
 }

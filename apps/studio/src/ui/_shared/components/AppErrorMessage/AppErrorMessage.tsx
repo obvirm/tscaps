@@ -5,6 +5,7 @@ import { useUtils } from '@ui/_shared/contexts/modules/UtilsContext';
 import { useErrors } from '@ui/_shared/contexts/modules/ErrorsContext';
 import type { UnsupportedAudioCodecError } from '@core/videos/domain/errors/UnsupportedAudioCodecError';
 import type { UnsupportedVideoCodecError } from '@core/videos/domain/errors/UnsupportedVideoCodecError';
+import type { ProjectVideoStoreFailedError } from '@core/projects/domain/errors/ProjectVideoStoreFailedError';
 
 const SUPPORT_EMAIL = 'support@tscaps.io';
 
@@ -34,19 +35,23 @@ export function getAppErrorTitle(error: AppError): string {
   switch (error.name) {
     case 'UnknownAppError':                  return 'Something went wrong';
     case 'ProjectSaveFailedError':           return "Couldn't save your project";
+    case 'ProjectVideoStoreFailedError':     return "Couldn't save your video in this browser";
     case 'ExportFailedError':                return "Export didn't finish";
     case 'ProjectListLoadFailedError':       return "Couldn't load your projects";
     case 'ProjectDeleteFailedError':         return "Couldn't delete this project";
+    case 'ProjectOpenFailedError':           return "Couldn't open this project";
+    case 'OriginalVideoDownloadFailedError': return "Couldn't get your original video";
     case 'ProjectExportFailedError':         return "Couldn't export this project";
     case 'ProjectImportFailedError':         return "Couldn't import this project";
     case 'AudioExtractionFailedError':       return "Couldn't read this video's audio";
+    case 'BehindActorMeasurementFailedError': return "Couldn't measure where the person is";
     case 'LocalTranscriptionFailedError':    return "On-device transcription didn't finish";
-    case 'TranscriptionModelCacheFailedError': return "Couldn't save Whisper transcription model";
-    case 'PreviewProxyGenerationFailedError': return "Preview isn't optimized";
+    case 'TranscriptionModelCacheFailedError': return "Couldn't save the transcription model";
+    case 'PreviewProxyGenerationFailedError': return "Couldn't build the precise preview";
     case 'PreviewLoadFailedError':           return "Couldn't load this video's preview";
     case 'UnsupportedVideoCodecError':       return "This video can't play in your browser";
     case 'UnsupportedAudioCodecError':       return "This video's audio can't play in your browser";
-    case 'VideoDurationUnreadableError':     return "We couldn't read this video's length";
+    case 'VideoDurationUnreadableError':     return "Couldn't read this video's length";
     default: {
       const _: never = error.name;
       return _;
@@ -66,6 +71,16 @@ function useFailureReason(error: AppError): FailureReason {
 }
 
 /**
+ * Whether this session's original video travels from the server. The
+ * two ways it can fail to arrive have nothing in common: a transfer
+ * that did not finish, against a browser database that would not
+ * answer. Neither remedy helps with the other.
+ */
+function useOriginalVideoComesFromServer(): boolean {
+  return false;
+}
+
+/**
  * One-line description of an `AppError` for space-constrained
  * surfaces (toasts, chips, tooltips). Full remediation guidance
  * lives in {@link AppErrorMessage}; this hook hands back a plain
@@ -73,22 +88,27 @@ function useFailureReason(error: AppError): FailureReason {
  */
 export function useAppErrorShortDescription(error: AppError): string {
   const reason = useFailureReason(error);
+  const originalFromServer = useOriginalVideoComesFromServer();
   switch (error.name) {
-    case 'UnknownAppError':                  return 'Try the action again.';
+    case 'UnknownAppError':                  return 'Try again.';
     case 'ProjectSaveFailedError':           return describeSaveFailure(reason);
+    case 'ProjectVideoStoreFailedError':     return describeVideoStoreFailure(error as ProjectVideoStoreFailedError, reason);
     case 'ExportFailedError':                return 'The export was interrupted before it finished.';
-    case 'ProjectListLoadFailedError':       return 'Check your internet connection.';
-    case 'ProjectDeleteFailedError':         return 'Check your internet connection.';
+    case 'ProjectListLoadFailedError':       return 'Reload the page to try again.';
+    case 'ProjectDeleteFailedError':         return 'Try deleting it again.';
+    case 'ProjectOpenFailedError':           return describeProjectOpenFailure(reason);
+    case 'OriginalVideoDownloadFailedError': return describeOriginalVideoDownloadFailure(originalFromServer);
     case 'ProjectExportFailedError':         return "Something went wrong while packaging your project.";
     case 'ProjectImportFailedError':         return "The file couldn't be read as a tscaps export.";
     case 'AudioExtractionFailedError':       return describeAudioExtractionFailure(reason);
     case 'LocalTranscriptionFailedError':    return describeLocalTranscriptionFailure(reason);
     case 'TranscriptionModelCacheFailedError': return describeModelCacheFailure(reason);
+    case 'BehindActorMeasurementFailedError': return 'Some parts of the video were not measured, so the captions were not placed behind the person there.';
     case 'PreviewProxyGenerationFailedError': return describeProxyFailure(reason);
     case 'PreviewLoadFailedError':           return "The video couldn't be loaded into the editor.";
     case 'UnsupportedVideoCodecError':       return "Your browser can't decode this video's format.";
     case 'UnsupportedAudioCodecError':       return "Your browser can't decode this video's audio.";
-    case 'VideoDurationUnreadableError':     return 'Playback and scrubbing may be limited. Re-importing the file usually fixes it.';
+    case 'VideoDurationUnreadableError':     return 'Playback and scrubbing may be limited. Adding the file again usually fixes it.';
     default: {
       const _: never = error.name;
       return _;
@@ -112,11 +132,49 @@ function describeSaveFailure(reason: FailureReason): string {
   }
 }
 
-function describeProxyFailure(reason: FailureReason): string {
+/**
+ * The video is on screen and works, so the loss is entirely in the
+ * future, and what the next open has to do is the whole message.
+ */
+function describeVideoStoreFailure(error: ProjectVideoStoreFailedError, reason: FailureReason): string {
+  const cause = reason === 'storage-full' ? 'Your device is out of space. ' : '';
+  const nextOpen = error.hasRemoteCopy
+    ? 'Next time you open this project, the video will download again.'
+    : 'Next time you open this project, you will have to select the video file again.';
+  return `${cause}${nextOpen}`;
+}
+
+function describeProjectOpenFailure(reason: FailureReason): string {
   switch (reason) {
-    case 'storage-full':      return 'Playback may be slower than usual. Free up disk space to restore it.';
-    case 'codec-unsupported': return "Your browser can't process this video's format. Playback may be slower than usual.";
-    default:                  return 'Playback may be slower than usual. Your captions and export are unaffected.';
+    case 'storage-full':      return 'Your device is out of space. Free some up, then try again.';
+    case 'codec-unsupported': return "Your browser can't decode this project's video.";
+    default:                  return 'Reload the page to try again.';
+  }
+}
+
+/**
+ * Says nothing about why the transfer stopped. A connection is worth
+ * naming as the thing to check and never as the cause: what the code
+ * knows is that the bytes did not arrive.
+ */
+function describeOriginalVideoDownloadFailure(fromServer: boolean): string {
+  return fromServer
+    ? 'Check your internet connection, then open the project again.'
+    : 'Close any other tab with tscaps open, then open the project again.';
+}
+
+/**
+ * The video plays either way, through the browser's own player when
+ * there is no proxy. What that costs is where a cut lands, so the
+ * copy says that and never speed. The title names the thing that
+ * could not be built, because the drift makes no sense on its own.
+ */
+function describeProxyFailure(reason: FailureReason): string {
+  const consequence = 'The video plays normally, but cuts can end a frame or two late.';
+  switch (reason) {
+    case 'storage-full':      return `Your device is out of space. ${consequence}`;
+    case 'codec-unsupported': return `Your browser can't process this video's format. ${consequence}`;
+    default:                  return consequence;
   }
 }
 
@@ -134,6 +192,7 @@ function describeModelCacheFailure(reason: FailureReason): string {
   }
 }
 
+
 function describeLocalTranscriptionFailure(reason: FailureReason): string {
   switch (reason) {
     case 'backend-unavailable': return "The transcribe backend you picked isn't usable on this device. Switch it in Advanced settings.";
@@ -148,11 +207,20 @@ function describeLocalTranscriptionFailure(reason: FailureReason): string {
  * Nothing in the app keeps a history of notices, so one that times
  * out unread is unrecoverable: whoever stepped away can never find
  * out why something now behaves differently. Waiting is therefore
- * the default, and fading away is what needs justifying — it fits
- * only a failure whose whole consequence is already plain on screen.
+ * the default, and fading away is what needs justifying — it fits a
+ * failure that asks nothing of the reader, now or later.
  */
 export function requiresManualDismissal(error: AppError): boolean {
-  return error.name !== 'PreviewProxyGenerationFailedError';
+  switch (error.name) {
+    // Cuts drift by a frame in the preview until the next reload
+    // tries again. Nothing to do about it, and nothing to remember.
+    case 'PreviewProxyGenerationFailedError': return false;
+    // Worth holding only when the reader will have to find the file
+    // themselves. When the video downloads on its own, they never
+    // learn this happened, and nothing is lost by that.
+    case 'ProjectVideoStoreFailedError': return !(error as ProjectVideoStoreFailedError).hasRemoteCopy;
+    default: return true;
+  }
 }
 
 /**
@@ -163,18 +231,23 @@ export function requiresManualDismissal(error: AppError): boolean {
  */
 export function AppErrorMessage({ error, isMobile = false }: AppErrorMessageProps): ReactElement {
   const reason = useFailureReason(error);
+  const originalFromServer = useOriginalVideoComesFromServer();
   switch (error.name) {
     case 'UnknownAppError':                  return <GenericFailureBody isMobile={isMobile} />;
     case 'ProjectSaveFailedError':           return <ProjectSaveFailedBody reason={reason} />;
+    case 'ProjectVideoStoreFailedError':     return <ProjectVideoStoreFailedBody error={error as ProjectVideoStoreFailedError} reason={reason} />;
     case 'ExportFailedError':                return <ExportFailedBody isMobile={isMobile} />;
     case 'ProjectListLoadFailedError':       return <ProjectListLoadFailedBody />;
     case 'ProjectDeleteFailedError':         return <ProjectDeleteFailedBody />;
+    case 'ProjectOpenFailedError':           return <ProjectOpenFailedBody reason={reason} isMobile={isMobile} />;
+    case 'OriginalVideoDownloadFailedError': return <OriginalVideoDownloadFailedBody fromServer={originalFromServer} />;
     case 'ProjectExportFailedError':         return <ProjectExportFailedBody />;
     case 'ProjectImportFailedError':         return <ProjectImportFailedBody />;
     case 'AudioExtractionFailedError':       return <AudioExtractionFailedBody reason={reason} isMobile={isMobile} />;
     case 'LocalTranscriptionFailedError':    return <LocalTranscriptionFailedBody reason={reason} isMobile={isMobile} />;
     case 'TranscriptionModelCacheFailedError': return <TranscriptionModelCacheFailedBody reason={reason} />;
-    case 'PreviewProxyGenerationFailedError': return <PreviewProxyGenerationFailedBody reason={reason} isMobile={isMobile} />;
+    case 'BehindActorMeasurementFailedError': return <BehindActorMeasurementFailedBody />;
+    case 'PreviewProxyGenerationFailedError': return <PreviewProxyGenerationFailedBody reason={reason} />;
     case 'PreviewLoadFailedError':           return <PreviewLoadFailedBody isMobile={isMobile} />;
     case 'UnsupportedVideoCodecError':       return <UnsupportedVideoCodecBody error={error as UnsupportedVideoCodecError} isMobile={isMobile} />;
     case 'UnsupportedAudioCodecError':       return <UnsupportedAudioCodecBody error={error as UnsupportedAudioCodecError} isMobile={isMobile} />;
@@ -186,28 +259,9 @@ export function AppErrorMessage({ error, isMobile = false }: AppErrorMessageProp
   }
 }
 
-function PreviewProxyGenerationFailedBody({
-  reason,
-  isMobile,
-}: {
-  readonly reason: FailureReason;
-  readonly isMobile: boolean;
-}): ReactElement {
-  const fallbackBullets = useEngineFallbackBullets(isMobile);
-  const lead = "We couldn't build a lightweight version of this video for the editor, so playback runs on the original and may be slower. Your captions and your export are unaffected. A few things you can try:";
-  if (reason === 'storage-full') {
-    return <ErrorBody lead={lead} bullets={STORAGE_RECOVERY_BULLETS} />;
-  }
-  return (
-    <ErrorBody
-      lead={lead}
-      bullets={[
-        'Reload the page to let the editor try again.',
-        'Convert the video to MP4 (H.264) and import it again.',
-        ...fallbackBullets,
-      ]}
-    />
-  );
+/** Notice-only, like {@link ProjectVideoStoreFailedBody}. */
+function PreviewProxyGenerationFailedBody({ reason }: { readonly reason: FailureReason }): ReactElement {
+  return <p className="m-0">{describeProxyFailure(reason)}</p>;
 }
 
 function PreviewLoadFailedBody({ isMobile }: { isMobile: boolean }): ReactElement {
@@ -215,7 +269,7 @@ function PreviewLoadFailedBody({ isMobile }: { isMobile: boolean }): ReactElemen
   return (
     <ErrorBody
       lead="We couldn't load this video into the editor. A few things you can try:"
-      bullets={['Upload the video again in a new project.', ...fallbackBullets]}
+      bullets={['Add the video again in a new project.', ...fallbackBullets]}
     />
   );
 }
@@ -231,7 +285,7 @@ function UnsupportedVideoCodecBody({
   return (
     <ErrorBody
       lead="Your browser doesn't support this video's format. A few things you can try:"
-      bullets={['Convert the video to MP4 (H.264) and upload it again.', ...fallbackBullets]}
+      bullets={['Convert the video to MP4 (H.264) and add it again.', ...fallbackBullets]}
       details={`Source codec: ${error.codec}`}
     />
   );
@@ -248,7 +302,7 @@ function UnsupportedAudioCodecBody({
   return (
     <ErrorBody
       lead="Your browser can't process this video's audio. A few things you can try:"
-      bullets={['Convert the audio to AAC or Opus and upload again.', ...fallbackBullets]}
+      bullets={['Convert the audio to AAC or Opus and add it again.', ...fallbackBullets]}
       details={`Source codec: ${error.codec}`}
     />
   );
@@ -267,7 +321,7 @@ function AudioExtractionFailedBody({
       <ErrorBody
         lead="Your browser couldn't decode the audio of this video. A few things you can try:"
         bullets={[
-          'Convert the video to MP4 with H.264 video and AAC audio, then upload it again.',
+          'Convert the video to MP4 with H.264 video and AAC audio, then add it again.',
           ...fallbackBullets,
         ]}
       />
@@ -276,7 +330,20 @@ function AudioExtractionFailedBody({
   return (
     <ErrorBody
       lead="We weren't able to read the audio from this video. A few things you can try:"
-      bullets={['Upload a different video.', ...fallbackBullets]}
+      bullets={['Try a different video.', ...fallbackBullets]}
+    />
+  );
+}
+
+/** Notice-only, like {@link ProjectVideoStoreFailedBody}. */
+function BehindActorMeasurementFailedBody(): ReactElement {
+  return (
+    <ErrorBody
+      lead="Some parts of the video could not be measured, so the captions were not placed behind the person there. The rest of the export is unaffected."
+      bullets={[
+        'Export again if you want another attempt at those parts.',
+        'Or pick a template that does not place captions behind the person.',
+      ]}
     />
   );
 }
@@ -286,7 +353,7 @@ function VideoDurationUnreadableBody(): ReactElement {
     <ErrorBody
       lead="Playback and scrubbing may be limited because we couldn't read the video's length."
       bullets={[
-        'Re-import the file. That usually recovers the length.',
+        'Add the file again. That usually recovers the length.',
         'Convert the video to MP4 (H.264) and try again.',
       ]}
     />
@@ -311,6 +378,23 @@ function ProjectSaveFailedBody({ reason }: { readonly reason: FailureReason }): 
   );
 }
 
+/**
+ * Reaches the reader as a notice and nowhere else, so it says its one
+ * sentence and stops. Writing a lead, remedies and a support line for
+ * a surface that does not render them produces copy that goes stale
+ * unread — which is how the version before this one came to describe
+ * a preview that had not been slow for months.
+ */
+function ProjectVideoStoreFailedBody({
+  error,
+  reason,
+}: {
+  readonly error: ProjectVideoStoreFailedError;
+  readonly reason: FailureReason;
+}): ReactElement {
+  return <p className="m-0">{describeVideoStoreFailure(error, reason)}</p>;
+}
+
 function ExportFailedBody({ isMobile }: { isMobile: boolean }): ReactElement {
   return (
     <ErrorBody
@@ -320,11 +404,20 @@ function ExportFailedBody({ isMobile }: { isMobile: boolean }): ReactElement {
   );
 }
 
+/**
+ * Reloading leads and the network hint follows, because a project list
+ * does not always come over the network. A browser database that
+ * refused to open does not care whether the reader is online, and
+ * connection advice was the only thing this said.
+ */
 function ProjectListLoadFailedBody(): ReactElement {
   return (
     <ErrorBody
-      lead="We weren't able to load your projects."
-      bullets={['Check your internet connection.']}
+      lead="We weren't able to load your projects. A couple of things you can try:"
+      bullets={[
+        'Reload the page.',
+        'If it keeps failing, check your internet connection.',
+      ]}
     />
   );
 }
@@ -332,8 +425,83 @@ function ProjectListLoadFailedBody(): ReactElement {
 function ProjectDeleteFailedBody(): ReactElement {
   return (
     <ErrorBody
-      lead="We weren't able to delete this project."
-      bullets={['Check your internet connection.']}
+      lead="We weren't able to delete this project. A couple of things you can try:"
+      bullets={[
+        'Try deleting it again.',
+        'If it keeps failing, check your internet connection.',
+      ]}
+    />
+  );
+}
+
+/**
+ * The three ways a project refuses to open want three different
+ * answers: space is recovered outside the app, an undecodable video
+ * needs a different file or a different engine, and everything else
+ * is worth one reload before support.
+ */
+function ProjectOpenFailedBody({
+  reason,
+  isMobile,
+}: {
+  readonly reason: FailureReason;
+  readonly isMobile: boolean;
+}): ReactElement {
+  const fallbackBullets = useEngineFallbackBullets(isMobile);
+  if (reason === 'storage-full') {
+    return (
+      <ErrorBody
+        lead="Your device is out of space, so this project could not be loaded. Your other projects are untouched. A few things you can try:"
+        bullets={STORAGE_RECOVERY_BULLETS}
+      />
+    );
+  }
+  if (reason === 'codec-unsupported') {
+    return (
+      <ErrorBody
+        lead="Your browser can't decode this project's video. A few things you can try:"
+        bullets={[
+          'Convert the video to MP4 (H.264), then start a new project with it.',
+          ...fallbackBullets,
+        ]}
+      />
+    );
+  }
+  return (
+    <ErrorBody
+      lead="We weren't able to load this project. A couple of things you can try:"
+      bullets={[
+        'Reload the page.',
+        'If it keeps failing, check your internet connection.',
+      ]}
+    />
+  );
+}
+
+/**
+ * The captions are safe either way, so the copy leads with what is
+ * actually lost — the export — and opening the project again is the
+ * only retry there is: the reader has no local file to offer.
+ */
+function OriginalVideoDownloadFailedBody({ fromServer }: { readonly fromServer: boolean }): ReactElement {
+  if (fromServer) {
+    return (
+      <ErrorBody
+        lead="We weren't able to download the original video of this project. Your captions are safe, but exporting needs the video. A couple of things you can try:"
+        bullets={[
+          'Check your internet connection.',
+          'Go back to your projects and open this one again.',
+        ]}
+      />
+    );
+  }
+  return (
+    <ErrorBody
+      lead="We weren't able to read the original video of this project from your browser's storage. Your captions are safe, but exporting needs the video. A couple of things you can try:"
+      bullets={[
+        'Close any other tab with tscaps open, then reload the page.',
+        'Go back to your projects and open this one again.',
+      ]}
     />
   );
 }
@@ -446,7 +614,7 @@ function useEngineFallbackBullets(isMobile: boolean): string[] {
   const bullets: string[] = [];
   if (!isChromiumBased) {
     bullets.push(
-      'Open tscaps in a Chromium-based browser (Chrome, Edge, Brave) — they have the broadest support for our pipeline.',
+      'Open tscaps in a Chromium-based browser (Chrome, Edge, Brave). They have the broadest support for what tscaps needs.',
     );
   }
   if (isMobile) bullets.push("If you're on mobile, try from a desktop browser.");

@@ -1,8 +1,6 @@
 {
   "name": "Zara",
-  "categories": [
-    "impact"
-  ],
+  "category": "viral",
   "typography": {
     "fontFamily": "Anton",
     "fontWeight": 400,
@@ -55,6 +53,10 @@
       "unit": "em",
       "group": "style",
       "subgroup": "appearance"
+    },
+    {
+      "id": "glow-radius",
+      "default": 0.12
     }
   ],
   "segmentSplitters": [

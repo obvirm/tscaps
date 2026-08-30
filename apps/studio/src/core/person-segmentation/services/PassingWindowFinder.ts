@@ -1,15 +1,16 @@
+import type { PassingSample } from '@core/person-segmentation/domain/PassingSample';
 import type { PersonSegmentationWindow } from '@core/person-segmentation/domain/PersonSegmentationWindow';
-
-export interface PassingSample {
-  readonly t: number;
-  readonly passes: boolean;
-}
 
 /**
  * Groups a chronologically ordered array of pass / fail samples into
  * contiguous time windows of passing samples. Windows shorter than
  * the given minimum duration are dropped — the effect needs a stable
  * scene for at least that long before it makes sense to fire.
+ *
+ * The grouping reads the samples and nothing else, so it says nothing
+ * about the stretches between them: two passing samples with an
+ * unexamined hour between them still read as one run. Bounding the
+ * answer to what was actually examined is left to the caller.
  */
 export class PassingWindowFinder {
 

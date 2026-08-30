@@ -15,15 +15,17 @@ interface AutoAssignResultToastProps {
 }
 
 /**
- * Outcome notice for a "Group scenes" run: how many scenes (segment
- * granularity) or tagged words (word granularity) moved to the chosen
- * sheet, or that nothing matched. Auto-dismisses.
+ * Outcome notice for a "Group scenes" run: how many words or scenes
+ * moved to the chosen sheet, or that nothing matched. The noun follows
+ * the granularity the matcher reported, since a word-level matcher
+ * carves scenes apart and counting them would say nothing.
+ * Auto-dismisses.
  */
 export function AutoAssignResultToast({ state, onDismiss }: AutoAssignResultToastProps) {
   if (state === null) return null;
 
   const { granularity, movedCount } = state.result;
-  const noun = granularity === 'word' ? 'tagged word' : 'scene';
+  const noun = granularity === 'word' ? 'word' : 'scene';
   const title = movedCount === 0
     ? 'Nothing to move'
     : `Moved ${movedCount} ${noun}${movedCount === 1 ? '' : 's'} to ${state.sheetName}`;

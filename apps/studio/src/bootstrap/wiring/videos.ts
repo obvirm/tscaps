@@ -3,7 +3,20 @@ import type { IndexedDbStoreDefinition } from '@core/_shared/infrastructure/Inde
 import type { VideoBlobCache } from '@core/videos/domain/VideoBlobCache';
 import type { VideoCompatibilityChecker } from '@core/videos/domain/VideoCompatibilityChecker';
 import { IndexedDbVideoBlobCache } from '@core/videos/infrastructure/IndexedDbVideoBlobCache';
+import { MemoryFirstVideoBlobCache } from '@core/videos/infrastructure/MemoryFirstVideoBlobCache';
 import { MediaBunnyVideoCompatibilityChecker } from '@core/videos/infrastructure/MediaBunnyVideoCompatibilityChecker';
+
+/**
+ * How many projects keep their source video resident in IndexedDB
+ * before the least recently opened one is evicted.
+ *
+ * The preview-proxy cache reads this same number, and has to: the
+ * editor's fast path opens a project against its cached proxy and
+ * fetches the source in the background, so a proxy that outlives its
+ * source opens a project that cannot be exported. Whoever changes
+ * this changes both.
+ */
+export const MAX_CACHED_PROJECT_VIDEOS = 3;
 
 export interface VideosDependencies {
   readonly indexedDb: IndexedDbClient;
@@ -25,7 +38,9 @@ export interface VideosModule {
  */
 export function bootVideos(deps: VideosDependencies): VideosModule {
   return {
-    blobCache: new IndexedDbVideoBlobCache(deps.indexedDb),
+    blobCache: new MemoryFirstVideoBlobCache(
+      new IndexedDbVideoBlobCache(deps.indexedDb, MAX_CACHED_PROJECT_VIDEOS),
+    ),
     services: {
       compatibilityChecker: new MediaBunnyVideoCompatibilityChecker(),
     },

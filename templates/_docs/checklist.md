@@ -23,6 +23,12 @@ human or a rendered frame can see.
 - [ ] Any binary asset the CSS references lives in the shared [`_assets/`](../_assets) pool and
       is referenced as `url('asset:<filename-without-ext>')`.
       → [css-contract.md](css-contract.md#shared-assets)
+- [ ] **A `key-moments` or `modern` template ships a sample clip and a poster**, as
+      `apps/studio/public/templates/<id>.mp4` and `<id>.jpg`. Those two families are previewed in
+      the gallery as a recorded 9:16 sample with the captions burned in, not as a rendered tile,
+      and the URLs are built from the template id with no fallback, so a missing file is an empty
+      card. Nothing checks this. The card shows the middle 900 rows of the sample's 1280, so
+      confirm the captions survive that crop across the whole clip and not just one frame.
 
 ## The variable contract
 

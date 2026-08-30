@@ -1,9 +1,6 @@
 {
   "name": "Pepper",
-  "categories": [
-    "impact",
-    "multi-speakers"
-  ],
+  "category": "viral",
   "variants": [
     { "label": "Red pill", "overrides": { "highlight-bg-color": "#c8392c" } },
     { "label": "Blue pill", "overrides": { "highlight-bg-color": "#2c8ec8" } },

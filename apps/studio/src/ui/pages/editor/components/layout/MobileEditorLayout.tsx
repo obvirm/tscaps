@@ -149,6 +149,7 @@ export function MobileEditorLayout({ videoBox, playbackControls, sidebar, videoA
           height: `${pct * 100}%`,
           transition: isDragging ? 'none' : 'height 200ms ease-out',
         }}
+        data-tscaps-sidebar
       >
         <div
           className="flex items-center justify-center py-2 cursor-row-resize touch-none shrink-0"

@@ -53,7 +53,7 @@ const SIZE_CLASS: Record<AppDialogSize, string> = {
 };
 
 const TITLE = 'text-md font-semibold tracking-[-0.022em] text-fg-primary m-0';
-const DESCRIPTION = 'text-sm text-fg-secondary leading-normal m-0';
+const DESCRIPTION = 'text-sm text-fg-secondary leading-normal m-0 break-words';
 
 /**
  * Centered modal chrome shared by every dialog in the app. Radix

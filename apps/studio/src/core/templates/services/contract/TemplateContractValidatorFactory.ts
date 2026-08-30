@@ -23,6 +23,7 @@ import { UnknownFieldsTemplateJsonContractRule } from '@core/templates/services/
 import { RedeclaredControlsTemplateJsonContractRule } from '@core/templates/services/contract/RedeclaredControlsTemplateJsonContractRule';
 import { StyleControlsTemplateJsonContractRule } from '@core/templates/services/contract/StyleControlsTemplateJsonContractRule';
 import { VariantsTemplateJsonContractRule } from '@core/templates/services/contract/VariantsTemplateJsonContractRule';
+import { CategoryTemplateJsonContractRule } from '@core/templates/services/contract/CategoryTemplateJsonContractRule';
 
 /**
  * Builds the validator with the standard rule set. This is the single
@@ -61,6 +62,7 @@ export class TemplateContractValidatorFactory {
         new StyleControlsTemplateJsonContractRule(this.styleControlCatalog),
         new RedeclaredControlsTemplateJsonContractRule(),
         new VariantsTemplateJsonContractRule(),
+        new CategoryTemplateJsonContractRule(),
       ],
     );
   }

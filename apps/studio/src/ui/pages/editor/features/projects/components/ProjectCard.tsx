@@ -1,9 +1,8 @@
 import { memo, useEffect, useState } from 'react';
-import { Trash2, Download } from 'lucide-react';
 import type { ProjectMetadata } from '@core/projects/domain/ProjectMetadata';
 import type { ProjectThumbnailSource } from '@core/projects/domain/ProjectThumbnailSource';
 import { ConfirmDialog } from '@ui/_shared/components/Dialog/ConfirmDialog';
-import { Tooltip } from '@ui/_shared/components/Tooltip/Tooltip';
+import { ProjectActionsMenu } from '@ui/pages/editor/features/projects/components/ProjectActionsMenu';
 
 interface ProjectCardProps {
   project: ProjectMetadata;
@@ -19,35 +18,15 @@ const CARD =
   'hover:border-edge-medium ' +
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-0';
 
-const ACTION_BTN_BASE =
-  'w-7 h-7 inline-flex items-center justify-center bg-surface-1/80 backdrop-blur-sm ' +
-  'border border-edge-medium rounded-xs text-fg-secondary cursor-pointer ' +
-  'transition-colors duration-quick ease-standard ' +
-  'focus-visible:outline-none focus-visible:border-accent';
-
-const ACTION_BTN = `${ACTION_BTN_BASE} hover:bg-surface-2 hover:text-fg-primary`;
-const ACTION_BTN_DANGER = `${ACTION_BTN_BASE} hover:bg-danger/15 hover:border-danger/40 hover:text-danger`;
-
-const STATUS_PILL_BASE =
-  'inline-flex items-center font-mono text-3xs uppercase tracking-[0.06em] ' +
-  'px-1.5 py-0.5 rounded-pill';
-const STATUS_TRANSCRIBED = `${STATUS_PILL_BASE} bg-accent/10 text-info`;
-const STATUS_PENDING = `${STATUS_PILL_BASE} bg-warning/10 text-warning`;
+const DURATION_BADGE =
+  'absolute bottom-1.5 right-1.5 tabular-nums font-mono text-2xs text-white ' +
+  'bg-black/70 backdrop-blur-sm px-1.5 py-0.5 rounded-xs';
 
 export const ProjectCard = memo(function ProjectCard({ project, onOpen, onDelete, onExport }: ProjectCardProps) {
   const thumbUrl = useThumbnailRenderUrl(project.thumbnail);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
-
-  const handleDelete = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setConfirmOpen(true);
-  };
-
-  const handleExport = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (onExport) onExport(project.id);
-  };
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const handleConfirmDelete = async () => {
     setDeleting(true);
@@ -59,6 +38,9 @@ export const ProjectCard = memo(function ProjectCard({ project, onOpen, onDelete
     }
   };
 
+  const requestDelete = () => setConfirmOpen(true);
+  const requestExport = () => { if (onExport) onExport(project.id); };
+
   return (
     <>
       <div
@@ -68,39 +50,29 @@ export const ProjectCard = memo(function ProjectCard({ project, onOpen, onDelete
         tabIndex={0}
         onKeyDown={(e) => { if (e.key === 'Enter') onOpen(project.id); }}
       >
-        <div className="aspect-video bg-black flex items-center justify-center overflow-hidden">
+        <div className="relative aspect-video bg-black flex items-center justify-center overflow-hidden">
           {thumbUrl
             ? <img src={thumbUrl} alt="" className="w-full h-full object-cover block" />
             : <div className="font-mono text-2xs uppercase tracking-[0.08em] text-fg-faint">No preview</div>
           }
-        </div>
-        <div className="px-3.5 pt-3 pb-3.5 flex flex-col gap-1.5 min-w-0">
-          <div className="text-md font-medium text-fg-primary truncate" title={project.name}>{project.name}</div>
-          <div className="flex items-center justify-between gap-2 text-xs text-fg-muted">
-            <span className="tabular-nums">{formatDate(project.updatedAt)}</span>
-            {project.hasDocument
-              ? <span className={STATUS_TRANSCRIBED}>Transcribed</span>
-              : <span className={STATUS_PENDING}>Pending</span>
-            }
-          </div>
-          <div className="text-2xs text-fg-faint truncate" title={project.video.fileName}>{project.video.fileName}</div>
-        </div>
-        <div
-          className="absolute top-2.5 right-2.5 flex gap-1.5 opacity-0 transition-opacity duration-quick ease-standard group-hover/card:opacity-100 group-focus-within/card:opacity-100"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {onExport && (
-            <Tooltip text="Export project" position="bottom">
-              <button className={ACTION_BTN} onClick={handleExport} aria-label="Export project">
-                <Download size={14} />
-              </button>
-            </Tooltip>
+          {project.video.duration > 0 && (
+            <span className={DURATION_BADGE}>{formatDuration(project.video.duration)}</span>
           )}
-          <Tooltip text="Delete project" position="bottom">
-            <button className={ACTION_BTN_DANGER} onClick={handleDelete} aria-label="Delete project">
-              <Trash2 size={14} />
-            </button>
-          </Tooltip>
+        </div>
+        <div className="px-3 pt-2.5 pb-2 flex flex-col gap-1 min-w-0">
+          <div className="text-sm font-medium text-fg-primary truncate" title={project.name}>{project.name}</div>
+          <div className="flex items-center gap-2 text-2xs text-fg-faint">
+            <span className="tabular-nums flex-1 truncate">{formatDate(project.updatedAt)}</span>
+            <div onClick={(e) => e.stopPropagation()}>
+              <ProjectActionsMenu
+                open={menuOpen}
+                onOpenChange={setMenuOpen}
+                canExport={onExport !== undefined}
+                onExport={requestExport}
+                onDelete={requestDelete}
+              />
+            </div>
+          </div>
         </div>
       </div>
       <ConfirmDialog
@@ -144,6 +116,15 @@ function useThumbnailRenderUrl(source: ProjectThumbnailSource | null): string | 
   }, [source]);
   /* eslint-enable react-hooks/set-state-in-effect */
   return url;
+}
+
+function formatDuration(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  const hours = Math.floor(total / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  const pad2 = (n: number) => n.toString().padStart(2, '0');
+  return hours > 0 ? `${hours}:${pad2(mins)}:${pad2(secs)}` : `${mins}:${pad2(secs)}`;
 }
 
 function formatDate(date: Date): string {

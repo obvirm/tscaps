@@ -25,6 +25,8 @@ export interface SegmentSearchControls {
   nextMatch(): void;
   prevMatch(): void;
   locate(): void;
+  /** Jumps the list to a segment of the caller's choosing. */
+  scrollTo(segmentId: string): void;
 }
 
 /**
@@ -108,10 +110,14 @@ export function useSegmentSearchControls(
     setMatchIdx((i) => (matches.length === 0 ? 0 : (i - 1 + matches.length) % matches.length));
   }, [matches.length]);
 
+  const scrollTo = useCallback((segmentId: string) => {
+    setScrollRequest({ segmentId, token: Date.now() });
+  }, []);
+
   const locate = useCallback(() => {
     if (!activeSegmentId) return;
-    setScrollRequest({ segmentId: activeSegmentId, token: Date.now() });
-  }, [activeSegmentId]);
+    scrollTo(activeSegmentId);
+  }, [activeSegmentId, scrollTo]);
 
   return {
     searchOpen,
@@ -128,5 +134,6 @@ export function useSegmentSearchControls(
     nextMatch,
     prevMatch,
     locate,
+    scrollTo,
   };
 }

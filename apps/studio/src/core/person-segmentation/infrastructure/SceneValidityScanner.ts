@@ -1,17 +1,17 @@
 import type { GrayscaleFrame } from '@core/person-segmentation/domain/GrayscaleFrame';
 import type { PoseFeatures } from '@core/person-segmentation/domain/PoseFeatures';
-import type { PersonSegmentationWindow } from '@core/person-segmentation/domain/PersonSegmentationWindow';
-import { PersonSegmentationThresholds } from '@core/person-segmentation/domain/PersonSegmentationThresholds';
+import type { TimeRangeSet } from '@core/person-segmentation/domain/TimeRangeSet';
 import type { FrameMotionCalculator } from '@core/person-segmentation/services/FrameMotionCalculator';
 import type { GrayscaleDownscaler } from '@core/person-segmentation/services/GrayscaleDownscaler';
 import type { LaplacianVarianceCalculator } from '@core/person-segmentation/services/LaplacianVarianceCalculator';
-import type { PassingSample, PassingWindowFinder } from '@core/person-segmentation/services/PassingWindowFinder';
+import type { PassingSample } from '@core/person-segmentation/domain/PassingSample';
 import type { PersonBboxCalculator } from '@core/person-segmentation/services/PersonBboxCalculator';
+import type { RunProfiler } from '@core/person-segmentation/domain/RunProfiler';
 import type { PoseFeatureExtractor } from '@core/person-segmentation/services/PoseFeatureExtractor';
+import type { DecodedVideoFrame, PrefetchingVideoFrameReader } from '@core/person-segmentation/services/PrefetchingVideoFrameReader';
 import type { SamplePassEvaluator } from '@core/person-segmentation/services/SamplePassEvaluator';
 import type { ShoulderDriftCalculator } from '@core/person-segmentation/services/ShoulderDriftCalculator';
-import type { VideoFrameBitmapCapturer } from '@core/person-segmentation/services/VideoFrameBitmapCapturer';
-import type { VideoFrameSeeker } from '@core/person-segmentation/services/VideoFrameSeeker';
+import type { VideoFramePixelBuffer } from '@core/person-segmentation/services/VideoFramePixelBuffer';
 import type { PersonSegmenterWorkerClient } from '@core/person-segmentation/infrastructure/PersonSegmenterWorkerClient';
 
 interface PreviousSampleState {
@@ -19,67 +19,105 @@ interface PreviousSampleState {
   readonly features: PoseFeatures | null;
 }
 
+/** Sample timestamps in walk order, alongside the range each one belongs to. */
+interface SamplePlan {
+  readonly timestamps: ReadonlyArray<number>;
+  readonly rangeIndexes: ReadonlyArray<number>;
+}
+
 /**
- * Walks a video at a fixed sample fps and returns the contiguous time
- * ranges whose frames meet every scene-validity threshold — a visible
- * person of the required visibility, low frame motion, low shoulder
- * drift, and sharp enough content. Each sample runs pose detection
- * through the supplied worker client; blur and motion are measured on
- * the caller's downscaler.
+ * Walks the given ranges of a video at a fixed sample fps and reports,
+ * per sample, whether that frame meets every scene-validity threshold
+ * — a visible person of the required visibility, low frame motion, low
+ * shoulder drift, and sharp enough content. Each sample runs pose
+ * detection through the supplied worker client; blur and motion are
+ * measured on the caller's downscaler.
+ *
+ * Samples come back raw rather than grouped into scenes: a scene can
+ * run across two ranges walked at different times, and only a caller
+ * holding every sample taken so far can see that.
  *
  * Progress is reported through `onFraction` as `[0, 1]` over the
- * video's duration. Aborting the supplied signal stops the walk at
+ * samples planned. Aborting the supplied signal stops the walk at
  * the next sample and throws.
  */
 export class SceneValidityScanner {
 
   constructor(
-    private readonly seeker: VideoFrameSeeker,
-    private readonly capturer: VideoFrameBitmapCapturer,
+    private readonly frameReader: PrefetchingVideoFrameReader,
+    private readonly pixelBuffer: VideoFramePixelBuffer,
     private readonly blurCalculator: LaplacianVarianceCalculator,
     private readonly motionCalculator: FrameMotionCalculator,
     private readonly poseExtractor: PoseFeatureExtractor,
     private readonly personBboxCalculator: PersonBboxCalculator,
     private readonly driftCalculator: ShoulderDriftCalculator,
     private readonly evaluator: SamplePassEvaluator,
-    private readonly windowFinder: PassingWindowFinder,
     private readonly workerClient: PersonSegmenterWorkerClient,
+    private readonly profiler: RunProfiler,
   ) {}
 
   async scan(
     video: HTMLVideoElement,
     downscaler: GrayscaleDownscaler,
     sampleFps: number,
+    ranges: TimeRangeSet,
     signal: AbortSignal,
     onFraction: (fraction: number) => void,
-  ): Promise<ReadonlyArray<PersonSegmentationWindow>> {
-    const duration = video.duration;
-    const step = 1 / sampleFps;
+  ): Promise<ReadonlyArray<PassingSample>> {
+    const plan = this.planSamples(ranges, sampleFps);
     const samples: PassingSample[] = [];
+    // Motion and shoulder drift are read against the previous sample,
+    // which only means anything within one contiguous stretch: across
+    // a gap the two frames are seconds apart and every shot reads as a
+    // jump cut. Each range therefore starts from nothing.
     let previous: PreviousSampleState = { grayscale: null, features: null };
-    for (let timestamp = 0; timestamp < duration; timestamp += step) {
-      signal.throwIfAborted();
-      const evaluated = await this.sampleOne(video, downscaler, timestamp, previous);
-      samples.push({ t: timestamp, passes: evaluated.passes });
+    let currentRangeIndex = -1;
+    let sampled = 0;
+    for await (const frame of this.frameReader.read(video, plan.timestamps, signal)) {
+      const rangeIndex = plan.rangeIndexes[sampled]!;
+      if (rangeIndex !== currentRangeIndex) {
+        previous = { grayscale: null, features: null };
+        currentRangeIndex = rangeIndex;
+      }
+      const evaluated = await this.sampleOne(frame, downscaler, previous);
+      samples.push({ t: frame.timestamp, passes: evaluated.passes });
       previous = { grayscale: evaluated.grayscale, features: evaluated.features };
-      onFraction(Math.min(1, (timestamp + step) / duration));
+      sampled++;
+      onFraction(sampled / plan.timestamps.length);
     }
-    return this.windowFinder.find(samples, PersonSegmentationThresholds.WINDOW_DURATION_MIN_SEC);
+    return samples;
+  }
+
+  private planSamples(ranges: TimeRangeSet, sampleFps: number): SamplePlan {
+    const step = 1 / sampleFps;
+    const timestamps: number[] = [];
+    const rangeIndexes: number[] = [];
+    ranges.list().forEach((range, rangeIndex) => {
+      for (let timestamp = range.start; timestamp < range.end; timestamp += step) {
+        timestamps.push(timestamp);
+        rangeIndexes.push(rangeIndex);
+      }
+    });
+    return { timestamps, rangeIndexes };
   }
 
   private async sampleOne(
-    video: HTMLVideoElement,
+    frame: DecodedVideoFrame,
     downscaler: GrayscaleDownscaler,
-    timestamp: number,
     previous: PreviousSampleState,
   ): Promise<{ passes: boolean; grayscale: GrayscaleFrame; features: PoseFeatures | null }> {
-    await this.seeker.seekTo(video, timestamp);
-    const fullGrayscale = downscaler.fullFrame(video);
-    const features = await this.detectPose(video, timestamp);
-    const personBlur = this.measurePersonBlur(video, downscaler, features);
-    const frameBlur = this.blurCalculator.fullFrame(fullGrayscale);
-    const frameMotion = this.motionCalculator.meanAbsoluteDifference(fullGrayscale, previous.grayscale);
-    const drift = this.driftCalculator.percentBetween(features, previous.features, video.videoWidth, video.videoHeight);
+    // Held before the bitmap goes to the worker, which transfers it:
+    // the person-blur crop is only known once the pose comes back.
+    const pixels = this.profiler.measureSync('scan:hold-frame', () => this.pixelBuffer.hold(frame.bitmap));
+    const fullGrayscale = this.profiler.measureSync('scan:downscale', () => downscaler.fullFrame(pixels));
+    const features = await this.detectPose(frame);
+    const personBlur = this.profiler.measureSync('scan:person-blur', () => this.measurePersonBlur(pixels, downscaler, features));
+    const frameBlur = this.profiler.measureSync('scan:frame-blur', () => this.blurCalculator.fullFrame(fullGrayscale));
+    const frameMotion = this.profiler.measureSync(
+      'scan:motion',
+      () => this.motionCalculator.meanAbsoluteDifference(fullGrayscale, previous.grayscale),
+    );
+    const drift = this.driftCalculator.percentBetween(features, previous.features, pixels.width, pixels.height);
     const passes = this.evaluator.passes({
       features,
       frameBlur,
@@ -90,24 +128,26 @@ export class SceneValidityScanner {
     return { passes, grayscale: fullGrayscale, features };
   }
 
-  private async detectPose(video: HTMLVideoElement, timestamp: number): Promise<PoseFeatures | null> {
-    const bitmap = await this.capturer.capture(video);
-    const landmarks = await this.workerClient.detectPose(bitmap, Math.round(timestamp * 1000));
+  private async detectPose(frame: DecodedVideoFrame): Promise<PoseFeatures | null> {
+    const landmarks = await this.profiler.measure(
+      'scan:pose-worker',
+      () => this.workerClient.detectPose(frame.bitmap, Math.round(frame.timestamp * 1000)),
+    );
     return this.poseExtractor.extract(landmarks);
   }
 
   private measurePersonBlur(
-    video: HTMLVideoElement,
+    pixels: OffscreenCanvas,
     downscaler: GrayscaleDownscaler,
     features: PoseFeatures | null,
   ): number {
     const bbox = this.personBboxCalculator.compute(features);
     if (bbox === null) return 0;
-    const sourceX = bbox.minX * video.videoWidth;
-    const sourceY = bbox.minY * video.videoHeight;
-    const sourceWidth = (bbox.maxX - bbox.minX) * video.videoWidth;
-    const sourceHeight = (bbox.maxY - bbox.minY) * video.videoHeight;
-    const personGrayscale = downscaler.region(video, sourceX, sourceY, sourceWidth, sourceHeight);
+    const sourceX = bbox.minX * pixels.width;
+    const sourceY = bbox.minY * pixels.height;
+    const sourceWidth = (bbox.maxX - bbox.minX) * pixels.width;
+    const sourceHeight = (bbox.maxY - bbox.minY) * pixels.height;
+    const personGrayscale = downscaler.region(pixels, sourceX, sourceY, sourceWidth, sourceHeight);
     return this.blurCalculator.fullFrame(personGrayscale);
   }
 }

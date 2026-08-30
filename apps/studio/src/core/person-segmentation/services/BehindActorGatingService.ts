@@ -17,7 +17,8 @@ import { BEHIND_ACTOR_TEMPLATE_CONFIG_DEFAULT } from '@core/person-segmentation/
  * condition qualifies every segment), and its entire time range fits
  * inside a single detector window — a segment straddling a window
  * boundary would flicker in and out of the effect mid-playback, so it
- * is treated as inactive.
+ * is treated as inactive. `null` windows mean the scene scan has not
+ * run and qualify nothing.
  */
 export class BehindActorGatingService {
 
@@ -29,7 +30,7 @@ export class BehindActorGatingService {
    */
   buildActiveSegmentIds(
     document: Document,
-    validWindows: ReadonlyArray<PersonSegmentationWindow>,
+    validWindows: ReadonlyArray<PersonSegmentationWindow> | null,
     overrides: ReadonlyMap<string, BehindActorSegmentOverride>,
     templateConfigBySectionKind: ReadonlyMap<string, BehindActorTemplateConfig>,
   ): ReadonlySet<string> {
@@ -45,10 +46,35 @@ export class BehindActorGatingService {
     return activeIds;
   }
 
+  /**
+   * Count of the segments the effect is active on inside the sections
+   * routed to `sheetId`. Same rules as `buildActiveSegmentIds`, but
+   * scoped to one sheet so callers can report a per-sheet outcome
+   * without confusing the user with matches that belong elsewhere.
+   */
+  countActiveSegmentsInSheet(
+    document: Document,
+    sheetId: string,
+    validWindows: ReadonlyArray<PersonSegmentationWindow> | null,
+    overrides: ReadonlyMap<string, BehindActorSegmentOverride>,
+    templateConfig: BehindActorTemplateConfig,
+  ): number {
+    let count = 0;
+    for (const section of document.sections) {
+      if (section.kind !== sheetId) continue;
+      for (const segment of section.segments) {
+        if (this.isEffectivelyOn(segment, overrides.get(segment.id) ?? 'auto', validWindows, templateConfig)) {
+          count++;
+        }
+      }
+    }
+    return count;
+  }
+
   isEffectivelyOn(
     segment: Segment,
     override: BehindActorSegmentOverride,
-    validWindows: ReadonlyArray<PersonSegmentationWindow>,
+    validWindows: ReadonlyArray<PersonSegmentationWindow> | null,
     templateConfig: BehindActorTemplateConfig,
   ): boolean {
     if (override === 'force-on') return true;
@@ -65,8 +91,9 @@ export class BehindActorGatingService {
 
   private isSegmentFullyContainedInAnyWindow(
     segment: Segment,
-    windows: ReadonlyArray<PersonSegmentationWindow>,
+    windows: ReadonlyArray<PersonSegmentationWindow> | null,
   ): boolean {
+    if (windows === null) return false;
     for (const window of windows) {
       if (window.start <= segment.time.start && segment.time.end <= window.end) return true;
     }

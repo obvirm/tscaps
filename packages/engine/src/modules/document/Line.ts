@@ -74,9 +74,21 @@ export class Line<M = unknown> {
       [CssVariable.LINE_ALREADY_NARRATED_ENDS]: `${(segEnd - currentTime).toFixed(3)}s`,
       [CssVariable.LINE_ALREADY_NARRATED_DURATION]: `${(segEnd - lineEnd).toFixed(3)}s`,
 
+      [CssVariable.LINE_CHAR_COUNT]: String(this.getCharCount()),
+
       [CssVariable.WORD_COUNT]: String(this.words.length),
       [CssVariable.LAST_WORD_CHAR_COUNT]: String(this.getLastWordCharCount()),
     };
+  }
+
+  /**
+   * Code points the line paints, counting one separator between
+   * adjacent words. Measured over display text, so it tracks what a
+   * reader sees rather than the transcript behind it.
+   */
+  private getCharCount(): number {
+    const separators = Math.max(this.words.length - 1, 0);
+    return this.words.reduce((sum, word) => sum + [...word.displayText].length, separators);
   }
 
   private getLastWordCharCount(): number {

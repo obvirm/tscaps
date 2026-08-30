@@ -1,4 +1,5 @@
-import type { CssMinifier, CssVarReferenceScanner } from '@tscaps/engine';
+import type { CssFilterReferenceScanner, CssMinifier, CssVarReferenceScanner } from '@tscaps/engine';
+import type { ReferencedSvgFilterVariableScanner } from '@core/sheets/services/ReferencedSvgFilterVariableScanner';
 
 const CONTROL_VARIABLE_PREFIX = '--tscaps-';
 
@@ -27,11 +28,17 @@ export interface StyleSources {
  *
  * Results are control ids rather than variable names, so a caller can
  * match them against the fields it renders.
+ *
+ * One reading survives that the render does not: a control read only
+ * inside an `@keyframes` block counts as read even when no declaration
+ * animates that block any more.
  */
 export class DisconnectedControlFinder {
   constructor(
     private readonly minifier: CssMinifier,
     private readonly scanner: CssVarReferenceScanner,
+    private readonly filterReferenceScanner: CssFilterReferenceScanner,
+    private readonly filterVariableScanner: ReferencedSvgFilterVariableScanner,
   ) {}
 
   find(authored: StyleSources, current: StyleSources): ReadonlySet<string> {
@@ -53,9 +60,20 @@ export class DisconnectedControlFinder {
     // parked in one satisfies the template loader's authoring check
     // without anything reading it, and the question here is what takes
     // effect.
-    this.collect(this.scanner.scan(this.minifier.minify(sources.css)), found);
-    this.collect(this.scanner.scan(sources.filtersSvg), found);
+    const css = this.minifier.minify(sources.css);
+    this.collect(this.scanner.scan(css), found);
+    this.collect(this.filterVariablesRead(sources.filtersSvg, css), found);
     return found;
+  }
+
+  /**
+   * What the filter document contributes is decided by the stylesheet:
+   * a filter reaches a caption only through the `url(#id)` that points
+   * at it, so dropping that reference takes the filter's controls out
+   * of use as surely as deleting the filter would.
+   */
+  private filterVariablesRead(filtersSvg: string, minifiedCss: string): ReadonlySet<string> {
+    return this.filterVariableScanner.scan(filtersSvg, this.filterReferenceScanner.scan(minifiedCss));
   }
 
   private collect(names: ReadonlySet<string>, into: Set<string>): void {

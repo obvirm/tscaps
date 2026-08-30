@@ -2,6 +2,7 @@ import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { VideoState } from '@core/editor/domain/VideoState';
 import type { ProjectRepository } from '@core/projects/domain/ProjectRepository';
 import type { OriginalVideoDownloadStore } from '@core/projects/store/OriginalVideoDownloadStore';
+import { OriginalVideoDownloadFailedError } from '@core/projects/domain/errors/OriginalVideoDownloadFailedError';
 
 const FALLBACK_FILE_NAME = 'video';
 const FALLBACK_MIME_TYPE = 'application/octet-stream';
@@ -48,16 +49,20 @@ export class StartOriginalVideoDownloadAction {
       );
       if (signal?.aborted) return;
       if (!blob) {
-        this.downloadStore.fail('network');
+        this.failWith(new Error('The project has no original video bytes to fetch'));
         return;
       }
       this.publishLoadedBlob(blob, snapshot.video);
       this.downloadStore.markReady();
     } catch (cause) {
       if (this.isAbort(cause, signal)) return;
-      console.error('[original-video] download failed', cause);
-      this.downloadStore.fail('network');
+      this.failWith(cause);
     }
+  }
+
+  private failWith(cause: unknown): void {
+    console.error('[original-video] download failed', cause);
+    this.downloadStore.fail(new OriginalVideoDownloadFailedError({ cause }));
   }
 
   private isAbort(error: unknown, signal: AbortSignal | undefined): boolean {

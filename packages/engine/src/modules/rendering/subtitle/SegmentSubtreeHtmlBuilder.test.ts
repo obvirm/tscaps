@@ -10,6 +10,7 @@ import { TimeFragment } from '@modules/document/TimeFragment';
 import { Word } from '@modules/document/Word';
 import { InlineStyleEmitter } from '@modules/rendering/styles/InlineStyleEmitter';
 import { ElementRenderOverrides } from '@modules/rendering/types/ElementRenderOverrides';
+import { ElementWidths } from '@modules/rendering/subtitle/ElementWidths';
 import { SegmentSubtreeHtmlBuilder, type SegmentSubtreeStyleInput } from '@modules/rendering/subtitle/SegmentSubtreeHtmlBuilder';
 import { GraphemeWordSplitter } from '@modules/splitting/GraphemeWordSplitter';
 
@@ -31,6 +32,7 @@ function styleInput(addressableElementIds: ReadonlySet<string>): SegmentSubtreeS
     inlineStyleEmitter: new InlineStyleEmitter(new Set()),
     textDirection: 'ltr',
     addressableElementIds,
+    elementWidths: ElementWidths.empty(),
   };
 }
 

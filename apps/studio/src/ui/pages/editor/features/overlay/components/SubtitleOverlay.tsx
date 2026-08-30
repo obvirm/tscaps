@@ -98,7 +98,6 @@ export const SubtitleOverlay = memo(function SubtitleOverlay({
   useLayoutEffect(() => {
     if (!scaler) return;
     manipulationController.setScaler(scaler);
-    selectionController.setScaler(scaler);
     const pushHeight = () => overlayController.setRenderHeight(scaler.clientHeight);
     pushHeight();
     const observer = new ResizeObserver(pushHeight);
@@ -106,9 +105,8 @@ export const SubtitleOverlay = memo(function SubtitleOverlay({
     return () => {
       observer.disconnect();
       manipulationController.setScaler(null);
-      selectionController.setScaler(null);
     };
-  }, [scaler, overlayController, manipulationController, selectionController]);
+  }, [scaler, overlayController, manipulationController]);
 
   return (
     <OverlayControllerProvider value={overlayController}>

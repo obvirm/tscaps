@@ -1,10 +1,17 @@
 import { memo, useMemo } from 'react';
 import { Ban, CornerDownRight } from 'lucide-react';
 import type { ElementAnimation } from '@core/elements/domain/ElementAnimation';
+import type { ElementKind } from '@core/elements/domain/ElementKind';
 import { ElementAnimationCard } from '@ui/_shared/components/element-fields/ElementAnimationCard';
 import { useElements } from '@ui/_shared/contexts/modules/ElementsContext';
 
 interface ElementAnimationGridProps {
+  /**
+   * The kind of element this part answers for. An entrance the library
+   * wrote for one kind is offered there and nowhere else, so the grid
+   * has to know which one it is showing.
+   */
+  animatedKind: ElementKind;
   /** What this part was told to do, or `undefined` for whatever reaches it. */
   animation: ElementAnimation | undefined;
   /** What the answer nobody gave is called here: an ancestor's, or the template's. */
@@ -58,6 +65,7 @@ function labelFor(presetId: string): string {
  * user or a template can reach.
  */
 export const ElementAnimationGrid = memo(function ElementAnimationGrid({
+  animatedKind,
   animation,
   inheritedLabel,
   inheritedPresetId,
@@ -66,7 +74,7 @@ export const ElementAnimationGrid = memo(function ElementAnimationGrid({
   onPick,
 }: ElementAnimationGridProps) {
   const { animationCatalog } = useElements().services;
-  const presets = useMemo(() => animationCatalog.all(), [animationCatalog]);
+  const presets = useMemo(() => animationCatalog.forKind(animatedKind), [animationCatalog, animatedKind]);
 
   // Whether the grid can name the unanswered state is a fact about the
   // grid, not about what is answered right now: a card that appeared on

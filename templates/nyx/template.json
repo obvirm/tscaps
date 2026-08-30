@@ -1,7 +1,12 @@
 {
   "name": "Nyx",
-  "categories": [
-    "decorative"
+  "category": "lab",
+  "variants": [
+    { "label": "Green", "overrides": { "primary-color": "#00ff41" } },
+    { "label": "Amber", "overrides": { "primary-color": "#ffb000" } },
+    { "label": "Cyan", "overrides": { "primary-color": "#33ccff" } },
+    { "label": "Magenta", "overrides": { "primary-color": "#ff6ec7" } },
+    { "label": "Violet", "overrides": { "primary-color": "#c08cff" } }
   ],
   "typography": {
     "fontFamily": "VT323",
@@ -46,18 +51,6 @@
       "default": "#7d8590",
       "group": "style",
       "subgroup": "colors"
-    },
-    {
-      "id": "glow-radius",
-      "label": "Glow",
-      "type": "float",
-      "default": 0.18,
-      "min": 0,
-      "max": 0.45,
-      "step": 0.01,
-      "unit": "em",
-      "group": "style",
-      "subgroup": "appearance"
     },
     {
       "id": "chrome-scale",

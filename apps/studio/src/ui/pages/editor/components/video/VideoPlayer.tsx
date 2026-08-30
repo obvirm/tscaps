@@ -24,7 +24,7 @@ interface VideoPlayerProps {
  * does not need to know which surface is active.
  */
 export const VideoPlayer = memo(function VideoPlayer({ containerRef, video, onClick }: VideoPlayerProps) {
-  const showLowResBadge = video.previewIsProxy;
+  const showLowResBadge = video.preview?.kind === 'proxy';
   return (
     <>
       <div

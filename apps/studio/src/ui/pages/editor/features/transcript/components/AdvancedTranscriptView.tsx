@@ -138,7 +138,10 @@ export const AdvancedTranscriptView = memo(function AdvancedTranscriptView({
     getItemKey: (index) => sorted[index]!.segment.id,
   });
 
-  useTranscriptAutoScroll({ virtualizer, scrollReady: !!scrollEl, sorted, activeSegmentId, isPlaying, scrollRequest });
+  useTranscriptAutoScroll({
+    virtualizer, scrollReady: !!scrollEl, sorted, activeSegmentId, isPlaying, scrollRequest,
+    pickActive: pickSnapshot.isActive,
+  });
 
   const items = virtualizer.getVirtualItems();
 

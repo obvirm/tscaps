@@ -1,7 +1,42 @@
 {
   "name": "Freya",
-  "categories": [
-    "impact"
+  "category": "viral",
+  "variants": [
+    {
+      "label": "White",
+      "overrides": {
+        "primary-color": "#ffffff",
+        "highlight-color": "#ffffff"
+      }
+    },
+    {
+      "label": "Amber",
+      "overrides": {
+        "primary-color": "#ffd866",
+        "highlight-color": "#ffd866"
+      }
+    },
+    {
+      "label": "Cyan",
+      "overrides": {
+        "primary-color": "#7be6ff",
+        "highlight-color": "#7be6ff"
+      }
+    },
+    {
+      "label": "Green",
+      "overrides": {
+        "primary-color": "#86ff86",
+        "highlight-color": "#86ff86"
+      }
+    },
+    {
+      "label": "Pink",
+      "overrides": {
+        "primary-color": "#ff86c5",
+        "highlight-color": "#ff86c5"
+      }
+    }
   ],
   "typography": {
     "fontFamily": "Anton",

@@ -42,11 +42,17 @@ export interface SubtitleStyle {
  * A drawable handle for one rendered subtitle frame. The consumer
  * paints it into its own 2D context through `draw`.
  *
- * The underlying raster is owned by the renderer that produced this
- * frame and stays valid only until the next `getFrames` call on the
- * same renderer or until `close`. Holding a `SubtitleFrame` past
- * either event leaves `draw` painting whatever state has since
- * replaced the raster.
+ * The underlying raster belongs to the **batch** that produced this
+ * frame rather than to the renderer, and stays valid until `close`.
+ * Frames from separate batches can therefore be held and painted
+ * alongside each other.
+ *
+ * That is load-bearing, not incidental: a caller gathers a run of
+ * frames before it paints any of them, and a run can span a batch
+ * boundary. An implementation that recycled one surface across
+ * batches would leave every frame but the last painting a raster that
+ * has since been overwritten — silently, and only for the runs that
+ * happen to straddle the boundary.
  */
 export interface SubtitleFrame {
   /**
@@ -67,16 +73,15 @@ export interface SubtitleFrame {
  *
  * Usage:
  *   1. `open` once per document.
- *   2. Either `getFrames(timestamps)` per batch (with at most
- *      `getMaxBatchSize()` entries), or `getFrame(timestamp)` per
- *      individual timestamp.
+ *   2. `getFrames(timestamps)` per batch, advancing by the length of
+ *      what it returns.
  *   3. `close` when done.
  */
 export interface SubtitleFrameRenderer {
   /**
    * Prepares the renderer for `doc` and the set of styles its
    * Sections may reference. `styles` is keyed by `Section.kind`.
-   * Must complete before the first `getFrames`/`getFrame` call.
+   * Must complete before the first `getFrames` call.
    *
    * `videoFrameSource` is required when any style in `styles` has
    * `rendering.videoFrame.required` set, and may be omitted
@@ -92,43 +97,45 @@ export interface SubtitleFrameRenderer {
   ): Promise<void>;
 
   /**
-   * Maximum number of timestamps a single `getFrames` call accepts
-   * at the given output dimensions. Bounded by the renderer's memory
-   * budget and any platform raster-size caps. A caller that exceeds
-   * this may see the call fail outright.
+   * How many distinct pictures one batch can rasterize at the given
+   * output dimensions, bounded by the renderer's memory budget and by
+   * any platform raster-size caps.
+   *
+   * This is a count of pictures, not of timestamps: timestamps that
+   * paint the same thing share one, so a batch covers as much video as
+   * the captions hold still for. Offer `getFrames` as many timestamps
+   * as you are willing to look ahead and let it answer how far it
+   * reached.
    */
-  getMaxBatchSize(): Promise<number>;
+  getMaxTilesPerBatch(): Promise<number>;
 
   /**
-   * Renders subtitle frames for the given timestamps. The returned
-   * array has the same length and order as `timestamps`; an entry is
-   * `null` for timestamps where no Section is active.
+   * Renders subtitle frames for the given timestamps, in order. An
+   * entry is `null` for a timestamp where no Section is active.
    *
-   * The implementation may deduplicate internally: timestamps that
-   * hit the same visual state share a single raster tile inside the
-   * batch and their return entries point at the same tile.
+   * The returned array covers a **prefix** of `timestamps`: the batch
+   * ends where the pictures it holds run out of room, so ask for as
+   * many as you want to look ahead, take what comes back, and start
+   * the next call where this one stopped. It is never empty for a
+   * non-empty input, so a caller advancing by its length always makes
+   * progress. Asking for at most `getMaxTilesPerBatch()` timestamps
+   * always comes back whole, since no batch can need more pictures
+   * than it has timestamps.
+   *
+   * The implementation deduplicates internally: timestamps that hit
+   * the same visual state share a single raster tile inside the batch
+   * and their return entries point at the same tile.
    *
    * Frames produced by one call may share underlying raster
-   * resources; those resources stay valid until the next
-   * `getFrames`/`getFrame` call or until `close`.
+   * resources, and those resources belong to the call rather than to
+   * the renderer: a later `getFrames` does not disturb them.
    */
   getFrames(timestamps: ReadonlyArray<number>): Promise<Array<SubtitleFrame | null>>;
 
   /**
-   * Renders the subtitle frame for a single timestamp. Returns
-   * `null` when no Section is active at `timestamp`. Equivalent in
-   * result to `(await getFrames([timestamp]))[0]`.
-   *
-   * The returned frame's underlying raster follows the same
-   * lifetime as `getFrames` results: valid until the next
-   * `getFrames`/`getFrame` call or until `close`.
-   */
-  getFrame(timestamp: number): Promise<SubtitleFrame | null>;
-
-  /**
    * Releases any host-document state the renderer attached during
    * `open` (probe stylesheets, offscreen containers). After `close`,
-   * `getFrames`/`getFrame` return `null` for every timestamp.
+   * `getFrames` returns `null` for every timestamp.
    */
   close(): void;
 }

@@ -1,9 +1,6 @@
 {
   "name": "Luca",
-  "categories": [
-    "hook",
-    "impact"
-  ],
+  "category": "key-moments",
   "typography": {
     "fontFamily": "Caveat Variable",
     "fontWeight": 600,

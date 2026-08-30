@@ -29,11 +29,14 @@ const COMFORTABLE_TARGET_PX = 24;
  *
  * The two states have deliberately different lifetimes. The popover is
  * ephemeral and closes the moment attention goes anywhere else. The
- * selection is what the user picked, and it survives everything except
- * being replaced, cleared on purpose, or clicked away from *inside the
- * preview* — the only place with empty space that means "nothing". A
- * selection that died on a click into the sidebar would leave every
- * panel editing an element the preview no longer marks.
+ * selection is what the user picked, and it survives everything the
+ * pane it is tuned from does — every click into the sidebar keeps it,
+ * because a panel editing the picked element is the point of the pick.
+ * It clears on Escape, on being replaced, and on any click that lands
+ * neither on a segment nor in the sidebar: the preview's own empty
+ * space, the toolbar, the space around the video. Deselecting has to
+ * be easy, and "click away from all of it" is the gesture every editor
+ * shares.
  *
  * It survives the playhead moving off the element too. The selection
  * outliving what is on screen is the point: nothing about picking a word
@@ -51,7 +54,6 @@ export class OverlaySelectionController {
   private readonly directPickSubscribers = new Set<() => void>();
   private selection: OverlaySelection = null;
   private popover: OverlayPopoverAnchor = null;
-  private scaler: HTMLElement | null = null;
   private paintedSegmentIds: ReadonlySet<string> = new Set();
   private onPointerDown: ((event: PointerEvent) => void) | null = null;
   private onKey: ((event: KeyboardEvent) => void) | null = null;
@@ -69,8 +71,11 @@ export class OverlaySelectionController {
       if (!target) return;
       if (target.closest('[data-tscaps-segment-id]')) return;
       if (target.closest('[data-floating-layer]')) return;
-      if (this.landedInsidePreview(target)) this.clearSelection();
-      else this.closePopover();
+      if (target.closest('[data-tscaps-sidebar]')) {
+        this.closePopover();
+        return;
+      }
+      this.clearSelection();
     };
     this.onKey = (event) => {
       if (event.key !== 'Escape') return;
@@ -94,17 +99,7 @@ export class OverlaySelectionController {
     this.directPickSubscribers.clear();
     this.selection = null;
     this.popover = null;
-    this.scaler = null;
     this.paintedSegmentIds = new Set();
-  }
-
-  /**
-   * Registers the box the captions are painted in. Until one is
-   * registered, a click that misses every segment closes the popover but
-   * leaves the selection alone — the safe half of the behaviour.
-   */
-  setScaler(element: HTMLElement | null): void {
-    this.scaler = element;
   }
 
   subscribe(callback: () => void): () => void {
@@ -203,10 +198,6 @@ export class OverlaySelectionController {
     if (!this.popover) return;
     this.popover = null;
     this.emit();
-  }
-
-  private landedInsidePreview(target: HTMLElement): boolean {
-    return this.scaler !== null && this.scaler.contains(target);
   }
 
   private isTextEntry(target: HTMLElement): boolean {

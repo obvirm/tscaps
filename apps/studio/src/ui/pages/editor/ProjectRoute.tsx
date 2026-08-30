@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AlertTriangle } from 'lucide-react';
+import type { AppError } from '@core/errors/domain/AppError';
 import type { EditorState } from '@core/editor/domain/EditorState';
+import { ProjectOpenFailedError } from '@core/projects/domain/errors/ProjectOpenFailedError';
 import type { OriginalVideoDownloadStatus } from '@core/projects/domain/OriginalVideoDownloadStatus';
 import { ScreenWakeLock } from '@presentation/editor/controllers/ScreenWakeLock';
 import { useProjects } from '@ui/_shared/contexts/modules/ProjectsContext';
+import { useErrors } from '@ui/_shared/contexts/modules/ErrorsContext';
 import { useEditor } from '@ui/_shared/contexts/modules/EditorContext';
 import { useAppRoutes } from '@ui/_shared/hooks/useAppRoutes';
 import { EditorShellHost } from '@ui/pages/editor/EditorShellHost';
@@ -12,6 +15,7 @@ import { VideoRecoveryPrompt } from '@ui/pages/editor/components/VideoRecoveryPr
 import { ProjectLoadingIndicator } from '@ui/pages/editor/components/ProjectLoadingIndicator';
 import { Toast } from '@ui/_shared/components/Toast/Toast';
 import { UnsupportedTemplateDialog } from '@ui/pages/editor/components/dialogs/UnsupportedTemplateDialog';
+import { ProjectBlockedDialog } from '@ui/pages/editor/components/dialogs/ProjectBlockedDialog';
 
 interface LoadedInfo {
   videoFileName: string;
@@ -21,7 +25,7 @@ interface LoadedInfo {
 
 type LoadStatus =
   | { kind: 'loading' }
-  | { kind: 'error' }
+  | { kind: 'error'; error: AppError }
   | { kind: 'unsupported-template'; templateIds: ReadonlyArray<string> }
   | { kind: 'loaded'; info: LoadedInfo };
 
@@ -34,8 +38,8 @@ type LoadStatus =
  *
  * Three render states:
  *  - loading: brief blank while LoadProjectAction is in flight
- *  - error: the project does not exist or could not be loaded → kicks the
- *    user back to the dashboard
+ *  - error: the project does not exist or could not be loaded → says so
+ *    and offers the dashboard as the way out
  *  - loaded: either renders the EditorHost (if a video is attached) or
  *    a VideoRecoveryPrompt (if the cached blob was evicted)
  */
@@ -44,9 +48,27 @@ export function ProjectRoute() {
   const navigate = useNavigate();
   const projects = useProjects();
   const { store } = useEditor();
+  const { errorClassifier } = useErrors();
   const routes = useAppRoutes();
   const onBack = useCallback(() => navigate(routes.projectsList()), [navigate, routes]);
+  // Replaces the entry so the back button does not lead to a project
+  // URL that has already been established as unopenable.
+  const onLeaveUnopenable = useCallback(
+    () => navigate(routes.projectsList(), { replace: true }),
+    [navigate, routes],
+  );
   const [status, setStatus] = useState<LoadStatus>({ kind: 'loading' });
+  const [recoveryError, setRecoveryError] = useState<AppError | null>(null);
+  // The chosen file is the likely subject of the failure — one this
+  // browser cannot decode, most of the time — so the error is shown
+  // where it can be answered by choosing a different one.
+  const recoverVideo = useCallback((file: File) => {
+    setRecoveryError(null);
+    projects.actions.recoverVideo.execute(file).catch((cause: unknown) => {
+      console.error('[projects] recovering the project video failed', cause);
+      setRecoveryError(errorClassifier.wrap(cause));
+    });
+  }, [projects, errorClassifier]);
   const [snapshot, setSnapshot] = useState<EditorState>(() => store.snapshot());
   const [downloadStatus, setDownloadStatus] = useState<OriginalVideoDownloadStatus>(
     () => projects.originalVideoDownloadStore.status,
@@ -110,11 +132,10 @@ export function ProjectRoute() {
           },
         });
       })
-      .catch((err) => {
+      .catch((cause) => {
         if (controller.signal.aborted) return;
-        console.error(`[projects] failed to open project "${id}":`, err);
-        setStatus({ kind: 'error' });
-        navigate(routes.projectsList(), { replace: true });
+        console.error(`[projects] failed to open project "${id}":`, cause);
+        setStatus({ kind: 'error', error: new ProjectOpenFailedError({ cause }) });
       });
     return () => { controller.abort(); };
   }, [id, store, projects, navigate, routes]);
@@ -125,8 +146,14 @@ export function ProjectRoute() {
       <UnsupportedTemplateDialog
         open
         templateIds={status.templateIds}
-        onDismiss={() => navigate(routes.projectsList(), { replace: true })}
+        onDismiss={onLeaveUnopenable}
       />
+    );
+  }
+
+  if (status.kind === 'error') {
+    return (
+      <ProjectBlockedDialog error={status.error} onBackToProjects={onLeaveUnopenable} />
     );
   }
 
@@ -144,8 +171,9 @@ export function ProjectRoute() {
         <VideoRecoveryPrompt
           projectName={snapshot.projectName}
           videoFileName={status.info.videoFileName}
-          onSelect={(file) => { void projects.actions.recoverVideo.execute(file); }}
-          onCancel={() => navigate(routes.projectsList(), { replace: true })}
+          error={recoveryError}
+          onSelect={recoverVideo}
+          onCancel={onLeaveUnopenable}
         />
         <MissingTemplatesToast missingTemplateIds={status.info.substitutedTemplateIds} />
       </>

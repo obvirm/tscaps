@@ -4,7 +4,7 @@ import type { ContractViolation } from '@core/templates/domain/contract/Contract
 // Mirrors the keys of JsonTemplateSchema; update both together.
 const KNOWN_TOP_LEVEL_FIELDS: ReadonlySet<string> = new Set([
   'name',
-  'categories',
+  'category',
   'unsupportedUserAgents',
   'styleControls',
   'typography',

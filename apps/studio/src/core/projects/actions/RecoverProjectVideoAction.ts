@@ -1,4 +1,6 @@
 import type { EditorStore } from '@core/editor/store/EditorStore';
+import type { NonBlockingFailureReporter } from '@core/errors/services/NonBlockingFailureReporter';
+import { ProjectVideoStoreFailedError } from '@core/projects/domain/errors/ProjectVideoStoreFailedError';
 import type { PersonSegmentationCacheRepository } from '@core/person-segmentation/domain/PersonSegmentationCacheRepository';
 import type { ProjectRepository } from '@core/projects/domain/ProjectRepository';
 import type { PreviewProxy } from '@core/preview/domain/PreviewProxy';
@@ -17,6 +19,10 @@ import type { VideoSourceMetadata } from '@core/videos/domain/VideoSourceMetadat
  * Publishes a preview proxy from the recovered file before handing
  * control back to the editor, so the preview surface has something
  * to load the moment the splash clears.
+ *
+ * Keeping a copy of the file for later is best-effort and reported
+ * as a notice when it fails; the recovery itself still succeeds.
+ * Raises when the chosen file cannot be decoded at all.
  */
 export class RecoverProjectVideoAction {
   constructor(
@@ -27,6 +33,7 @@ export class RecoverProjectVideoAction {
     private readonly personSegmentationCache: PersonSegmentationCacheRepository,
     private readonly compatibilityChecker: VideoCompatibilityChecker,
     private readonly metadataProbe: VideoMetadataProbe,
+    private readonly storeFailureReporter: NonBlockingFailureReporter,
   ) {}
 
   async execute(file: File): Promise<void> {
@@ -38,7 +45,7 @@ export class RecoverProjectVideoAction {
 
     if (snap.video.url) URL.revokeObjectURL(snap.video.url);
 
-    await this.repository.cacheVideoBlob(projectId, file);
+    await this.keepCopyBestEffort(projectId, file);
     await this.personSegmentationCache.delete(projectId);
     await this.publishPreviewProxy(projectId, file);
     const metadata = await this.probeOriginalMetadata(file);
@@ -57,17 +64,31 @@ export class RecoverProjectVideoAction {
     });
   }
 
+  /**
+   * The file is in hand and the session can edit and export from it
+   * without ever reaching storage, so a device with no room left is
+   * not a reason to refuse the recovery the reader just performed.
+   * What is lost is the next open, which will ask for the file again
+   * — worth a notice, not a dead end.
+   */
+  private async keepCopyBestEffort(projectId: string, file: File): Promise<void> {
+    try {
+      await this.repository.cacheVideoBlob(projectId, file);
+    } catch (cause) {
+      // Reaching the recovery prompt at all means the server had no
+      // copy either, so the next open asks for the file again.
+      this.storeFailureReporter.report(new ProjectVideoStoreFailedError({ cause, hasRemoteCopy: false }));
+    }
+  }
+
   private async publishPreviewProxy(projectId: string, source: Blob): Promise<void> {
     const cached = await this.previewProxyResolver.fromRepository(projectId);
     if (cached) {
-      this.store.patchVideo({ previewFile: cached.blob, previewIsProxy: true });
+      this.store.patchVideo({ preview: { kind: 'proxy', file: cached.blob } });
       return;
     }
     const resolution = await this.previewProxyResolver.fromSource(source);
-    this.store.patchVideo({
-      previewFile: resolution.previewBlob,
-      previewIsProxy: resolution.freshProxy !== null,
-    });
+    this.store.patchVideo({ preview: resolution.preview });
     if (resolution.freshProxy) this.dispatchProxyStore(projectId, resolution.freshProxy);
   }
 

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { Toast } from '@ui/_shared/components/Toast/Toast';
 import { getAppErrorTitle, requiresManualDismissal, useAppErrorShortDescription } from '@ui/_shared/components/AppErrorMessage/AppErrorMessage';
 import type { AppError } from '@core/errors/domain/AppError';
+import type { AppErrorName } from '@core/errors/domain/AppErrorName';
 import type { AppNoticeChannel } from '@core/errors/services/AppNoticeChannel';
 
 const AUTO_DISMISS_MS = 12000;
@@ -12,17 +13,32 @@ interface AppNoticeToastProps {
 }
 
 /**
- * Corner notice for non-blocking `AppError` events broadcast through
+ * Corner notices for non-blocking `AppError` events broadcast through
  * the shared notice channel. Title and short description come from
  * the app-wide error catalog, so a new error type only needs an
- * entry there — no change to this toast. Whether it waits to be
+ * entry there — no change to this toast. Whether one waits to be
  * dismissed or fades on its own is carried by the notice.
+ *
+ * Unrelated failures stack rather than replace each other: a phase
+ * that degrades two things has two things to say. A repeat of the
+ * same failure replaces the notice already on screen instead of
+ * putting a second copy of it beside the first.
  */
 export function AppNoticeToast({ channel }: AppNoticeToastProps) {
-  const [error, setError] = useState<AppError | null>(null);
-  useEffect(() => channel.subscribe((next) => setError(next)), [channel]);
-  if (!error) return null;
-  return <PublishedNotice error={error} onDismiss={() => setError(null)} />;
+  const [notices, setNotices] = useState<readonly AppError[]>([]);
+  useEffect(() => channel.subscribe((next) => {
+    setNotices((shown) => [...shown.filter((error) => error.name !== next.name), next]);
+  }), [channel]);
+  const dismiss = useCallback((name: AppErrorName) => {
+    setNotices((shown) => shown.filter((error) => error.name !== name));
+  }, []);
+  return (
+    <>
+      {notices.map((error) => (
+        <PublishedNotice key={error.name} error={error} onDismiss={() => dismiss(error.name)} />
+      ))}
+    </>
+  );
 }
 
 /**

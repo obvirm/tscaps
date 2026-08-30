@@ -11,6 +11,12 @@ import { DeleteUserBlobAction } from '@core/user-blobs/actions/DeleteUserBlobAct
 
 export interface UserBlobsDependencies {
   readonly indexedDb: IndexedDbClient;
+  /**
+   * Where the user's uploaded bytes come from. Defaults to whatever
+   * the surface implies; a host whose blobs arrive with the job rather
+   * than from storage or the network supplies its own.
+   */
+  readonly repository?: UserBlobRepository;
 }
 
 export type UserBlobsModule = Awaited<ReturnType<typeof bootUserBlobs>>;
@@ -22,7 +28,7 @@ export type UserBlobsModule = Awaited<ReturnType<typeof bootUserBlobs>>;
  * subscribes to. Backed by IndexedDB.
  */
 export async function bootUserBlobs(deps: UserBlobsDependencies) {
-  const repository = buildRepository(deps);
+  const repository = deps.repository ?? buildRepository(deps);
   const store = new UserBlobsStore([]);
   const urlResolver = new UserBlobUrlResolver(repository, store);
   return {

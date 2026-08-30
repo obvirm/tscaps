@@ -1,4 +1,5 @@
 @use 'fade-in' as *;
+@use 'flash-in' as *;
 @use 'pop-in' as *;
 @use 'rise-in' as *;
 @use 'scale-in' as *;
@@ -85,5 +86,15 @@
 
   .wobble-in {
     @include wobble-in($element: $element, $swing: 9deg, $delay: $delay);
+  }
+
+  // Offered for words alone. It paints a plate the width of what it
+  // covers, which reads as a word being struck by light and as a
+  // rectangle sitting on anything larger; and an emoji arriving from
+  // behind a white block reads as a redaction rather than an entrance.
+  @if $element == 'word' {
+    .flash-in {
+      @include flash-in($element: $element, $delay: $delay);
+    }
   }
 }

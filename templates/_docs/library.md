@@ -25,9 +25,10 @@ block comments, collapses blank runs, and writes the result. Root `postinstall` 
 on every install and both deploy workflows run it explicitly before the contract check.
 
 Three more artifacts are written the same way and are gitignored the same way:
-`filters.build.svg`, `controls.build.json` (the controls a stylesheet declared while
-compiling) and `animations.build.json` (the animations it applied). **Never edit a `.build.*`
-file, and never commit one.**
+`filters.build.svg` (the authored `filters.svg` with its recipe calls expanded and its XML
+comments stripped, on the same reasoning as the CSS ones), `controls.build.json` (the controls
+a stylesheet declared while compiling) and `animations.build.json` (the animations it
+applied). **Never edit a `.build.*` file, and never commit one.**
 
 **The split is the point.** The author edits the source, the runtime reads the built output,
 and they never share responsibility. What the editor's Code tab shows, what an agent writing
@@ -135,6 +136,53 @@ the build rejects a template that asks for two.
 while `filter: drop-shadow()` reads it as a Gaussian standard deviation, which is half of
 that. The same number is twice as soft inside `drop-shadow()`.
 
+### `glow`
+
+Light coming off the glyphs, in the text's own colour. Returns a comma-separated shadow list,
+so it stacks in front of a cast shade:
+
+```scss
+@use '../_lib/glow' as *;
+
+.word-being-narrated { text-shadow: glow(0.16), soft-drop-shadow(0.06, 0.25); }
+```
+
+`glow($radius, $passes: 1, $color: currentColor)`. `$radius` is your default for the
+`--tscaps-glow-radius` control, and **the control comes with the call**.
+
+`currentColor` is what makes one rule reach every case — an accent, a proper noun, the word
+being narrated all glow in whatever they are painted, with no rule per case.
+
+**A glow does not hold a caption against its shot.** It carries the text's colour, so over a
+bright frame it adds light to light and takes the edge with it. Put one only on a template that
+already separates some other way — an outline, a hard cast shade, a plate — and leave that
+separator alone. Templates whose whole separation is a same-colour halo (`hugo`, `sara`) are
+visibly soft on a pale shot, which is the trade their look accepts, not a pattern to copy.
+
+**`$passes` repeats the layer instead of widening it**, which is how a halo gains weight
+without gaining reach: one pass reads as a blur on the letters, two as light off them.
+
+#### `glow-filter`
+
+The same glow for a template that paints through `filter`. Returns space-separated
+`drop-shadow()` functions:
+
+```scss
+.segment { filter: drop-shadow(soft-drop-shadow(0.03, 0.12)) glow-filter(0.12, $color: #ffd84d); }
+```
+
+**Required, not preferred, when the text is filled by a `background-clip: text` gradient.** A
+background paints *beneath* the text shadow, so a `text-shadow` there covers the fill it was
+meant to sit behind and floods the letters with the halo's colour. Such a template also has no
+current colour to take — its `color` is `transparent` — so it must name one.
+
+**Put it last in the chain.** Each function feeds the next, so a glow placed before an outline
+built from `drop-shadow()` passes becomes their input and they draw a hard edge around the halo
+itself.
+
+The radius halves on the way in, so the control means one softness whichever mechanism a
+template paints with. See the blur note under `soft-drop-shadow`.
+
 ### `dynamic-font-size`
 
 Renders short captions bigger than long ones: a one-word caption appears visually larger than
@@ -178,7 +226,7 @@ rather than producing a variable no editor can drive. See
 
 ### Animation recipes
 
-Fourteen of them, one folder each under `_lib/animation/`. Documented in
+Fifteen of them, one folder each under `_lib/animation/`. Documented in
 [animation.md](animation.md#the-library).
 
 ### Filter recipes

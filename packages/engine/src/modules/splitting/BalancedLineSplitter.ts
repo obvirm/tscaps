@@ -7,6 +7,8 @@ export interface BalancedLineSplitterConfig {
   maxLines: number;
   minLines: number;
   maxCharsPerLine: number;
+  /** Shortest line a break may produce; `0` accepts every break. */
+  minCharsPerLine?: number;
 }
 
 /**
@@ -14,6 +16,12 @@ export interface BalancedLineSplitterConfig {
  * words across lines in a way that minimizes the difference in character count
  * between lines, while respecting specified constraints on maximum lines,
  * minimum lines, and maximum characters per line.
+ *
+ * `maxCharsPerLine` sets how many lines to aim for and `minCharsPerLine`
+ * vetoes the result: a split leaving any line under the floor is dropped
+ * in favour of one line fewer, down to a single line. `minLines` outranks
+ * the floor, so a caller asking for two lines gets two even where no
+ * split reaches it.
  */
 export class BalancedLineSplitter implements LineSplitter {
   constructor(private readonly _config: BalancedLineSplitterConfig) {}
@@ -37,11 +45,17 @@ export class BalancedLineSplitter implements LineSplitter {
     const linesNeeded = Math.ceil(totalChars / maxCharsPerLine);
     const targetLines = Math.min(linesNeeded, maxLines);
 
-    if (targetLines <= 1) {
-      return [new Line({ words })];
+    for (let lines = targetLines; lines > 1; lines--) {
+      const candidate = this.splitRecursive(words, lines);
+      if (this.everyLineReachesMinChars(candidate)) return candidate;
     }
 
-    return this.splitRecursive(words, targetLines);
+    return [new Line({ words })];
+  }
+
+  private everyLineReachesMinChars(lines: Line[]): boolean {
+    const minCharsPerLine = this._config.minCharsPerLine ?? 0;
+    return lines.every((line) => this.charCount([...line.words]) >= minCharsPerLine);
   }
 
   private splitRecursive(words: Word[], linesLeft: number): Line[] {

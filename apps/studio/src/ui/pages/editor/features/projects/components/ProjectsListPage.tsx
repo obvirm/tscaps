@@ -8,6 +8,7 @@ import { Wordmark } from '@ui/_shared/components/Wordmark/Wordmark';
 import { StatusPill } from '@ui/_shared/components/StatusPill/StatusPill';
 import { AppErrorMessage, getAppErrorTitle } from '@ui/_shared/components/AppErrorMessage/AppErrorMessage';
 import { ProjectCard } from '@ui/pages/editor/features/projects/components/ProjectCard';
+import { ProjectsDropCatcher } from '@ui/pages/editor/features/projects/components/ProjectsDropCatcher';
 
 interface ProjectsListPageProps {
   projects: ProjectMetadata[] | null;
@@ -72,8 +73,13 @@ const EMPTY_SUB = 'text-sm text-fg-muted m-0 max-w-[42ch]';
 /**
  * The shared "your projects" page. Renderer-only: it owns no
  * application state and emits no side effects beyond the file-input
- * click bridge. Orchestration (which list to fetch, which CTAs to
- * expose, what banner to render) lives in its host.
+ * click bridge and the page-wide drop listeners. Orchestration (which
+ * list to fetch, which CTAs to expose, what banner to render) lives in
+ * its host.
+ *
+ * A video dropped anywhere on the page takes the same route as the
+ * "New project" button, `onNewProjectIntent` included. Hosts that pass
+ * `onImportProject` also take a dropped `.tscaps` file.
  */
 export const ProjectsListPage = memo(function ProjectsListPage({
   projects,
@@ -191,6 +197,12 @@ export const ProjectsListPage = memo(function ProjectsListPage({
 
         {footerNote}
       </main>
+
+      <ProjectsDropCatcher
+        onVideo={onNewProject}
+        {...(onNewProjectIntent ? { onVideoIntent: onNewProjectIntent } : {})}
+        {...(onImportProject ? { onProjectFile: onImportProject } : {})}
+      />
     </div>
   );
 });

@@ -46,6 +46,26 @@ interface StartDialogProps {
    * language from the audio turn this on.
    */
   readonly allowAutoDetect?: boolean;
+  /**
+   * Surface code of the user's most-picked language across sessions.
+   * The matching entry in `languages` gets a "Most used" hint (or
+   * only "Last used" when it coincides with `lastUsedCode`). Callers
+   * are expected to have moved this language to the top of the list.
+   */
+  readonly mostUsedCode?: string | null;
+  /**
+   * Surface code of the user's last-picked language. The matching
+   * entry gets a "Last used" hint. Callers are expected to have moved
+   * this language near the top of the list.
+   */
+  readonly lastUsedCode?: string | null;
+  /**
+   * Fires when the user commits an explicit language (not auto-detect,
+   * not empty) via Start. Receives the full catalog entry so the
+   * caller can persist a usage signal keyed by whichever identity it
+   * prefers without exposing the storage layer to this component.
+   */
+  readonly onLanguagePicked?: (language: SupportedLanguage) => void;
 }
 
 /**
@@ -70,6 +90,9 @@ export function StartDialog({
   inBrowserTranscription = true,
   languages = WHISPER_SUPPORTED_LANGUAGES,
   allowAutoDetect = false,
+  mostUsedCode = null,
+  lastUsedCode = null,
+  onLanguagePicked,
 }: StartDialogProps) {
   const [language, setLanguage] = useState<string>(allowAutoDetect ? AUTO_DETECT_LANGUAGE_VALUE : '');
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -86,9 +109,15 @@ export function StartDialog({
       document.getElementById('td-language')?.focus();
       return;
     }
-    const transcriber: TranscriberOptions =
-      language === '' || language === AUTO_DETECT_LANGUAGE_VALUE ? {} : { language };
-    return preprocessVideo.execute({ transcriber, multipleSpeakers: false });
+    const isExplicit = language !== '' && language !== AUTO_DETECT_LANGUAGE_VALUE;
+    const transcriber: TranscriberOptions = isExplicit ? { language } : {};
+    const picked = isExplicit ? languages.find((l) => l.code === language) : undefined;
+    if (picked !== undefined) onLanguagePicked?.(picked);
+    return preprocessVideo.execute({
+      transcriber,
+      multipleSpeakers: false,
+      ...(picked ? { language: picked } : {}),
+    });
   };
 
   return (
@@ -107,6 +136,8 @@ export function StartDialog({
         value={language}
         onChange={handleLanguageChange}
         allowAutoDetect={allowAutoDetect}
+        mostUsedCode={mostUsedCode}
+        lastUsedCode={lastUsedCode}
         placeholder="Select a language"
         errorMessage={languageError ?? undefined}
       />

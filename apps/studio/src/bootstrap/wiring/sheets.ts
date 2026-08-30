@@ -2,8 +2,9 @@ import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { RefreshDocumentAction } from '@core/editor/actions/RefreshDocumentAction';
 import type { DocumentDeriver } from '@core/editor/services/DocumentDeriver';
 import { SheetColorPalette } from '@core/sheets/services/SheetColorPalette';
-import { CssMinifier, CssVarReferenceScanner } from '@tscaps/engine';
+import { CssFilterReferenceScanner, CssMinifier, CssVarReferenceScanner } from '@tscaps/engine';
 import { DisconnectedControlFinder } from '@core/sheets/services/DisconnectedControlFinder';
+import { ReferencedSvgFilterVariableScanner } from '@core/sheets/services/ReferencedSvgFilterVariableScanner';
 import { DecorationPlacementResolver } from '@core/effect/services/DecorationPlacementResolver';
 import { DecorationVisibility } from '@core/captions/services/DecorationVisibility';
 import { DecorationFilter } from '@core/captions/services/DecorationFilter';
@@ -12,7 +13,11 @@ import { LinkedSheetsPropagationNotifier } from '@core/sheets/services/LinkedShe
 import { LinkedSheetsSync } from '@core/sheets/services/LinkedSheetsSync';
 import type { TemplatesModule } from '@bootstrap/wiring/templates';
 import type { TelemetryModule } from '@bootstrap/wiring/telemetry';
-import { HookTemplatePicker } from '@core/sheets/services/HookTemplatePicker';
+import { RoleTemplatePicker } from '@core/sheets/services/RoleTemplatePicker';
+import { RoleSheetProvisioner } from '@core/sheets/services/RoleSheetProvisioner';
+import { SheetCreationOptionFinder } from '@core/sheets/services/SheetCreationOptionFinder';
+import { CreateRoleSheetAction } from '@core/sheets/actions/CreateRoleSheetAction';
+import { CreateSpeakerSheetAction } from '@core/sheets/actions/CreateSpeakerSheetAction';
 import { SetHookScenesAction } from '@core/sheets/actions/SetHookScenesAction';
 import { CreateSheetAction } from '@core/sheets/actions/CreateSheetAction';
 import { RenameSheetAction } from '@core/sheets/actions/RenameSheetAction';
@@ -41,6 +46,7 @@ import { UpdateEffectsAction } from '@core/sheets/actions/style/UpdateEffectsAct
 import { AnimationSupportResolver } from '@core/templates/services/animations/AnimationSupportResolver';
 import { ResetSheetMotionAction } from '@core/sheets/actions/style/ResetSheetMotionAction';
 import { ResetSheetSliceAction } from '@core/sheets/actions/style/ResetSheetSliceAction';
+import { ResetSheetToTemplateDefaultsAction } from '@core/sheets/actions/style/ResetSheetToTemplateDefaultsAction';
 import { SetStyleAssetAction } from '@core/sheets/actions/style/SetStyleAssetAction';
 import { AnimationValueComposer } from '@core/elements/services/css/AnimationValueComposer';
 import { ReplaceSheetAnimationAction } from '@core/sheets/actions/style/ReplaceSheetAnimationAction';
@@ -71,16 +77,26 @@ export type SheetsModule = ReturnType<typeof bootSheets>;
  */
 export function bootSheets(deps: SheetsDependencies) {
   const palette = new SheetColorPalette();
+  const tagSheetMatcher = new TagSheetMatcher();
+  const speakerSheetMatcher = new SpeakerSheetMatcher();
   const matcherRegistry = new SheetMatcherRegistry([
-    new SpeakerSheetMatcher(),
-    new TagSheetMatcher(),
+    speakerSheetMatcher,
+    tagSheetMatcher,
   ]);
+  const roleSheetProvisioner = new RoleSheetProvisioner(new RoleTemplatePicker());
+  const runSheetMatcher = new RunSheetMatcherAction(deps.store, deps.deriver);
   const linkedSheetsPropagationNotifier = new LinkedSheetsPropagationNotifier();
   const linkedSheetsSync = new LinkedSheetsSync(linkedSheetsPropagationNotifier);
   const updateControl = new UpdateStyleControlAction(deps.store, deps.refresh, linkedSheetsSync);
   return {
     matcherRegistry,
-    disconnectedControlFinder: new DisconnectedControlFinder(new CssMinifier(), new CssVarReferenceScanner()),
+    sheetCreationOptionFinder: new SheetCreationOptionFinder(speakerSheetMatcher),
+    disconnectedControlFinder: new DisconnectedControlFinder(
+      new CssMinifier(),
+      new CssVarReferenceScanner(),
+      new CssFilterReferenceScanner(),
+      new ReferencedSvgFilterVariableScanner(new CssVarReferenceScanner()),
+    ),
     palette,
     linkedSheetsPropagationNotifier,
     linkedSheetsSync,
@@ -90,10 +106,27 @@ export function bootSheets(deps: SheetsDependencies) {
     actions: {
       sheets: {
         create: new CreateSheetAction(deps.store, palette),
+        createRole: new CreateRoleSheetAction(
+          deps.store,
+          deps.refresh,
+          roleSheetProvisioner,
+          runSheetMatcher,
+          tagSheetMatcher,
+          deps.telemetry.telemetry,
+        ),
+        createSpeaker: new CreateSpeakerSheetAction(
+          deps.store,
+          deps.refresh,
+          palette,
+          linkedSheetsSync,
+          runSheetMatcher,
+          speakerSheetMatcher,
+          deps.telemetry.telemetry,
+        ),
         setHookScenes: new SetHookScenesAction(
           deps.store,
           deps.refresh,
-          new HookTemplatePicker(),
+          roleSheetProvisioner,
           deps.telemetry.telemetry,
         ),
         rename: new RenameSheetAction(deps.store),
@@ -103,7 +136,7 @@ export function bootSheets(deps: SheetsDependencies) {
         copyStylesFromSheet: new CopyStylesFromSheetAction(deps.store, deps.refresh),
         link: new LinkSheetAction(deps.store, deps.refresh, linkedSheetsSync),
         unlink: new UnlinkSheetAction(deps.store),
-        runMatcher: new RunSheetMatcherAction(deps.store, deps.deriver),
+        runMatcher: runSheetMatcher,
         updateTextDirection: new UpdateSheetTextDirectionAction(deps.store),
       },
       style: {
@@ -113,6 +146,7 @@ export function bootSheets(deps: SheetsDependencies) {
           deps.templates.actions.recordUse,
           deps.telemetry.telemetry,
           linkedSheetsSync,
+          deps.sheetElementResolver,
         ),
         updateControl,
         updateVariant: new UpdateSheetVariantAction(deps.store, deps.refresh),
@@ -127,6 +161,12 @@ export function bootSheets(deps: SheetsDependencies) {
         updateEffects: new UpdateEffectsAction(deps.store, deps.refresh, linkedSheetsSync),
         resetSlice: new ResetSheetSliceAction(deps.store, deps.refresh, linkedSheetsSync),
         resetMotion: new ResetSheetMotionAction(deps.store, deps.refresh, linkedSheetsSync),
+        resetToTemplateDefaults: new ResetSheetToTemplateDefaultsAction(
+          deps.store,
+          deps.refresh,
+          linkedSheetsSync,
+          deps.sheetElementResolver,
+        ),
         setAnimation: new ReplaceSheetAnimationAction(
           deps.store,
           deps.sheetElementResolver,

@@ -4,6 +4,7 @@ import { LayoutTemplate, Subtitles, Type, Palette, Move, Orbit, Sparkles, WrapTe
 import type { Document } from '@tscaps/engine';
 import type { AppError } from '@core/errors/domain/AppError';
 import type { Sheet } from '@core/sheets/domain/Sheet';
+import type { SheetCreationOption } from '@core/sheets/domain/SheetCreationOption';
 import type { Template } from '@core/templates/domain/Template';
 import type { ElementStyles } from '@core/elements/domain/ElementStyles';
 import type { BehindActorSegmentOverrideRegistry } from '@core/person-segmentation/domain/BehindActorSegmentOverrideRegistry';
@@ -42,11 +43,14 @@ interface CaptionsPanelProps {
   isMobileDevice: boolean;
   onSetActiveSheet: (sheetId: string) => void;
   onCreateSheet: (name: string) => string | null;
+  sheetCreationOptions: ReadonlyArray<SheetCreationOption>;
+  onCreateSheetFromOption: (option: SheetCreationOption) => void;
   onRenameSheet: (sheetId: string, name: string) => void;
   onDeleteSheet: (sheetId: string) => void;
   onCopyStylesFromSheet: (targetSheetId: string, sourceSheetId: string) => void;
   onLinkSheet: (targetSheetId: string, sourceSheetId: string) => void;
   onUnlinkSheet: (sheetId: string) => void;
+  onResetSheetToTemplateDefaults: (sheetId: string) => void;
 }
 
 interface RailEntry {
@@ -116,8 +120,9 @@ export const CaptionsPanel = memo(function CaptionsPanel(props: CaptionsPanelPro
   const {
     sheets, activeSheet, templates, library, document, activeSegmentId,
     elementStyles, behindActorOverrides, frozenSegments, decorationOverrides, videoDuration, isPlaying, error, isMobileDevice,
-    onSetActiveSheet, onCreateSheet, onRenameSheet, onDeleteSheet, onCopyStylesFromSheet,
-    onLinkSheet, onUnlinkSheet,
+    onSetActiveSheet, onCreateSheet, sheetCreationOptions, onCreateSheetFromOption,
+    onRenameSheet, onDeleteSheet, onCopyStylesFromSheet,
+    onLinkSheet, onUnlinkSheet, onResetSheetToTemplateDefaults,
   } = props;
 
   const tabStore = useCaptionsTabStore();
@@ -154,11 +159,14 @@ export const CaptionsPanel = memo(function CaptionsPanel(props: CaptionsPanelPro
         activeSheet,
         onSetActiveSheet,
         onCreateSheet,
+        sheetCreationOptions,
+        onCreateSheetFromOption,
         onRenameSheet,
         onDeleteSheet,
         onCopyStylesFromSheet,
         onLinkSheet,
         onUnlinkSheet,
+        onResetSheetToTemplateDefaults,
       }
     : null;
 

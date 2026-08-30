@@ -4,8 +4,10 @@ import type {
   SubtitleStyle,
 } from '@modules/rendering/SubtitleFrameRenderer';
 import { LayeredSubtitleFrame } from '@modules/rendering/LayeredSubtitleFrame';
-import type { DecodedVideoFrame } from '@modules/video/mediabunny/frame/VideoFrameDecoder';
-import type { SubtitleLayerSource } from '@modules/video/mediabunny/caption/SubtitleLayerSource';
+import type {
+  SubtitleLayerRequest,
+  SubtitleLayerSource,
+} from '@modules/video/mediabunny/caption/SubtitleLayerSource';
 
 // 1 µs tolerance: absorbs IEEE-754 rounding at exact interval
 // boundaries (a video frame whose timestamp matches a caption
@@ -19,19 +21,32 @@ interface PartitionedStyles {
 }
 
 /**
- * Composes two `SubtitleLayerSource`s, routing each Section to one
- * of them by whether its style declares
- * `rendering.videoFrame.required`. Snaps the time of each
- * `frameAt` call to the nearest caption tick and merges the rasters
- * produced by sub-sources with active sections into a single frame.
+ * Composes two `SubtitleLayerSource`s, routing each Section to one of
+ * them by whether its style declares `rendering.videoFrame.required`,
+ * and merging what they paint into one raster per request.
  *
- * `frameAt` expects monotonically advancing times.
+ * The two halves are handed **different times for the same request**,
+ * and that difference is the reason this class exists:
+ *
+ * - the batched half is given the request snapped to a caption tick,
+ *   which is what lets the frames that resolve to one picture share a
+ *   tile;
+ * - the video-bound half is given the frame's own time, because it
+ *   bakes the pixels under the caption into its picture, and those
+ *   differ at every frame the decoder hands over.
+ *
+ * Snapping both would tie a whole run of frames to one backdrop
+ * wherever the video runs faster than the tick rate, leaving the
+ * caption sitting on pixels the video has already moved past.
+ *
+ * `framesFor` expects monotonically advancing times.
  */
 export class ComposedSubtitleLayerSource implements SubtitleLayerSource {
 
   private captionInterval = 0;
   private captionIdx = 0;
-  private readonly openedSources: SubtitleLayerSource[] = [];
+  private openedBatched: SubtitleLayerSource | null = null;
+  private openedVideoBound: SubtitleLayerSource | null = null;
 
   constructor(
     private readonly batchedSource: SubtitleLayerSource,
@@ -50,26 +65,51 @@ export class ComposedSubtitleLayerSource implements SubtitleLayerSource {
     const { batched, videoBound } = this.partitionStyles(styles);
     if (Object.keys(batched).length > 0) {
       await this.batchedSource.open(doc, batched, width, height, captionInterval);
-      this.openedSources.push(this.batchedSource);
+      this.openedBatched = this.batchedSource;
     }
     if (Object.keys(videoBound).length > 0) {
       await this.videoBoundSource.open(doc, videoBound, width, height, captionInterval);
-      this.openedSources.push(this.videoBoundSource);
+      this.openedVideoBound = this.videoBoundSource;
     }
   }
 
-  async frameAt(time: number, videoFrame: DecodedVideoFrame): Promise<SubtitleFrame | null> {
-    this.captionIdx = this.advanceCaptionIdxToTime(this.captionIdx, time);
-    const captionTime = this.captionIdx * this.captionInterval;
-    const layers = await Promise.all(
-      this.openedSources.map((source) => source.frameAt(captionTime, videoFrame)),
+  /**
+   * The largest either open half asks for, so a run gathered for this
+   * composite is long enough to serve the hungriest of them. The other
+   * is handed the same run and is free to ignore its length.
+   */
+  lookAhead(): number {
+    return Math.max(
+      1,
+      this.openedBatched?.lookAhead() ?? 1,
+      this.openedVideoBound?.lookAhead() ?? 1,
     );
-    return LayeredSubtitleFrame.from(...layers);
+  }
+
+  async framesFor(requests: ReadonlyArray<SubtitleLayerRequest>): Promise<Array<SubtitleFrame | null>> {
+    // Walked here and nowhere else: the tick index carries across
+    // calls, so a request snapped twice would advance it twice.
+    const onTicks = requests.map((request) => this.snapToCaptionTick(request));
+    const [batchedLayers, videoBoundLayers] = await Promise.all([
+      this.openedBatched?.framesFor(onTicks) ?? [],
+      this.openedVideoBound?.framesFor(requests) ?? [],
+    ]);
+    // Batched first: the video-bound layer paints over it.
+    return requests.map((_, i) =>
+      LayeredSubtitleFrame.from(batchedLayers[i] ?? null, videoBoundLayers[i] ?? null),
+    );
+  }
+
+  private snapToCaptionTick(request: SubtitleLayerRequest): SubtitleLayerRequest {
+    this.captionIdx = this.advanceCaptionIdxToTime(this.captionIdx, request.time);
+    return { time: this.captionIdx * this.captionInterval, videoFrame: request.videoFrame };
   }
 
   close(): void {
-    for (const source of this.openedSources) source.close();
-    this.openedSources.length = 0;
+    this.openedBatched?.close();
+    this.openedVideoBound?.close();
+    this.openedBatched = null;
+    this.openedVideoBound = null;
   }
 
   private partitionStyles(styles: Readonly<Record<string, SubtitleStyle>>): PartitionedStyles {

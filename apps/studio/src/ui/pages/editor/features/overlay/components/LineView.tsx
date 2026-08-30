@@ -3,6 +3,8 @@ import type { Line, Segment, TextDirection, Word, WordFragmenter, WordSplitter }
 import { WordView } from '@ui/pages/editor/features/overlay/components/words/WordView';
 import { useBoundLine } from '@ui/pages/editor/features/overlay/hooks/useOverlayBinding';
 import { useDraggedWordId } from '@ui/pages/editor/features/overlay/hooks/useDraggedWordId';
+import { useMeasuredWidth } from '@ui/pages/editor/features/overlay/hooks/useMeasuredWidth';
+import { useEngine } from '@ui/_shared/contexts/modules/EngineContext';
 import { CAPTION_ELEMENT_ID_ATTRIBUTE } from '@presentation/editor/services/CaptionElementAttribute';
 
 interface LineViewProps {
@@ -43,6 +45,7 @@ export const LineView = memo(function LineView({
   inlineSuppressedDecorationIds,
 }: LineViewProps) {
   const draggedWordId = useDraggedWordId();
+  const { constants } = useEngine();
   const visibleWords: VisibleWord[] = [];
   for (let i = 0; i < line.words.length; i++) {
     const word = line.words[i]!;
@@ -55,6 +58,7 @@ export const LineView = memo(function LineView({
     textDirection,
   );
   const ref = useBoundLine(line, segment, visibleWords.length > 0);
+  useMeasuredWidth(ref, constants.LINE_WIDTH_EM_VARIABLE, visibleWords.length > 0);
   if (visibleWords.length === 0) return null;
   return (
     <div ref={ref} style={LINE_LAYOUT_STYLE} {...{ [CAPTION_ELEMENT_ID_ATTRIBUTE]: line.id }}>

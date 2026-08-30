@@ -1,9 +1,16 @@
-import { memo, useMemo, useState } from 'react';
-import { Search } from 'lucide-react';
+import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
+import { ChevronLeft, Search } from 'lucide-react';
 import type { Template } from '@core/templates/domain/Template';
 import type { TemplateLibraryView } from '@core/templates/store/TemplateLibraryStore';
+import { TEMPLATE_CATEGORIES } from '@core/templates/domain/TemplateCategory';
+import {
+  TemplateGalleryLayout,
+  type TemplateGallerySectionId,
+} from '@presentation/editor/services/TemplateGalleryLayout';
+import { TemplateClipLibrary } from '@presentation/editor/services/TemplateClipLibrary';
 import { TemplateCard } from '@ui/pages/editor/components/template/TemplateCard';
-import { TemplateTabStrip, type TemplateTab } from '@ui/pages/editor/components/template/TemplateTabStrip';
+import { TemplateClipCard } from '@ui/pages/editor/components/template/TemplateClipCard';
+import { TemplateGallerySection } from '@ui/pages/editor/components/template/TemplateGallerySection';
 
 interface TemplateSelectorProps {
   templates: Template[];
@@ -14,20 +21,58 @@ interface TemplateSelectorProps {
   onRenameUserTemplate: (id: string) => void;
   library: TemplateLibraryView;
   /**
-   * Category tab the picker opens on, or `null` for "All". A default,
-   * not a filter lock — every tab stays reachable.
+   * Per-section element rendered next to the section label, keyed by
+   * section id. A section without an entry renders no adornment.
+   * Search results and the empty state are not sections and do not
+   * consult this map.
    */
-  preferredCategory?: string | null | undefined;
+  sectionAdornments?: Partial<Record<TemplateGallerySectionId, ReactNode>> | undefined;
 }
 
-/** Built-in tab ids; user categories are appended after these. */
-type BuiltinTab = 'all' | 'favorites';
-type TabId = BuiltinTab | string;
+// Rows a section shows before its "view all" link. How many cards that
+// is follows the panel's width, so a section fills what it is given
+// instead of leaving the row short at some sizes and clipped at others.
+const PREVIEW_ROWS = 2;
+
+// The panel's vertical rhythm. The gallery is the tab's whole body, so
+// it sets its own top padding rather than sitting in a `Section` — the
+// tab title's row is already 32px tall around a 16px title (its buttons
+// set that height), so it arrives carrying half a gap of its own and a
+// section's 18px on top of that is what made the field look adrift.
+//
+// The field belongs to the title above it and the families below are
+// what it filters, so the gap under it is the larger of the two, and it
+// matches the gap between families: the search is a peer of the section
+// headers, not a lid on the first one.
+const HEADER_TO_SEARCH_PADDING = 'pt-2';
+const SEARCH_TO_BODY_GAP = 'gap-6';
+// Families are separated by a hairline rather than by more space: at
+// 24px the gap was already the widest in the panel and still did not
+// read, because a section's header carries the same weight as every
+// other label in the sidebar. The rule is the one `Section` uses to
+// separate blocks elsewhere, and it lives on the list rather than on a
+// section, since a section shown on its own has nothing to divide from.
+// Padding on both sides keeps the line centred in the same 24px.
+const BETWEEN_SECTIONS_DIVIDERS =
+  '[&>section+section]:border-t [&>section+section]:border-edge-subtle ' +
+  '[&>section+section]:pt-3 [&>section:not(:last-child)]:pb-3';
+const BACK_LINK_GAP = 'gap-4';
+
+const SEARCH_FIELD_CLASS =
+  'group/search flex items-center gap-2 h-[30px] px-2.5 bg-surface-2 border border-edge-medium rounded-xs ' +
+  'transition-colors duration-quick ease-standard hover:border-edge-strong ' +
+  'focus-within:border-accent focus-within:bg-surface-1 focus-within:ring-2 focus-within:ring-accent/30';
+
+const BACK_BUTTON_CLASS =
+  'inline-flex items-center gap-1 bg-transparent border-none p-0 cursor-pointer ' +
+  'font-mono text-2xs uppercase tracking-[0.08em] text-fg-faint ' +
+  'transition-colors duration-quick ease-standard hover:text-fg-secondary ' +
+  'focus-visible:outline-none focus-visible:text-fg-secondary';
 
 /**
- * Picker for the active template. Owns the search field and the tab strip
- * (built-ins + per-category tabs from each template's `categories`). All
- * matching templates are rendered — the surrounding sidebar handles scroll.
+ * Picker for the active template. Browses by family — one section each,
+ * every section openable in full — and collapses to a single ranked list
+ * as soon as anything is typed into the search field.
  */
 export const TemplateSelector = memo(function TemplateSelector({
   templates,
@@ -37,105 +82,83 @@ export const TemplateSelector = memo(function TemplateSelector({
   onDeleteUserTemplate,
   onRenameUserTemplate,
   library,
-  preferredCategory = null,
+  sectionAdornments,
 }: TemplateSelectorProps) {
   const [query, setQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<TabId>(preferredCategory ?? 'all');
+  const [openedSectionId, setOpenedSectionId] = useState<TemplateGallerySectionId | null>(null);
 
-  // Re-seed the tab when the preferred category changes (e.g. the active
-  // sheet switched role). Render-time sync avoids an extra effect tick.
-  const [lastPreferredCategory, setLastPreferredCategory] = useState(preferredCategory);
-  if (preferredCategory !== lastPreferredCategory) {
-    setLastPreferredCategory(preferredCategory);
-    setActiveTab(preferredCategory ?? 'all');
-  }
+  const [layout] = useState(() => new TemplateGalleryLayout());
+  const [clips] = useState(() => new TemplateClipLibrary(import.meta.env.BASE_URL));
 
   const userTemplateIds = useMemo(
     () => new Set(userTemplates.map((t) => t.metadata.id)),
     [userTemplates],
   );
 
-  // User templates render before built-ins; tabs are derived from the
-  // union so categories carried only by user templates (e.g. the
-  // implicit "my templates") still surface.
-  const combinedTemplates = useMemo<Template[]>(
-    () => [...userTemplates, ...templates],
-    [userTemplates, templates],
+  const galleryInput = useMemo(
+    () => ({
+      builtins: templates,
+      userTemplates,
+      favoriteIds: library.favorites,
+    }),
+    [templates, userTemplates, library.favorites],
   );
 
-  const tabs = useMemo<TemplateTab[]>(() => {
-    const result: TemplateTab[] = [{ id: 'all', label: 'All' }];
-    if (library.favorites.size > 0) result.push({ id: 'favorites', label: 'Favorites' });
-    const seen = new Set<string>();
-    for (const t of combinedTemplates) {
-      for (const c of t.metadata.categories) {
-        if (seen.has(c)) continue;
-        seen.add(c);
-        result.push({ id: c, label: titleCase(c) });
+  const sections = useMemo(() => layout.build(galleryInput), [layout, galleryInput]);
+  const searchResults = useMemo(() => layout.search(galleryInput, query), [layout, galleryInput, query]);
+
+  // A section can empty out while it is open (its last favorite removed,
+  // its last saved template deleted); falling back to the gallery keeps
+  // the panel from going blank.
+  const openedSection = sections.find((section) => section.id === openedSectionId) ?? null;
+
+  const closeSection = useCallback(() => setOpenedSectionId(null), []);
+  const openSection = useCallback((id: TemplateGallerySectionId) => setOpenedSectionId(id), []);
+
+  const renderCard = useCallback(
+    (template: Template) => {
+      const isSelected = selectedTemplate?.metadata.id === template.metadata.id;
+      const isFavorite = library.favorites.has(template.metadata.id);
+      const isUserTemplate = userTemplateIds.has(template.metadata.id);
+      // A saved template is the user's own edit of its parent, so the
+      // parent's clip would show them something they did not save.
+      const showsClip = !isUserTemplate
+        && TEMPLATE_CATEGORIES[template.metadata.category].preview === 'clip';
+      if (showsClip) {
+        const clip = clips.clipFor(template.metadata.id);
+        return (
+          <TemplateClipCard
+            key={template.metadata.id}
+            template={template}
+            clipUrl={clip.clipUrl}
+            posterUrl={clip.posterUrl}
+            objectPosition={clip.objectPosition}
+            isSelected={isSelected}
+            isFavorite={isFavorite}
+            onSelect={onSelect}
+            onToggleFavorite={library.toggleFavorite}
+          />
+        );
       }
-    }
-    return result;
-  }, [combinedTemplates, library.favorites]);
-
-  // Active tab can vanish (favorites cleared, category emptied); fall back to "All".
-  const effectiveTab: TabId = tabs.some((t) => t.id === activeTab) ? activeTab : 'all';
-
-  const tabFiltered = useMemo<Template[]>(() => {
-    if (effectiveTab === 'all') return combinedTemplates;
-    if (effectiveTab === 'favorites') return combinedTemplates.filter((t) => library.favorites.has(t.metadata.id));
-    return combinedTemplates.filter((t) => t.metadata.categories.includes(effectiveTab));
-  }, [combinedTemplates, effectiveTab, library.favorites]);
-
-  const queryFiltered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return tabFiltered;
-    return tabFiltered.filter((t) => t.metadata.name.toLowerCase().includes(q));
-  }, [tabFiltered, query]);
-
-  // Favorites float to the top of every bucket. `sort` is stable in
-  // modern engines, so non-favorites preserve their incoming order
-  // (user templates: updatedAt-desc from TemplatesTab; built-ins:
-  // declaration order).
-  const filtered = useMemo<Template[]>(() => {
-    const favorites = library.favorites;
-    return [...queryFiltered].sort((a, b) => {
-      const aFav = favorites.has(a.metadata.id) ? 1 : 0;
-      const bFav = favorites.has(b.metadata.id) ? 1 : 0;
-      return bFav - aFav;
-    });
-  }, [queryFiltered, library.favorites]);
-
-  const allTabSplit = useMemo(() => {
-    if (effectiveTab !== 'all') return null;
-    const user: Template[] = [];
-    const builtin: Template[] = [];
-    for (const t of filtered) {
-      (userTemplateIds.has(t.metadata.id) ? user : builtin).push(t);
-    }
-    return { user, builtin };
-  }, [filtered, effectiveTab, userTemplateIds]);
-
-  const hasGrid = filtered.length > 0;
-
-  const renderCard = (template: Template) => {
-    const isUserTemplate = userTemplateIds.has(template.metadata.id);
-    return (
-      <TemplateCard
-        key={template.metadata.id}
-        template={template}
-        isSelected={selectedTemplate?.metadata.id === template.metadata.id}
-        isFavorite={library.favorites.has(template.metadata.id)}
-        onSelect={onSelect}
-        onToggleFavorite={library.toggleFavorite}
-        onDelete={isUserTemplate ? () => onDeleteUserTemplate(template.metadata.id) : undefined}
-        onRename={isUserTemplate ? () => onRenameUserTemplate(template.metadata.id) : undefined}
-      />
-    );
-  };
+      return (
+        <TemplateCard
+          key={template.metadata.id}
+          template={template}
+          isSelected={isSelected}
+          isFavorite={isFavorite}
+          onSelect={onSelect}
+          onToggleFavorite={library.toggleFavorite}
+          onDelete={isUserTemplate ? () => onDeleteUserTemplate(template.metadata.id) : undefined}
+          onRename={isUserTemplate ? () => onRenameUserTemplate(template.metadata.id) : undefined}
+        />
+      );
+    },
+    [selectedTemplate, library, userTemplateIds, clips, onSelect, onDeleteUserTemplate, onRenameUserTemplate],
+  );
 
   return (
-    <div className="flex flex-col gap-2.5 pb-2">
-      <div className="group/search flex items-center gap-2 h-[30px] px-2.5 bg-surface-2 border border-edge-medium rounded-xs transition-colors duration-quick ease-standard hover:border-edge-strong focus-within:border-accent focus-within:bg-surface-1 focus-within:ring-2 focus-within:ring-accent/30">
+    <div className={`flex flex-col ${SEARCH_TO_BODY_GAP} ${HEADER_TO_SEARCH_PADDING} pb-2`}>
+      <div className={SEARCH_FIELD_CLASS}>
         <Search size={13} className="text-fg-faint shrink-0 group-focus-within/search:text-fg-muted transition-colors duration-quick ease-standard" />
         <input
           type="text"
@@ -146,34 +169,49 @@ export const TemplateSelector = memo(function TemplateSelector({
         />
       </div>
 
-      <TemplateTabStrip tabs={tabs} activeId={effectiveTab} onSelect={setActiveTab} />
-
-      {!hasGrid ? (
-        <div className="p-6 text-center text-fg-muted text-sm">
-          No templates match.
+      {query.trim() !== '' ? (
+        searchResults.length === 0 ? (
+          <div className="p-6 text-center text-fg-muted text-sm">No templates match.</div>
+        ) : (
+          <TemplateGallerySection
+            id="saved"
+            label="Results"
+            templates={searchResults}
+            rows={null}
+            renderCard={renderCard}
+          />
+        )
+      ) : openedSection ? (
+        <div className={`flex flex-col ${BACK_LINK_GAP}`}>
+          <button type="button" onClick={closeSection} className={BACK_BUTTON_CLASS}>
+            <ChevronLeft size={12} strokeWidth={2.5} />
+            <span>All templates</span>
+          </button>
+          <TemplateGallerySection
+            id={openedSection.id}
+            label={openedSection.label}
+            templates={openedSection.templates}
+            rows={null}
+            headerAdornment={sectionAdornments?.[openedSection.id]}
+            renderCard={renderCard}
+          />
         </div>
       ) : (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(140px,100%),1fr))] gap-2">
-          {allTabSplit ? (
-            <>
-              {allTabSplit.user.map(renderCard)}
-              {allTabSplit.user.length > 0 && allTabSplit.builtin.length > 0 && (
-                <hr
-                  className="border-0 border-t border-edge-subtle my-1"
-                  style={{ gridColumn: '1 / -1' }}
-                />
-              )}
-              {allTabSplit.builtin.map(renderCard)}
-            </>
-          ) : (
-            filtered.map(renderCard)
-          )}
+        <div className={`flex flex-col ${BETWEEN_SECTIONS_DIVIDERS}`}>
+          {sections.map((section) => (
+            <TemplateGallerySection
+              key={section.id}
+              id={section.id}
+              label={section.label}
+              templates={section.templates}
+              rows={PREVIEW_ROWS}
+              onViewAll={openSection}
+              headerAdornment={sectionAdornments?.[section.id]}
+              renderCard={renderCard}
+            />
+          ))}
         </div>
       )}
     </div>
   );
 });
-
-function titleCase(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1);
-}

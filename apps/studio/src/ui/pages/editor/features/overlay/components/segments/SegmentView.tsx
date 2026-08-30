@@ -3,6 +3,8 @@ import type { DecorationPlacementSide, Decoration, Segment, TextDirection, Word,
 import { LineView } from '@ui/pages/editor/features/overlay/components/LineView';
 import { WordDecorationSpan } from '@ui/pages/editor/features/overlay/components/words/WordDecorationSpan';
 import { useBoundSegment } from '@ui/pages/editor/features/overlay/hooks/useOverlayBinding';
+import { useMeasuredWidth } from '@ui/pages/editor/features/overlay/hooks/useMeasuredWidth';
+import { useEngine } from '@ui/_shared/contexts/modules/EngineContext';
 import { CAPTION_ELEMENT_ID_ATTRIBUTE } from '@presentation/editor/services/CaptionElementAttribute';
 
 interface SegmentViewProps {
@@ -59,6 +61,8 @@ export const SegmentView = memo(function SegmentView({
   const classes = extraSegmentClasses ?? EMPTY_EXTRA_CLASSES;
   const segmentRef = useRef<HTMLDivElement | null>(null);
   useBoundSegment(segmentRef, segment, indexInSection, classes);
+  const { constants } = useEngine();
+  useMeasuredWidth(segmentRef, constants.SEGMENT_WIDTH_EM_VARIABLE);
   const attachRef = useCallback(
     (element: HTMLDivElement | null) => {
       segmentRef.current = element;

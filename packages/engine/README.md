@@ -12,7 +12,22 @@ Captions are HTML elements styled with CSS. On export, the engine rasterizes tha
 npm install @tscaps/engine
 ```
 
-The engine targets modern browsers (Chrome 94+, Edge 94+, Safari 16.4+, Firefox 130+) and requires WebCodecs, Web Audio, and Canvas APIs. Node ≥20 is needed only for development tooling; the engine itself does not run in Node.
+If you use the built-in transcriber (`WhisperTranscriber`), you also need `onnxruntime-web >= 1.27` as an override. See [ONNX runtime version](#onnx-runtime-version) below.
+
+The engine targets modern browsers (Chrome 94+, Edge 94+, Safari 16.4+, Firefox 130+). It requires WebCodecs for encoding and Canvas for rasterization. Audio decoding falls back to Web Audio on browsers that ship WebCodecs without an audio decoder (Safari before 26). Node >= 20 is needed only for development tooling; the engine itself does not run in Node.
+
+### ONNX runtime version
+
+`onnxruntime-web` is a peer dependency. The engine's Whisper integration needs version 1.27+, but `@huggingface/transformers@4.2` pins version 1.26, which cannot open the current model files. You need to override it:
+
+```jsonc
+// package.json (npm "overrides" or yarn "resolutions")
+"overrides": { "onnxruntime-web": "1.27.0" }
+```
+
+Without the override, transcription fails at model loading, after the full download. This is fixed in transformers.js v4.3.0 ([#1707](https://github.com/huggingface/transformers.js/issues/1707)); the override can be removed after that.
+
+If you do not use `WhisperTranscriber` (e.g. you only use `SrtTranscriber` or `PassthroughTranscriber`), you do not need `onnxruntime-web` at all.
 
 ## Quick start
 
@@ -287,7 +302,7 @@ Positional tags from `StructureTagger`, assigned once after splitting:
 
 Classes on elements the renderer creates rather than on document nodes, collected in the `CssClass` enum:
 
-- `behind-actor-active` — on `.segment` while the text-behind-actor effect is active for it
+- `behind-actor-active` — on `.segment` while the text-behind-actor effect is active. Set by the consumer through `ElementRenderOverrides`; the engine publishes the class name in `CssClass`
 - `tscaps-video-frame-layer` — the layer holding the video frame, emitted inside `.segment` when `rendering.videoFrame.required` is set
 - `segment-decorations-above`, `segment-decorations-below` — the containers of decorations lifted out of line flow
 
@@ -333,10 +348,17 @@ Structural metadata — unitless integers, so a rule can stagger, scale or branc
 - `--word-count` — on `.segment` and on `.line`; the nearest ancestor wins for a `.word` reading it
 - `--word-char-count` — code-point length of the word's display text
 - `--last-word-char-count` — on `.segment` and on `.line`; the length of the closing word, without traversing to it
+- `--line-char-count` — character length of the line's text
+
+Measured widths, as a multiple of the element's own font size. Only set when the stylesheet reads them:
+
+- `--segment-width-em`, `--line-width-em`, `--word-width-em` — how wide the element lays out under your stylesheet
 
 Layout and frame:
 
 - `--subtitle-region-width`, `--subtitle-region-height`, `--subtitle-region-x`, `--subtitle-region-y` — the caption region's box, useful when positioning relative to the video frame
+- `--segment-anchor-y` — where the caption's anchor sits, as a fraction of the frame height
+- `--segment-anchor-origin-y` — share of the caption's own height above that anchor (`0%`, `50%` or `100%`). The two together let a rule place the caption against the frame instead of against its anchor
 - `--video-frame` — the underlying video frame as `url("data:image/jpeg;base64,…")`, only set when `rendering.videoFrame.required` is `true` (see [docs/RENDERING_INTERNALS.md](docs/RENDERING_INTERNALS.md))
 - `--segment-padding-top`, `--segment-padding-bottom` — the padding the renderer put on the segment to give a filter room to spread
 
@@ -358,19 +380,24 @@ Tags map one-to-one onto CSS classes through `Tag.toCssClass()`. Unknown tag cla
 
 The examples above cover the common cases. The pipeline exposes more knobs you'll reach for as your needs grow:
 
-- **Built-in transcribers**: `WhisperTranscriber` (the default, in-browser Whisper, with a `tiny` / `base` / `small` / `medium` model ladder), `SrtTranscriber` and `VttTranscriber` (parse SubRip and WebVTT, reading per-word timings where the file carries them), `PassthroughTranscriber` (wraps a pre-built `Document`). Or implement your own by satisfying the `Transcriber` interface.
+- **Built-in transcribers**: `WhisperTranscriber` (the default, in-browser Whisper, with a `tiny` / `base` / `small` / `medium` model ladder), `SrtTranscriber` and `VttTranscriber` (parse SubRip and WebVTT, reading per-word timings where the file carries them), `PassthroughTranscriber` (wraps a pre-built `Document`), with per-run options through `withTranscriberOptions`. Or implement your own by satisfying the `Transcriber` interface.
 - **Writing subtitle files**: `SubtitleFileSerializer` is the inverse of the parsers. `SrtSubtitleFileSerializer`, `VttSubtitleFileSerializer`, `AssSubtitleFileSerializer`, `SbvSubtitleFileSerializer`, `TtmlSubtitleFileSerializer` and `TextSubtitleFileSerializer` each declare their own media type and extension, and `granularity: 'word'` asks for per-word timing where the format can express it.
 - **Right-to-left and mixed-script text**: each line is resolved through the Unicode bidirectional algorithm and its words are emitted in painting order. `RenderingConfig.textDirection` supplies the paragraph direction, `TextDirectionDetector` infers it from a text, and `AlignmentConfig.horizontalAlign` additionally accepts `start` / `end` so one declaration can follow the reading direction.
 - **Cuts**: time ranges declared on a `Document` are removed from the exported video, and captions realign to the shortened timeline.
 - **Segment splitters**: the default `CompositeSegmentSplitter` chains a sentence-boundary cut with a scaled-character budget. Individual strategies are exposed for custom chains — `BoundarySegmentSplitter`, `LimitByWordsSegmentSplitter`, `LimitByScaledCharsSegmentSplitter`, `PauseBasedSegmentSplitter`, `SpeakerChangeSegmentSplitter`.
-- **Line splitters**: `BalancedLineSplitter` (char-balanced, no measurer needed) and `BalancedPixelWidthLineSplitter` (pixel-balanced, backed by a `TextMeasurer` — `DomProbeCanvasTextMeasurer` is the default measurer).
-- **Replace any stage**: `withTranscriber`, `withSegmentSplitter`, `withLineSplitter`, `withVideoRenderer`, `withSubtitleFrameRenderer`, `withOverlayFrameRenderer`. Defaults stay in place until explicitly replaced.
+- **Line splitters**: `BalancedLineSplitter` (char-balanced, no measurer needed, with a `minCharsPerLine` floor) and `BalancedPixelWidthLineSplitter` (pixel-balanced, backed by a `TextMeasurer` — `DomProbeCanvasTextMeasurer` is the default measurer).
+- **Render shape**: `withRenderingConfig({ splitWordsIntoLetters, videoFrame, padding, textDirection })` — the switches that change the emitted DOM rather than its styling.
+- **Per-element styling**: `ElementRenderOverrides` carries inline styles, alignment and extra classes for one segment, line, word or decoration; `mergedWith` layers a second set over an existing one.
+- **Decoder choice**: the default prefers WebCodecs and falls back to a hidden `<video>`, asking first through `withConfirmFallbackDecoder`. `WebCodecsOnlyVideoFrameDecoderFactory` refuses that fallback with `VideoFrameDecoderSelectionFailedError`, and `onVideoFrameDecoderSelected` reports which one ran.
+- **Model weights across sessions**: `WhisperTranscriber` takes a `ModelFileCache`; `CacheStorageModelFileCache` is the browser-backed one, and raises `ModelFileCacheUnavailableError` when the browser refuses to store them.
+- **Composing a stylesheet from several sources**: `CssLayer`, `CssBlockSealer`, `CssKeyframeNamespacer`, `CssFragmentParser`, plus scanners that report what a stylesheet defines and reads.
+- **Replace any stage**: `withTranscriber`, `withSegmentSplitter`, `withLineSplitter`, `withWordSplitter`, `withVideoRenderer`, `withSubtitleFrameRenderer`, `withOverlayFrameRenderer`, `withCssResourceEmbedder`. Defaults stay in place until explicitly replaced.
 - **Tweak default-stage configs without rebuilding them**: `withDefaultSegmentSplitterConfig({ maxChars, minChars, ... })`, `withDefaultLineSplitterConfig({ maxLines, maxWidthRatio, ... })`.
-- **Output control**: `withOutputFormat('mp4' | 'webm')`, `withOutputResolution(width, height)`, `withQuality(...)`, `withOutputStream(...)` for streaming the encoded bytes as they're produced.
+- **Output control**: `withOutputFormat('mp4' | 'webm')`, `withOutputResolution(width, height)`, `withQuality(...)`, `withOutputStream(...)` for streaming the encoded bytes as they're produced. `withOverlayHtml(html)` draws a self-contained snippet into every frame, and `withOnAudioDiscarded` fires when a source's audio cannot be carried over.
 - **Per-step execution**: `runTranscriptionStep`, `runSplittingStep`, `runStructuralTaggingStep`, `runSemanticTaggingStep`, `runEffectsStep`, `runRenderingStep`. Useful when you want to inspect or hand-edit the `Document` between stages — `getDocument()` and `setDocument(doc)` give you read/replace access.
 - **Progress reporting**: `run` accepts a callback that fires through every pipeline stage — Whisper model download, transcription, splitting, tagging, effects, and per-frame rendering progress.
-- **Effects and semantic taggers**: pure document-transforming stages (smart punctuation, lowercase, regex/wordlist taggers, etc.) added via `addEffect` and `addTagger`.
-- **Multi-style captions**: `withSubtitleStyles({ kindA: ..., kindB: ... })` for documents with multiple `Section.kind` groups, each carrying its own visual rule.
+- **Effects and semantic taggers**: pure document-transforming stages (smart punctuation, lowercase, regex/wordlist taggers, etc.) added via `addEffect` and `addTagger`, or set wholesale with `withEffects` and `withTaggers`.
+- **Multi-style captions**: `withSubtitleStyles({ kindA: ..., kindB: ... })` for documents with multiple `Section.kind` groups, each carrying its own visual rule. `withSubtitleStyle` replaces the default wholesale; `withCss`, `withAlignment`, `withInlineStyles` and `withRenderingConfig` layer onto it.
 
 Full type definitions and inline JSDoc ship in `dist/index.d.ts`. Runnable browser and CLI consumers live in [`examples/`](examples) in the source repository.
 

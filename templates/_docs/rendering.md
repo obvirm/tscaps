@@ -127,7 +127,7 @@ silently does nothing in the preview.
 ## Text behind the actor
 
 ```jsonc
-"behindActor": { "required": true, "tagCondition": "highlight or hook" }
+"behindActor": { "required": true, "tagCondition": "peak or hook" }
 ```
 
 When the scene is a good fit — a person is present, the shot is steady and sharp — the actor's
@@ -181,9 +181,14 @@ the cutout over the un-moved caption.
 
 The engine's line splitter decides where to break a long caption by measuring how wide each
 candidate run of words would render. The measurement is analytical: typography (font, weight,
-size, letter and word spacing, padding, margin, text transform) is resolved once against a
-hidden shadow-DOM probe, then each word's width is computed with Canvas 2D `measureText` plus
+size, letter and word spacing, padding, margin, text transform) is resolved against a hidden
+shadow-DOM probe, then each word's width is computed with Canvas 2D `measureText` plus
 per-letter spacing and per-word padding and margin contributions added arithmetically.
+
+The probe is styled with the classes each word will carry, so a rule that changes the face,
+the weight or the size of `.emphasis`, `.accent`, `.entity` or a structure tag is measured at
+the size it renders at rather than at a plain word's. Grow a tagged word freely; the lines
+are broken around what it actually costs.
 
 **It looks only at the words' text strings.** Anything painted through `::before` / `::after`
 is invisible to it. That is almost always correct: a purely visual extension should not bias
@@ -198,3 +203,4 @@ above the text area, a caret positioned past the last letter — none of them ne
 
 For those, render the glyph inside a real element — an extra wrapper, or a structure tag — so
 its text reaches the measurer through a word.
+

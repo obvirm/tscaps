@@ -62,7 +62,7 @@ export const StyleTab = memo(function StyleTab({ sheetScope }: StyleTabProps) {
         <Section title={VARIANT_SECTION_TITLE}>
           <Select
             label={VARIANT_FIELD_LABEL}
-            value={String(activeSheet.variantIndex)}
+            value={String(activeSheet.resolveVariantIndex())}
             options={variantOptions}
             onChange={(value) => sheets.actions.style.updateVariant.execute(Number(value))}
           />

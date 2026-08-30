@@ -81,6 +81,7 @@ export const EditorWorkspacePane = memo(function EditorWorkspacePane({
       value={activeId}
       onValueChange={(v) => store.setActiveMode(v as EditorModeId)}
       className="flex flex-col h-full min-h-0 gap-2 lg:gap-3"
+      data-tscaps-sidebar
     >
       <div className={isInspectorOpen ? 'hidden' : 'contents'}>
         <Tabs.List className={MODE_TABS_LIST_CLASS} aria-label="Editor mode">

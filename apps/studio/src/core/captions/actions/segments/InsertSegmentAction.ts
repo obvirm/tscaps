@@ -5,9 +5,13 @@ import type { SegmentTimeBounds } from '@core/captions/services/SegmentTimeBound
 import type { WordTimeLimits } from '@core/captions/services/WordTimeBounds';
 import type { Segment } from '@tscaps/engine';
 import type { EditorStore } from '@core/editor/store/EditorStore';
+import type { EditorState } from '@core/editor/domain/EditorState';
 import type { DocumentDeriver } from '@core/editor/services/DocumentDeriver';
+import { MAIN_SHEET_ID } from '@core/sheets/domain/Sheet';
 
 const docEditor = new DocumentEditor();
+
+type Insertion = ReturnType<DocumentEditor['insertSegmentAt']>;
 
 /**
  * Inserts a new empty segment beside the anchor, claiming the room next
@@ -34,7 +38,9 @@ const docEditor = new DocumentEditor();
  *
  * The first scene of an empty document is the exception and still claims
  * the whole video: with no anchor there is no `+` to have mis-clicked,
- * and the scene it produces is the only one there is to find.
+ * and the scene it produces is the only one there is to find. It also
+ * has no anchor to inherit a sheet from, so it is written under the one
+ * on screen.
  *
  * Effects are reapplied so neighbours that had been padded across the
  * now-occupied gap settle back against the new segment boundary.
@@ -54,21 +60,50 @@ export class InsertSegmentAction {
     if (!document) return '';
 
     const flat = document.getSegments();
-    const anchor = flat[segIdx];
-    if (!anchor && flat.length > 0) return '';
-    const time = anchor
-      ? this._roomBeside(document, anchor, position)
-      : new TimeFragment(0, this.videoDurationProvider());
+    const inserted = flat.length === 0
+      ? this._firstScene(document, snap)
+      : this._sceneBeside(document, flat, segIdx, position);
+    if (!inserted) return '';
 
-    const { doc, wordId, segmentId } = docEditor.insertSegmentAt(document, segIdx, position, time);
-    if (!wordId) return '';
-
+    const { doc, wordId, segmentId } = inserted;
     const next = this.deriver.reapplyEffects(doc, snap.sheets, snap.video.duration, snap.decorationOverrides);
     const frozenSegments = snap.frozenSegments.withStructurallyEdited([segmentId]);
 
     this.store.commit();
     this.store.patch({ document: next, frozenSegments });
     return wordId;
+  }
+
+  private _firstScene(document: Document, snap: EditorState): Insertion {
+    return docEditor.insertFirstSegment(
+      document,
+      new TimeFragment(0, this.videoDurationProvider()),
+      this._firstSceneSheetId(snap),
+    );
+  }
+
+  private _sceneBeside(
+    document: Document,
+    flat: ReadonlyArray<Segment>,
+    segIdx: number,
+    position: 'before' | 'after',
+  ): Insertion | null {
+    const anchor = flat[segIdx];
+    if (!anchor) return null;
+    return docEditor.insertSegmentAt(document, segIdx, position, this._roomBeside(document, anchor, position));
+  }
+
+  /**
+   * Sheet the first scene of an empty document is written under: the
+   * one on screen, which is what the user is looking at, and Main when
+   * that one is gone. A section naming a sheet nobody owns is dropped
+   * the next time the document is derived, and a scene dropped that way
+   * still shows in the transcript while nothing paints it.
+   */
+  private _firstSceneSheetId(snap: EditorState): string {
+    const active = snap.activeSheetId;
+    if (active !== null && snap.sheets.some((sheet) => sheet.id === active)) return active;
+    return MAIN_SHEET_ID;
   }
 
   private _roomBeside(

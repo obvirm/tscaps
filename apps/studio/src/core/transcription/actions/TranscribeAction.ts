@@ -44,6 +44,7 @@ export class TranscribeAction {
     videoFile: File,
     preference: TranscribePreference,
     options?: TranscriberOptions,
+    languageCode?: string | null,
   ): Promise<Document> {
     this.transcriber.setConfig({
       model: preference.model,
@@ -56,7 +57,7 @@ export class TranscribeAction {
 
     try {
       const transcribed = await this.transcriber.transcribe(videoFile, options);
-      const document = this.assemble(transcribed.getWords(), regions);
+      const document = this.assemble(transcribed.getWords(), regions, languageCode ?? null);
       if (regions.length > 0) {
         this.untranscribedRegionsStore.publish(regions, preference.model);
         this.telemetry.capture('transcription_gaps_detected', {
@@ -78,6 +79,7 @@ export class TranscribeAction {
   private assemble(
     rawWords: ReadonlyArray<Word>,
     untranscribedRegions: ReadonlyArray<UntranscribedRegion>,
+    languageCode: string | null,
   ): Document {
     const allWords = this.overlapClamper.clamp(this.withPlaceholders(rawWords, untranscribedRegions));
     const segments = allWords.length === 0
@@ -86,6 +88,7 @@ export class TranscribeAction {
     return new Document({
       sections: [new Section({ segments, kind: MAIN_SHEET_ID })],
       narrationPace: NarrationPace.fromWords(allWords),
+      language: languageCode,
     });
   }
 

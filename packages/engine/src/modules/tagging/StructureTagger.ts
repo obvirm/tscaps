@@ -82,7 +82,7 @@ export class StructureTagger extends Tagger {
       this.tagWord(word, wordIdx, line.words.length, segmentWords, sectionWords),
     );
 
-    return new Line({ words: taggedWords, structureTags: tags, id: line.id });
+    return line.with({ words: taggedWords, structureTags: tags });
   }
 
   private tagWord(

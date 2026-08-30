@@ -1,7 +1,12 @@
 {
   "name": "Pico",
-  "categories": [
-    "decorative"
+  "category": "lab",
+  "variants": [
+    { "label": "Silver", "overrides": { "primary-color": "#d4d4d4" } },
+    { "label": "Sand", "overrides": { "primary-color": "#ce9178" } },
+    { "label": "Sky", "overrides": { "primary-color": "#9cdcfe" } },
+    { "label": "Sage", "overrides": { "primary-color": "#b5cea8" } },
+    { "label": "Butter", "overrides": { "primary-color": "#dcdcaa" } }
   ],
   "typography": {
     "fontFamily": "JetBrains Mono Variable",
@@ -87,7 +92,7 @@
     },
     {
       "id": "tag-bold",
-      "label": "Bold tags",
+      "label": "Bold accents",
       "type": "toggle",
       "default": true,
       "valueOn": "900",

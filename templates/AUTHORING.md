@@ -159,14 +159,14 @@ where the design does:
 ```json
 {
   "name": "Aria",
-  "categories": ["clean"],
+  "category": "classic",
   "typography": {
     "fontFamily": "Inter",
     "fontWeight": 700,
     "fontSize": 3,
     "wordSpacing": 0.1
   },
-  "alignment": { "verticalAlign": "bottom", "verticalOffset": 0.12 }
+  "alignment": { "verticalAlign": "top", "verticalOffset": 0.86 }
 }
 ```
 
@@ -323,7 +323,7 @@ The whole of step 2's `.segment` and `.word` blocks are one mixin each:
 }
 ```
 
-And step 4's animation is one of fourteen recipes:
+And step 4's animation is one of fifteen recipes:
 
 ```scss
 @use '../_lib/animation/rise-in' as *;
@@ -392,7 +392,7 @@ The guide stops here. Each reference below is self-contained; open the one you n
 | [`_docs/template-json.md`](_docs/template-json.md) | Every field of `template.json`: splitters, line splitter, effects, variants, features, rendering switches, behind-actor |
 | [`_docs/css-contract.md`](_docs/css-contract.md) | Everything the runtime publishes to CSS: element tree, state classes, structure tags, timing variables, structural metadata, letter mode, right-to-left, addressing one element, shared assets |
 | [`_docs/style-controls.md`](_docs/style-controls.md) | The universal typography variables, your own controls, the catalogue, groups and subgroups, what the build refuses |
-| [`_docs/animation.md`](_docs/animation.md) | The paused model, the four animation patterns, the library of fourteen recipes, declaring what you apply, the entrances a user can pick, per-animation controls |
+| [`_docs/animation.md`](_docs/animation.md) | The paused model, the four animation patterns, the library of fifteen recipes, declaring what you apply, the entrances a user can pick, per-animation controls |
 | [`_docs/library.md`](_docs/library.md) | The Sass build and every primitive: `segment-typography`, `word-layout`, `soft-drop-shadow`, `dynamic-font-size`, `control.field`, the filter recipes |
 | [`_docs/filters.md`](_docs/filters.md) | `filters.svg`: file shape, filter regions, variable substitution, recipes, what SMIL cannot do, cross-browser notes |
 | [`_docs/rendering.md`](_docs/rendering.md) | Where preview and export differ, the video-frame layer, text behind the actor, how the line splitter measures |

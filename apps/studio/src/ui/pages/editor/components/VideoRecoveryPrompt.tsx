@@ -1,11 +1,15 @@
 import { useRef } from 'react';
-import { Upload } from 'lucide-react';
+import { AlertTriangle, Upload } from 'lucide-react';
+import type { AppError } from '@core/errors/domain/AppError';
 import { AppDialog, AppDialogActions } from '@ui/_shared/components/Dialog/AppDialog';
+import { getAppErrorTitle, useAppErrorShortDescription } from '@ui/_shared/components/AppErrorMessage/AppErrorMessage';
 import { BTN_PRIMARY_SM, BTN_SECONDARY_SM } from '@ui/_shared/styles/buttons';
 
 interface VideoRecoveryPromptProps {
   projectName: string;
   videoFileName: string;
+  /** What went wrong with the file chosen last, if one was chosen and rejected. */
+  error: AppError | null;
   onSelect: (file: File) => void;
   onCancel: () => void;
 }
@@ -14,8 +18,11 @@ interface VideoRecoveryPromptProps {
  * Shown after LoadProjectAction succeeds but the video Blob has been
  * evicted by the LRU cache. Names the original file so the user can
  * recognise which one to re-pick. Cancel returns to the dashboard.
+ *
+ * Stays open when a chosen file is refused, with the reason above the
+ * picker: the answer to most of those failures is another file.
  */
-export function VideoRecoveryPrompt({ projectName, videoFileName, onSelect, onCancel }: VideoRecoveryPromptProps) {
+export function VideoRecoveryPrompt({ projectName, videoFileName, error, onSelect, onCancel }: VideoRecoveryPromptProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const handleClick = () => inputRef.current?.click();
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -40,6 +47,7 @@ export function VideoRecoveryPrompt({ projectName, videoFileName, onSelect, onCa
           Re-select <strong className="text-fg-primary">{videoFileName}</strong> to keep editing — your
           captions, sheets, and styles are intact.
         </p>
+        {error && <RejectedFileNotice error={error} />}
       </div>
       <AppDialogActions>
         <button type="button" className={BTN_SECONDARY_SM} onClick={onCancel}>Back to dashboard</button>
@@ -50,5 +58,20 @@ export function VideoRecoveryPrompt({ projectName, videoFileName, onSelect, onCa
         <input ref={inputRef} type="file" accept="video/*" onChange={handleChange} hidden />
       </AppDialogActions>
     </AppDialog>
+  );
+}
+
+function RejectedFileNotice({ error }: { readonly error: AppError }) {
+  const description = useAppErrorShortDescription(error);
+  return (
+    <div
+      role="alert"
+      className="mt-1 flex items-start gap-2 rounded-md border border-danger/40 bg-danger/10 px-3 py-2"
+    >
+      <AlertTriangle size={16} strokeWidth={2.5} className="text-danger shrink-0 mt-0.5" aria-hidden="true" />
+      <p className="text-sm text-fg-secondary leading-normal m-0">
+        <span className="text-fg-primary">{getAppErrorTitle(error)}.</span> {description}
+      </p>
+    </div>
   );
 }

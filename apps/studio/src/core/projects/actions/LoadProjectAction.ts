@@ -2,15 +2,15 @@ import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { RefreshDocumentAction } from '@core/editor/actions/RefreshDocumentAction';
 import type { ProjectRepository } from '@core/projects/domain/ProjectRepository';
 import type { Project } from '@core/projects/domain/Project';
+import type { ProjectName } from '@core/projects/domain/ProjectName';
 import type { TemplateBrowserSupportChecker } from '@core/browser-support/services/TemplateBrowserSupportChecker';
 import type { ExportStore } from '@core/export/store/ExportStore';
 import type { TemplateSubstitutionNotifier } from '@core/templates/domain/TemplateSubstitutionNotifier';
-import type { PreviewProxy } from '@core/preview/domain/PreviewProxy';
-import type { PreviewProxyRepository } from '@core/preview/domain/PreviewProxyRepository';
 import type { PreviewProxyResolver } from '@core/preview/services/PreviewProxyResolver';
 import type { StartOriginalVideoDownloadAction } from '@core/projects/actions/StartOriginalVideoDownloadAction';
 import type { OriginalVideoDownloadStore } from '@core/projects/store/OriginalVideoDownloadStore';
 import type { VideoCompatibilityChecker } from '@core/videos/domain/VideoCompatibilityChecker';
+import type { BehindActorTemplateSubstituter } from '@core/person-segmentation/services/BehindActorTemplateSubstituter';
 
 /**
  * Outcome of {@link LoadProjectAction.execute}.
@@ -22,10 +22,12 @@ import type { VideoCompatibilityChecker } from '@core/videos/domain/VideoCompati
  * - `unsupportedTemplateIds` lists any template ids referenced by the
  *   project's sheets that the current browser cannot render. When
  *   non-empty, the editor state is left untouched.
- * - `substitutedTemplateIds` lists template ids that were missing from
- *   the catalog and replaced with a fallback during deserialization.
- *   The loaded project reflects the substitution; the caller is
- *   expected to surface a notice so the user understands the swap.
+ * - `substitutedTemplateIds` lists template ids that were replaced
+ *   with a fallback: either the catalog no longer carries them, or
+ *   they need the text-behind-actor effect and this project's preview
+ *   will not be able to render it. The loaded project reflects the
+ *   substitution; the caller is expected to surface a notice so the
+ *   user understands the swap.
  */
 export interface LoadProjectResult {
   readonly project: Project;
@@ -43,8 +45,8 @@ export interface LoadProjectResult {
  * via the optional remote sync: the editor opens against the proxy
  * with the original-video bytes still in flight, and a background
  * download fills `video.file` when the bytes land. Falls back to a
- * cold path — load the original first, generate the proxy from it —
- * when both cache and remote miss.
+ * cold path — load the original and play it directly — when both
+ * cache and remote miss. Opening never generates a proxy.
  *
  * If any sheet references a template outside the support set, the
  * store is left untouched and the result carries the offending ids
@@ -73,46 +75,47 @@ export class LoadProjectAction {
     private readonly templateSupportChecker: TemplateBrowserSupportChecker,
     private readonly templateSubstitutionNotifier: TemplateSubstitutionNotifier,
     private readonly previewProxyResolver: PreviewProxyResolver,
-    private readonly proxyRepository: PreviewProxyRepository,
     private readonly startOriginalDownload: StartOriginalVideoDownloadAction,
     private readonly compatibilityChecker: VideoCompatibilityChecker,
+    private readonly behindActorSubstituter: BehindActorTemplateSubstituter,
+    private readonly projectName: ProjectName,
   ) {}
 
   async execute(projectId: string, signal?: AbortSignal): Promise<LoadProjectResult> {
     this.exportStore.reset();
     this.downloadStore.reset();
-    const { project, substitutedTemplateIds } = await this.loadProjectWithSubstitutions(projectId);
+    const substituted = new Set<string>();
+    const unsubscribe = this.templateSubstitutionNotifier.subscribe((id) => { substituted.add(id); });
+    try {
+      return await this.loadUnderSubscription(projectId, substituted, signal);
+    } finally {
+      unsubscribe();
+    }
+  }
+
+  private async loadUnderSubscription(
+    projectId: string,
+    substituted: Set<string>,
+    signal: AbortSignal | undefined,
+  ): Promise<LoadProjectResult> {
+    const loaded = await this.repository.load(projectId);
+    if (!loaded) throw new Error(`Project not found: ${projectId}`);
     signal?.throwIfAborted();
 
-    const unsupportedTemplateIds = this.collectUnsupportedTemplates(project);
+    const unsupportedTemplateIds = this.collectUnsupportedTemplates(loaded);
     if (unsupportedTemplateIds.length > 0) {
-      return { project, videoRecovered: false, unsupportedTemplateIds, substitutedTemplateIds };
+      return { project: loaded, videoRecovered: false, unsupportedTemplateIds, substitutedTemplateIds: [...substituted] };
     }
 
     this.releasePreviousObjectUrl();
     this.enterLoadingState();
 
-    const usedFastPath = await this.tryFastPath(project, substitutedTemplateIds, signal);
-    if (usedFastPath) {
-      return { project, videoRecovered: true, unsupportedTemplateIds: [], substitutedTemplateIds };
+    const project = await this.tryFastPath(loaded, substituted, signal);
+    if (project) {
+      return { project, videoRecovered: true, unsupportedTemplateIds: [], substitutedTemplateIds: [...substituted] };
     }
-    const videoRecovered = await this.runColdPath(project, substitutedTemplateIds, signal);
-    return { project, videoRecovered, unsupportedTemplateIds: [], substitutedTemplateIds };
-  }
-
-  private async loadProjectWithSubstitutions(projectId: string): Promise<{
-    project: Project;
-    substitutedTemplateIds: ReadonlyArray<string>;
-  }> {
-    const collected = new Set<string>();
-    const unsubscribe = this.templateSubstitutionNotifier.subscribe((id) => { collected.add(id); });
-    try {
-      const project = await this.repository.load(projectId);
-      if (!project) throw new Error(`Project not found: ${projectId}`);
-      return { project, substitutedTemplateIds: [...collected] };
-    } finally {
-      unsubscribe();
-    }
+    const cold = await this.runColdPath(loaded, substituted, signal);
+    return { ...cold, unsupportedTemplateIds: [], substitutedTemplateIds: [...substituted] };
   }
 
   /**
@@ -121,45 +124,49 @@ export class LoadProjectAction {
    * commits the project with `file: null` and dispatches the
    * original-video download in the background under the same
    * cancellation signal so navigating away aborts the download too.
+   *
+   * Resolves to the committed project, or `null` when the repository
+   * holds no proxy and the cold path has to run instead.
    */
   private async tryFastPath(
-    project: Project,
-    substitutedTemplateIds: ReadonlyArray<string>,
+    loaded: Project,
+    substituted: Set<string>,
     signal: AbortSignal | undefined,
-  ): Promise<boolean> {
-    this.editorStore.patch({ projectId: project.id });
-    const proxy = await this.previewProxyResolver.fromRepository(project.id);
+  ): Promise<Project | null> {
+    this.editorStore.patch({ projectId: loaded.id });
+    const proxy = await this.previewProxyResolver.fromRepository(loaded.id);
     signal?.throwIfAborted();
-    if (!proxy) return false;
-    this.editorStore.patchVideo({ previewFile: proxy.blob, previewIsProxy: true });
-    this.commitProject(project, null, substitutedTemplateIds.length > 0);
+    if (!proxy) return null;
+    this.editorStore.patchVideo({ preview: { kind: 'proxy', file: proxy.blob } });
+    const project = await this.behindActorSubstituter.substitute(loaded);
+    this.commitProject(project, null, substituted.size > 0);
     this.refresh.execute();
     void this.startOriginalDownload.execute(signal);
-    return true;
+    return project;
   }
 
   /**
-   * Falls back to fetching the original bytes and generating the
-   * proxy from them. Returns `true` when the bytes were recovered
-   * and committed to the store; `false` when the project has no
-   * source bytes available.
+   * Falls back to fetching the original bytes and playing them.
+   * `videoRecovered` is `false` when the project has no source bytes
+   * available, which sends the route to the recovery prompt.
    */
   private async runColdPath(
-    project: Project,
-    substitutedTemplateIds: ReadonlyArray<string>,
+    loaded: Project,
+    substituted: Set<string>,
     signal: AbortSignal | undefined,
-  ): Promise<boolean> {
-    const blob = await this.downloadOriginalWithProgress(project.id, signal);
+  ): Promise<{ project: Project; videoRecovered: boolean }> {
+    const blob = await this.downloadOriginalWithProgress(loaded.id, signal);
     signal?.throwIfAborted();
     if (blob) {
       await this.compatibilityChecker.check(blob);
       signal?.throwIfAborted();
-      await this.publishPreviewProxy(project.id, blob, signal);
+      this.playSourceWithoutProxy(blob);
     }
-    this.commitProject(project, blob, substitutedTemplateIds.length > 0);
+    const project = await this.behindActorSubstituter.substitute(loaded);
+    this.commitProject(project, blob, substituted.size > 0);
     this.refresh.execute();
     if (blob) this.downloadStore.markReady();
-    return blob !== null;
+    return { project, videoRecovered: blob !== null };
   }
 
   private async downloadOriginalWithProgress(
@@ -174,30 +181,22 @@ export class LoadProjectAction {
     );
   }
 
-  private async publishPreviewProxy(
-    projectId: string,
-    source: Blob,
-    signal: AbortSignal | undefined,
-  ): Promise<void> {
-    const cached = await this.previewProxyResolver.fromRepository(projectId);
-    signal?.throwIfAborted();
-    if (cached) {
-      this.editorStore.patchVideo({ previewFile: cached.blob, previewIsProxy: true });
-      return;
-    }
-    const resolution = await this.previewProxyResolver.fromSource(source);
-    signal?.throwIfAborted();
-    this.editorStore.patchVideo({
-      previewFile: resolution.previewBlob,
-      previewIsProxy: resolution.freshProxy !== null,
-    });
-    if (resolution.freshProxy) this.dispatchProxyStore(projectId, resolution.freshProxy);
-  }
-
-  private dispatchProxyStore(projectId: string, proxy: PreviewProxy): void {
-    void this.proxyRepository.store(projectId, proxy).catch((error) => {
-      console.error('[load-project] preview-proxy store failed', error);
-    });
+  /**
+   * Plays the source, without generating anything.
+   *
+   * Only reached when the repository holds no proxy for this project,
+   * which is not a reason to build one: opening is not importing. Any
+   * stored proxy, wherever the repository keeps it, was already found
+   * by the fast path — so reaching here means it was never made, or
+   * that the video cache outlived it, and the two share a cap and
+   * normally evict together. When the video is gone too, the recovery
+   * prompt runs instead and does generate, from the file it is handed.
+   *
+   * Generating here charged the whole wait to every open of a project
+   * that had already given up on one.
+   */
+  private playSourceWithoutProxy(source: Blob): void {
+    this.editorStore.patchVideo({ preview: { kind: 'original', file: source, reason: 'none-stored' } });
   }
 
   private enterLoadingState(): void {
@@ -231,7 +230,7 @@ export class LoadProjectAction {
       decorationOverrides: project.decorationOverrides,
       cuts: project.cuts,
       projectId: project.id,
-      projectName: project.name,
+      projectName: this.projectName.clamp(project.name),
       projectCreatedAt: project.createdAt,
       projectThumbnail: project.thumbnail,
       status: 'idle',

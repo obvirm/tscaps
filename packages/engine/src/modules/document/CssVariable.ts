@@ -28,6 +28,7 @@ export enum CssVariable {
   SEGMENT_ENDS = '--on-segment-ends',
   SEGMENT_DURATION = '--segment-duration',
   SEGMENT_CHAR_COUNT = '--segment-char-count',
+  SEGMENT_WIDTH_EM = '--segment-width-em',
   SEGMENT_INDEX = '--segment-index',
 
   LINE_NOT_NARRATED_YET_STARTS = '--on-line-not-narrated-yet-starts',
@@ -39,6 +40,8 @@ export enum CssVariable {
   LINE_ALREADY_NARRATED_STARTS = '--on-line-already-narrated-starts',
   LINE_ALREADY_NARRATED_ENDS = '--on-line-already-narrated-ends',
   LINE_ALREADY_NARRATED_DURATION = '--line-already-narrated-duration',
+  LINE_CHAR_COUNT = '--line-char-count',
+  LINE_WIDTH_EM = '--line-width-em',
 
   WORD_NOT_NARRATED_YET_STARTS = '--on-word-not-narrated-yet-starts',
   WORD_NOT_NARRATED_YET_ENDS = '--on-word-not-narrated-yet-ends',
@@ -55,6 +58,7 @@ export enum CssVariable {
 
   WORD_INDEX = '--word-index',
   WORD_CHAR_COUNT = '--word-char-count',
+  WORD_WIDTH_EM = '--word-width-em',
   WORD_COUNT = '--word-count',
   LAST_WORD_CHAR_COUNT = '--last-word-char-count',
 
@@ -66,6 +70,9 @@ export enum CssVariable {
 
   SEGMENT_PADDING_TOP = '--segment-padding-top',
   SEGMENT_PADDING_BOTTOM = '--segment-padding-bottom',
+
+  SEGMENT_ANCHOR_Y = '--segment-anchor-y',
+  SEGMENT_ANCHOR_ORIGIN_Y = '--segment-anchor-origin-y',
 
   // ── Consumer-written ───────────────────────────────────────────
   // The engine's baseline CSS reads these with sensible defaults;

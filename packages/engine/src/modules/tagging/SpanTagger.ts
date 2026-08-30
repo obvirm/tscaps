@@ -73,7 +73,7 @@ export class SpanTagger extends Tagger {
     const words = line.words.map((word) =>
       taggedWords.has(word) ? this.withTag(word) : word,
     );
-    return new Line({ words, structureTags: line.structureTags, id: line.id });
+    return line.with({ words });
   }
 
   private withTag(word: Word): Word {

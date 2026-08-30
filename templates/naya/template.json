@@ -1,7 +1,12 @@
 {
   "name": "Naya",
-  "categories": [
-    "impact"
+  "category": "viral",
+  "variants": [
+    { "label": "Yellow", "overrides": { "highlight-color": "#ffff00" } },
+    { "label": "Cyan", "overrides": { "highlight-color": "#00e5ff" } },
+    { "label": "Green", "overrides": { "highlight-color": "#3ddc84" } },
+    { "label": "Pink", "overrides": { "highlight-color": "#ff4fa3" } },
+    { "label": "Violet", "overrides": { "highlight-color": "#b388ff" } }
   ],
   "typography": {
     "fontFamily": "Anton",

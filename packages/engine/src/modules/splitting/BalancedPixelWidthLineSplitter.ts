@@ -11,16 +11,17 @@ export interface BalancedPixelWidthLineSplitterConfig {
 }
 
 /**
- * Cached per-word widths plus the inter-word space width for a single
- * segment. Anchors all subsequent range queries to O(1) arithmetic.
+ * Cached per-word widths for a single segment. Anchors all subsequent range
+ * queries to O(1) arithmetic.
  *
  * `wordWidthPrefixSums[i]` is the sum of widths of the first `i` words —
- * `[0] = 0`, `[N] = total`. Width of `words[a..b]` (inclusive) rendered
- * alone on a line is `prefixSums[b+1] - prefixSums[a] + (b-a) * spaceWidth`.
+ * `[0] = 0`, `[N] = total`. Each word's width already carries the margins
+ * that hold it off its neighbours, and the words are rendered as adjacent
+ * elements with nothing between them, so a range needs nothing added for
+ * the gaps.
  */
 interface SegmentMeasurements {
   wordWidthPrefixSums: number[];
-  spaceWidth: number;
 }
 
 /**
@@ -51,17 +52,15 @@ export class BalancedPixelWidthLineSplitter implements LineSplitter {
     const prefixSums = new Array<number>(words.length + 1);
     prefixSums[0] = 0;
     for (let i = 0; i < words.length; i++) {
-      prefixSums[i + 1] = prefixSums[i]! + this._measurer.measure(words[i]!.text);
+      const word = words[i]!;
+      prefixSums[i + 1] = prefixSums[i]! + this._measurer.measure(word.text, word.getTagCssClasses());
     }
-    return { wordWidthPrefixSums: prefixSums, spaceWidth: this._measurer.spaceWidth() };
+    return { wordWidthPrefixSums: prefixSums };
   }
 
-  /**
-   * Width of `words[a..b]` (inclusive, in original segment indices) rendered
-   * alone on a line: sum of word widths plus one inter-word gap per pair.
-   */
+  /** Width of `words[a..b]` (inclusive, in original segment indices) rendered alone on a line. */
   private rangeWidth(m: SegmentMeasurements, a: number, b: number): number {
-    return m.wordWidthPrefixSums[b + 1]! - m.wordWidthPrefixSums[a]! + (b - a) * m.spaceWidth;
+    return m.wordWidthPrefixSums[b + 1]! - m.wordWidthPrefixSums[a]!;
   }
 
   private buildLines(words: Word[], m: SegmentMeasurements): Line[] {

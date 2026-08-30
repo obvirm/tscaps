@@ -5,11 +5,14 @@ import type { IndexedDbStoreDefinition } from '@core/_shared/infrastructure/Inde
 import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { ExportStore } from '@core/export/store/ExportStore';
 import type { RefreshDocumentAction } from '@core/editor/actions/RefreshDocumentAction';
+import type { BehindActorPreviewSupportChecker } from '@core/person-segmentation/services/BehindActorPreviewSupportChecker';
+import { BehindActorTemplateSubstituter } from '@core/person-segmentation/services/BehindActorTemplateSubstituter';
 import type { TemplateBrowserSupportChecker } from '@core/browser-support/services/TemplateBrowserSupportChecker';
 import type { StyledElementCatalog } from '@core/elements/domain/StyledElementCatalog';
 import type { ElementControlCssWriter } from '@core/elements/services/css/ElementControlCssWriter';
 import type { ElementAnimationCssWriter } from '@core/elements/services/css/ElementAnimationCssWriter';
 import type { ProjectRepository } from '@core/projects/domain/ProjectRepository';
+import { ProjectName } from '@core/projects/domain/ProjectName';
 import type { UnsavedWorkPolicy } from '@core/projects/domain/UnsavedWorkPolicy';
 import { IndexedDbProjectRepository } from '@core/projects/infrastructure/repositories/IndexedDbProjectRepository';
 import type { TemplateRepository } from '@core/templates/domain/TemplateRepository';
@@ -46,6 +49,13 @@ import type { FileDownloader } from '@core/_shared/domain/FileDownloader';
 
 export interface ProjectsDependencies {
   readonly templateRepository: TemplateRepository;
+  /**
+   * Where a behind-actor template that cannot be rendered goes
+   * looking for its replacement — the same catalog the gallery
+   * offers, so the swap lands on something this session can show.
+   */
+  readonly behindActorFallbackTemplates: TemplateRepository;
+  readonly behindActorSupportChecker: BehindActorPreviewSupportChecker;
   readonly store: EditorStore;
   readonly exportStore: ExportStore;
   readonly refresh: RefreshDocumentAction;
@@ -74,6 +84,11 @@ export type ProjectsModule = ReturnType<typeof bootProjects>;
  */
 export function bootProjects(deps: ProjectsDependencies) {
   const templateSubstitutionNotifier = new TemplateSubstitutionNotifier();
+  const behindActorTemplateSubstituter = new BehindActorTemplateSubstituter(
+    deps.behindActorSupportChecker,
+    deps.behindActorFallbackTemplates,
+    templateSubstitutionNotifier,
+  );
   const templateReferenceResolver = new FallbackingTemplateReferenceResolver(
     deps.templateRepository,
     templateSubstitutionNotifier,
@@ -97,6 +112,7 @@ export function bootProjects(deps: ProjectsDependencies) {
   const unsavedWorkPolicy: UnsavedWorkPolicy = editorStatePolicy;
 
   const thumbnails = new ThumbnailGenerator();
+  const projectName = new ProjectName();
   const saveFailureReporter = new NonBlockingFailureReporter(
     deps.telemetry.telemetry,
     deps.appNoticeChannel,
@@ -104,6 +120,14 @@ export function bootProjects(deps: ProjectsDependencies) {
     deps.errorTelemetryDescriber,
     deps.storageFootprintProbe,
     'project_save_failed',
+  );
+  const videoStoreFailureReporter = new NonBlockingFailureReporter(
+    deps.telemetry.telemetry,
+    deps.appNoticeChannel,
+    deps.errorClassifier,
+    deps.errorTelemetryDescriber,
+    deps.storageFootprintProbe,
+    'project_video_store_failed',
   );
   const originalVideoDownloadStore = new OriginalVideoDownloadStore();
   const startOriginalVideoDownload = new StartOriginalVideoDownloadAction(
@@ -115,11 +139,13 @@ export function bootProjects(deps: ProjectsDependencies) {
     repository,
     serializer,
     thumbnails,
+    projectName,
     saveFailureReporter,
+    videoStoreFailureReporter,
     originalVideoDownloadStore,
     unsavedWorkPolicy,
     actions: {
-      create: new CreateProjectAction(deps.store, repository, thumbnails),
+      create: new CreateProjectAction(deps.store, repository, thumbnails, projectName),
       save: new SaveProjectAction(deps.store, repository, projectBuilder, serializer),
       load: new LoadProjectAction(
         deps.store,
@@ -130,9 +156,10 @@ export function bootProjects(deps: ProjectsDependencies) {
         deps.templateSupportChecker,
         templateSubstitutionNotifier,
         deps.preview.proxyResolver,
-        deps.preview.proxyRepository,
         startOriginalVideoDownload,
         deps.videos.services.compatibilityChecker,
+        behindActorTemplateSubstituter,
+        projectName,
       ),
       delete: new DeleteProjectAction(repository),
       list: new ListProjectsAction(repository),
@@ -146,8 +173,9 @@ export function bootProjects(deps: ProjectsDependencies) {
         deps.personSegmentationCacheRepository,
         deps.videos.services.compatibilityChecker,
         new MediaBunnyVideoMetadataProbe(),
+        videoStoreFailureReporter,
       ),
-      rename: new RenameProjectAction(deps.store),
+      rename: new RenameProjectAction(deps.store, projectName),
       startOriginalVideoDownload,
     },
   };

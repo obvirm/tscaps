@@ -1,7 +1,12 @@
 {
   "name": "Ivo",
-  "categories": [
-    "decorative"
+  "category": "viral",
+  "variants": [
+    { "label": "Lime", "overrides": { "accent-bg": "#adff2f" } },
+    { "label": "Gold", "overrides": { "accent-bg": "#ffd700" } },
+    { "label": "Aqua", "overrides": { "accent-bg": "#5ce1e6" } },
+    { "label": "Blossom", "overrides": { "accent-bg": "#ff9ecd" } },
+    { "label": "Lavender", "overrides": { "accent-bg": "#c9b6ff" } }
   ],
   "typography": {
     "fontFamily": "Anton",
@@ -95,7 +100,7 @@
     "type": "balanced-pixel-width",
     "minLines": 2,
     "maxLines": 2,
-    "maxWidthRatio": 0.7
+    "maxWidthRatio": 0.67
   },
   "alignment": {
     "verticalAlign": "top",

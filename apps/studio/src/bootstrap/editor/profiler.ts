@@ -5,6 +5,10 @@ import type { ExportStore } from '@core/export/store/ExportStore';
 // Render-pipeline classes we want timed. Other engine classes are skipped to
 // keep the report focused and to avoid profiler overhead on hot per-word /
 // per-letter code paths in the document model.
+//
+// Only names the engine exports reach `wrapNamespace`, which reads the
+// namespace object. A class kept internal has to carry its own
+// `profiler.time` calls instead, and listing it here does nothing.
 const PROFILED_CLASSES = new Set([
   'MediaBunnyVideoRenderer',
   'BrowserSubtitleFrameRenderer',

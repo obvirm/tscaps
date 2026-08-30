@@ -42,6 +42,20 @@ export class Template {
     return this.css;
   }
 
+  /**
+   * The slot in `variants` that a sheet's preferred variant index lands
+   * on for this template. A sheet's index is a preference, not a
+   * position: it outlives templates that ship fewer variants — or none —
+   * so every read of `variants` by index goes through here. Wraps into
+   * range; returns `0` when the template ships no variants at all, where
+   * the sheet renders the template's bare defaults.
+   */
+  resolveVariantIndex(preferredIndex: number): number {
+    const count = this.variants.length;
+    if (count === 0) return 0;
+    return ((preferredIndex % count) + count) % count;
+  }
+
   /** Raw `filters.svg` source the template ships, or `''` if it has none. */
   getFiltersSvg(): string {
     return this.filtersSvg;

@@ -1,8 +1,6 @@
 {
   "name": "Tala",
-  "categories": [
-    "clean"
-  ],
+  "category": "viral",
   "typography": {
     "fontFamily": "Anton",
     "fontWeight": 400,

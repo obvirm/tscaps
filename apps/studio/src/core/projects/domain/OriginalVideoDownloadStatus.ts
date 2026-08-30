@@ -1,10 +1,4 @@
-/**
- * Why the original-video download could not complete. Single value
- * today (network); kept as an explicit type so future reasons (e.g.
- * authorization expired, storage backend gone) can be added without
- * widening string literals across consumers.
- */
-export type OriginalVideoDownloadFailureReason = 'network';
+import type { AppError } from '@core/errors/domain/AppError';
 
 /**
  * Discriminated snapshot of the in-flight (or completed) original-
@@ -17,10 +11,12 @@ export type OriginalVideoDownloadFailureReason = 'network';
  *   carries the received fraction in `[0, 1]`.
  * - `ready`: bytes landed and the editor store's `video.file` reflects
  *   them.
- * - `failed`: fetch ended in error. `reason` names the failure mode.
+ * - `failed`: fetch ended in error, and `error` carries it whole so
+ *   whoever describes the failure can read the condition underneath
+ *   instead of guessing at one.
  */
 export type OriginalVideoDownloadStatus =
   | { readonly kind: 'idle' }
   | { readonly kind: 'downloading'; readonly progress: number | null }
   | { readonly kind: 'ready' }
-  | { readonly kind: 'failed'; readonly reason: OriginalVideoDownloadFailureReason };
+  | { readonly kind: 'failed'; readonly error: AppError };

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ACCEPTED_VIDEO_TYPES, VIDEO_UNSUPPORTED_MESSAGE } from '@ui/_shared/video/videoAcceptance';
 
-const ACCEPTED_TYPES = ['video/mp4', 'video/webm', 'video/quicktime'];
 const ERROR_TIMEOUT_MS = 4000;
 
 interface VideoDropzoneProps {
@@ -43,8 +43,8 @@ export function VideoDropzone({ onFile }: VideoDropzoneProps) {
 
   const handleFile = useCallback(
     (file: File) => {
-      if (!ACCEPTED_TYPES.includes(file.type)) {
-        showError('Unsupported format. Please upload MP4, WebM, or MOV.');
+      if (!ACCEPTED_VIDEO_TYPES.includes(file.type)) {
+        showError(VIDEO_UNSUPPORTED_MESSAGE);
         return;
       }
       setError(null);
@@ -82,7 +82,7 @@ export function VideoDropzone({ onFile }: VideoDropzoneProps) {
           or <span className={BROWSE_LINK}>browse files</span>
           <input
             type="file"
-            accept={ACCEPTED_TYPES.join(',')}
+            accept={ACCEPTED_VIDEO_TYPES.join(',')}
             onChange={handleInputChange}
             hidden
           />

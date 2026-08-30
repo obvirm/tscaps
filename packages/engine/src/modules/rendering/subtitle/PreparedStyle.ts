@@ -27,6 +27,8 @@ export interface PreparedStyle {
   segmentOverrides: ElementRenderOverrides;
   decorationPlacements: ReadonlyMap<string, DecorationPlacementSide>;
   addressableElementIds: ReadonlySet<string>;
+  /** Every custom property the style's CSS reads, whether by substitution or style query. */
+  usedCssVars: ReadonlySet<string>;
   probeStyleElement: HTMLStyleElement;
   probeContainer: HTMLElement;
   scopeClass: string;

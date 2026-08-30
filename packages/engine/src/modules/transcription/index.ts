@@ -7,6 +7,10 @@ export type {
 export type { AudioDecoder } from '@modules/transcription/AudioDecoder';
 export { PreDecodedAudioDecoder } from '@modules/transcription/PreDecodedAudioDecoder';
 export { MediaBunnyAudioDecoder } from '@modules/transcription/MediaBunnyAudioDecoder';
+export { WebAudioAudioDecoder } from '@modules/transcription/WebAudioAudioDecoder';
+export { FallbackAudioDecoder } from '@modules/transcription/FallbackAudioDecoder';
+export { MediaBunnyAudioOnlyRemuxer } from '@modules/transcription/MediaBunnyAudioOnlyRemuxer';
+export type { AudioOnlySegment } from '@modules/transcription/MediaBunnyAudioOnlyRemuxer';
 export { PassthroughTranscriber } from '@modules/transcription/PassthroughTranscriber';
 export { SrtTranscriber } from '@modules/transcription/SrtTranscriber';
 export { VttTranscriber } from '@modules/transcription/VttTranscriber';

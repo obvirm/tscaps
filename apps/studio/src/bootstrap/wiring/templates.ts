@@ -81,39 +81,57 @@ async function loadBuiltinTemplates(
   return new BuiltinTemplateRepository(templates);
 }
 
+/**
+ * Every built-in template, in the order the app receives them. The
+ * order decides two things: the **first entry is the default** every
+ * new sheet and every fallback lands on, and within a family the order
+ * here is the order the gallery lists them in. Grouping by family is
+ * for whoever edits this list — the gallery groups by each template's
+ * own `category`, not by position.
+ */
 function builtinTemplateNames(): string[] {
   return [
+    // Modern
     'mira',
+    'enzo',
+    'sara',
+    'hugo',
     'selene',
-    'noor',
-    'tito',
-    'freya',
-    'loki',
-    'pico',
-    'milo',
-    'lena',
-    'pepper',
-    'juno',
-    'kel',
-    'vera',
-    'otto',
-    'theo',
     'cleo',
-    'yuki',
-    'naya',
-    'iris',
+    'noor',
+    // Key moments
+    'milo',
     'elio',
-    'anya',
-    'zara',
-    'tala',
-    'remi',
-    'ivo',
+    'pastor',
     'levi',
-    'nyx',
-    'lyra',
-    'kai',
     'luna',
     'luca',
+    // Viral
+    'loki',
+    'pepper',
+    'lewis',
+    'naya',
+    'tito',
+    'juno',
+    'freya',
+    'remi',
+    'ivo',
+    'tala',
+    'kai',
+    'zara',
+    // Classic
+    'yuki',
+    'theo',
+    'otto',
+    'vera',
+    'kel',
+    'anya',
+    // Lab
+    'pico',
+    'lena',
+    'lyra',
+    'nyx',
+    'iris',
   ];
 }
 

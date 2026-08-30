@@ -1,6 +1,12 @@
 import type { DecodedVideoFrame } from '@modules/video/mediabunny/frame/VideoFrameDecoder';
 import type { PaintFrame } from '@modules/video/mediabunny/encoder/VideoTrackEncoder';
 
+/** One output frame to paint: the decoded source frame and where it lands on the output timeline. */
+export interface FramePaintRequest {
+  readonly frame: DecodedVideoFrame;
+  readonly outputTimestamp: number;
+}
+
 /**
  * Owns the pixel work for a single transcode run: what to draw into
  * every output frame's canvas. The transcode coordinator owns the
@@ -9,16 +15,16 @@ import type { PaintFrame } from '@modules/video/mediabunny/encoder/VideoTrackEnc
  *
  * Lifecycle is per-run: {@link begin} once at the start with the
  * resolved output dimensions and source frame rate, {@link paint} for
- * each decoded frame in monotonically advancing source-time order, and
- * {@link end} once at the end (called on both success and failure).
- * Instances are single-use unless the concrete class documents
- * otherwise.
+ * each run of decoded frames in monotonically advancing source-time
+ * order, and {@link end} once at the end (called on both success and
+ * failure). Instances are single-use unless the concrete class
+ * documents otherwise.
  *
  * The two-step {@link paint} contract exists because
  * {@link VideoTrackEncoder.encode} takes a synchronous paint callback:
- * any per-frame work that has to be awaited (e.g. rasterizing a
- * caption layer) happens inside {@link paint}, and the returned
- * closure runs synchronously against the encoder's canvas.
+ * any work that has to be awaited (e.g. rasterizing a caption layer)
+ * happens inside {@link paint}, and the returned closures run
+ * synchronously against the encoder's canvas.
  */
 export interface FramePainter {
   /**
@@ -30,14 +36,31 @@ export interface FramePainter {
   begin(width: number, height: number, fps: number): Promise<void>;
 
   /**
-   * Resolves any per-frame state asynchronously and returns the
-   * synchronous paint step the encoder will run. `outputTimestamp` is
-   * the frame's presentation time on the output timeline (already
-   * mapped through any skip ranges by the caller); `frame.timestamp`
-   * carries the source-timeline time and stays authoritative for any
-   * lookup against source-aligned data (captions, per-source overlays).
+   * How many consecutive frames the painter wants handed to one
+   * {@link paint} call to work at its best. `1` means it is happy frame
+   * by frame; a larger number means it amortizes work across the run,
+   * and the caller should gather that many before painting — which
+   * costs it holding them all until the run is painted and encoded.
+   *
+   * A preference, not a requirement: {@link paint} accepts any length,
+   * and the last run of a render is short by nature. Meaningful only
+   * after {@link begin}.
    */
-  paint(frame: DecodedVideoFrame, outputTimestamp: number): Promise<PaintFrame>;
+  lookAhead(): number;
+
+  /**
+   * Resolves any state the run needs asynchronously and returns one
+   * synchronous paint step per request, in the order given.
+   *
+   * Each request's `outputTimestamp` is that frame's presentation time
+   * on the output timeline (already mapped through any skip ranges by
+   * the caller); its `frame.timestamp` carries the source-timeline time
+   * and stays authoritative for any lookup against source-aligned data
+   * (captions, per-source overlays).
+   *
+   * The frames must stay open until every returned step has run.
+   */
+  paint(requests: ReadonlyArray<FramePaintRequest>): Promise<PaintFrame[]>;
 
   /**
    * Releases the per-run resources opened by {@link begin}. Called on

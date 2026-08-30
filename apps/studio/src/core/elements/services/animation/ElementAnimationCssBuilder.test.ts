@@ -54,7 +54,7 @@ function entranceOf(presetId: string, params: Record<string, ElementControlValue
 }
 
 /** Paints one word entering this way across its window, and reads back what moved. */
-async function framesOf(entrance: ElementAnimation): Promise<string> {
+async function framesOf(entrance: ElementAnimation, pseudo?: string): Promise<string> {
   const offsets = ['0s', '-0.05s', '-0.1s', '-0.2s', '-0.3s'];
   const styles = ElementStyles.empty()
     .withAnimation('w1', 'word', ElementAnimationScope.SELF, entrance, entranceCssWriter.rewrite('', 'word', ElementAnimationScope.SELF, undefined, entrance));
@@ -78,10 +78,10 @@ async function framesOf(entrance: ElementAnimation): Promise<string> {
   const page = await browser.newPage();
   try {
     await page.setContent(`<style>${stylesheet}</style><div class="${SCOPE}">${markup}</div>`);
-    return await page.evaluate((count) => Array.from({ length: count }, (_unused, index) => {
-      const style = getComputedStyle(document.getElementById(`s${index}`)!);
+    return await page.evaluate(({ count, part }) => Array.from({ length: count }, (_unused, index) => {
+      const style = getComputedStyle(document.getElementById(`s${index}`)!, part ?? null);
       return `${style.transform}|${style.opacity}`;
-    }).join(' '), offsets.length);
+    }).join(' '), { count: offsets.length, part: pseudo });
   } finally {
     await page.close();
   }
@@ -106,6 +106,43 @@ describe('an entrance built from what was picked', () => {
   it('anchors to the clock the element\'s kind runs on', () => {
     expect(entranceCssBuilder.build(entranceOf('rise-in'), 'word', ElementAnimationScope.SELF)).toContain('--on-word-being-narrated-starts');
     expect(entranceCssBuilder.build(entranceOf('rise-in'), 'segment', ElementAnimationScope.SELF)).toContain('--on-segment-starts');
+  });
+});
+
+describe('an entrance that paints a box of its own', () => {
+  // Applying an entrance silences the element's generated boxes, so that
+  // a box a template was moving does not keep moving under a new answer.
+  // An entrance bringing its own box has to survive that, or it paints
+  // an animation nothing plays.
+  it('moves that box rather than being silenced with the rest', async () => {
+    const frames = await framesOf(entranceOf('flash-in'), '::after');
+    expect(new Set(frames.split(' '))).not.toHaveLength(1);
+  }, 60_000);
+
+  /**
+   * Order alone would already leave the box moving, since its rule is
+   * written after the silencing and the two weigh the same. This is
+   * about what the CSS says rather than what it does: a user reads it,
+   * and a box told to stop on one line and to move on the next reads as
+   * a mistake in whichever of the two they find first.
+   */
+  it('does not tell that box to stop and then move', () => {
+    const css = entranceCssBuilder.build(entranceOf('flash-in'), 'word', ElementAnimationScope.SELF);
+    const silencing = css.slice(0, css.indexOf('&::after {\n'));
+    expect(silencing).not.toContain('&::after');
+    expect(silencing).toContain('&::before');
+  });
+
+  it('is offered only for the kind the library wrote it for', () => {
+    expect(catalog.forKind('word').map((preset) => preset.id)).toContain('flash-in');
+    expect(catalog.forKind('decoration').map((preset) => preset.id)).not.toContain('flash-in');
+  });
+
+  // A decoration runs on the word's clock, so an entrance available for
+  // one and not the other cannot be told apart by the clock alone.
+  it('is refused for a kind it was never built for', () => {
+    const preset = catalog.byId('flash-in')!;
+    expect(() => catalog.declarationsFor(preset, '--on-segment-starts')).toThrow();
   });
 });
 

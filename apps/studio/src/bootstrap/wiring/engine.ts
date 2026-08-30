@@ -8,6 +8,7 @@ import {
   PauseTagger,
   DefaultCodecPolicy,
   DefaultVideoFrameDecoderFactory,
+  type VideoFrameDecoderFactory,
   DefaultAudioTrackBridgeFactory,
   MediaBunnyOutputTargetBuilder,
   MediaBunnyCanvasVideoTrackEncoderFactory,
@@ -17,12 +18,20 @@ import {
   ComposedSubtitleLayerSource,
   BrowserCssResourceEmbedder,
   MediaBunnyAudioDecoder,
+  WebAudioAudioDecoder,
+  FallbackAudioDecoder,
   GraphemeWordSplitter,
   DocumentEditor,
   SvgFilterDefinitionsParser,
   BaselineCssComposer,
   CssClass,
+  CssVariable,
+  SpriteSheetSizeProbe,
+  ImageDecodeSpriteSheetRasterProbe,
 } from '@tscaps/engine';
+import type { ErrorsModule } from '@bootstrap/wiring/errors';
+import type { TelemetryModule } from '@bootstrap/wiring/telemetry';
+import { SpriteSheetProbeReporter } from '@core/export/services/SpriteSheetProbeReporter';
 import { SegmentSplitterRegistry } from '@core/segment-splitter/services/SegmentSplitterRegistry';
 import { LineSplitterRegistry } from '@core/line-splitter/services/LineSplitterRegistry';
 import { EffectRegistry } from '@core/effect/services/EffectRegistry';
@@ -53,7 +62,19 @@ export type EngineModule = ReturnType<typeof bootEngine>;
  * `useEngine()` instead of value-importing from `@tscaps/engine` —
  * keeping the package opaque to the React layer.
  */
-export function bootEngine() {
+export interface EngineDependencies {
+  readonly telemetry: TelemetryModule;
+  readonly errors: ErrorsModule;
+  /**
+   * Which decoders a render may drive the input through. Defaults to
+   * the one that falls back to a `<video>` element for codecs WebCodecs
+   * cannot decode; a host with a cheaper way to handle those than
+   * driving playback supplies its own.
+   */
+  readonly videoFrameDecoderFactory?: VideoFrameDecoderFactory;
+}
+
+export function bootEngine(deps: EngineDependencies) {
   const segmentSplitters = new SegmentSplitterRegistry();
   const lineSplitters = new LineSplitterRegistry();
   const effects = new EffectRegistry();
@@ -63,20 +84,33 @@ export function bootEngine() {
   const cssResourceEmbedder = new BrowserCssResourceEmbedder();
   const documentEditor = new DocumentEditor();
   const svgFilterDefinitionsParser = new SvgFilterDefinitionsParser();
-  const audioDecoder = new MediaBunnyAudioDecoder();
+  // WebCodecs first; the Web Audio path covers browsers whose
+  // WebCodecs has no AudioDecoder (Safari before 26 is video-only).
+  const audioDecoder = new FallbackAudioDecoder(new MediaBunnyAudioDecoder(), new WebAudioAudioDecoder());
   const transcodeCoordinator = new MediaBunnyTranscodeCoordinator({
-    videoFrameDecoderFactory: new DefaultVideoFrameDecoderFactory(),
+    videoFrameDecoderFactory: deps.videoFrameDecoderFactory ?? new DefaultVideoFrameDecoderFactory(),
     videoTrackEncoderFactory: new MediaBunnyCanvasVideoTrackEncoderFactory(),
     audioTrackBridgeFactory: new DefaultAudioTrackBridgeFactory(),
     outputTargetBuilder: new MediaBunnyOutputTargetBuilder(),
   });
+  // Shared by both renderers: a walk decodes rasters up to the whole
+  // pixel budget, and the two work at the same output size.
+  const sizeProbe = new SpriteSheetSizeProbe(
+    new ImageDecodeSpriteSheetRasterProbe(),
+    new SpriteSheetProbeReporter(
+      deps.telemetry.telemetry,
+      deps.errors.errorReporter,
+      deps.errors.errorClassifier,
+      deps.errors.errorTelemetryDescriber,
+    ),
+  );
   const captionsOverlayPainterFactory = new CaptionsOverlayFramePainterFactory(
     new ComposedSubtitleLayerSource(
       new BatchedSubtitleLayerSource(
-        BrowserSubtitleFrameRenderer.create(cssResourceEmbedder, wordSplitter),
+        BrowserSubtitleFrameRenderer.create(cssResourceEmbedder, wordSplitter, { sizeProbe }),
       ),
       new VideoBoundSubtitleLayerSource(
-        BrowserSubtitleFrameRenderer.create(cssResourceEmbedder, wordSplitter),
+        BrowserSubtitleFrameRenderer.create(cssResourceEmbedder, wordSplitter, { sizeProbe }),
       ),
     ),
     new BrowserOverlayFrameRenderer(),
@@ -107,6 +141,9 @@ export function bootEngine() {
       // universal half, so only the optional blocks come across.
       CAPTION_BASELINE_CSS: new BaselineCssComposer().composeOptional({ decorations: true, videoFrame: true }),
       BEHIND_ACTOR_ACTIVE_CLASS: CssClass.BEHIND_ACTOR_ACTIVE,
+      SEGMENT_WIDTH_EM_VARIABLE: CssVariable.SEGMENT_WIDTH_EM,
+      LINE_WIDTH_EM_VARIABLE: CssVariable.LINE_WIDTH_EM,
+      WORD_WIDTH_EM_VARIABLE: CssVariable.WORD_WIDTH_EM,
     },
   };
 }

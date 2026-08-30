@@ -9,6 +9,8 @@ export interface BalancedLineSplitterConfig {
   readonly maxLines: number;
   readonly minLines: number;
   readonly maxCharsPerLine: number;
+  /** Shortest line a break may produce; a split under it falls back to one line fewer. */
+  readonly minCharsPerLine: number;
 }
 
 export interface BalancedPixelWidthLineSplitterConfig {

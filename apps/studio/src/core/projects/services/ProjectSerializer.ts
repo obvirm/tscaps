@@ -31,7 +31,7 @@ import type { ProjectMigrator } from '@core/projects/services/migrations/Project
  * migration step will cause old projects to fail to load with an explicit
  * error.
  */
-export const PROJECT_SCHEMA_VERSION = 17;
+export const PROJECT_SCHEMA_VERSION = 18;
 
 export interface SerializedProject {
   readonly version: number;
@@ -54,6 +54,7 @@ export interface SerializedProject {
 interface SerializedDocument {
   readonly sections: ReadonlyArray<SerializedSection>;
   readonly narrationPace?: Record<string, number>;
+  readonly language?: string;
 }
 
 interface SerializedSection {
@@ -219,15 +220,18 @@ export class ProjectSerializer {
   }
 
   private serializeDocument(doc: Document): SerializedDocument {
-    const sections = doc.sections.map(s => this.serializeSection(s));
-    if (doc.narrationPace.isEmpty()) return { sections };
-    return { sections, narrationPace: doc.narrationPace.toRecord() };
+    return {
+      sections: doc.sections.map(s => this.serializeSection(s)),
+      ...(doc.narrationPace.isEmpty() ? {} : { narrationPace: doc.narrationPace.toRecord() }),
+      ...(doc.language ? { language: doc.language } : {}),
+    };
   }
 
   private deserializeDocument(data: SerializedDocument): Document {
     return new Document({
       sections: data.sections.map(s => this.deserializeSection(s)),
       ...(data.narrationPace ? { narrationPace: NarrationPace.fromRecord(data.narrationPace) } : {}),
+      ...(data.language ? { language: data.language } : {}),
     });
   }
 
@@ -397,23 +401,26 @@ export class ProjectSerializer {
       cssOverride: data.cssOverride,
       filtersSvgOverride: data.filtersSvgOverride,
       linkGroupId: data.linkGroupId ?? null,
-      // Payloads written before roles existed still identify the
-      // auto-created hook sheet by its fixed id.
+      // Payloads written before roles existed identify the hook sheet
+      // by its fixed id alone.
       role: data.role ?? (data.id === HOOK_SHEET_ID ? 'hook' : null),
       textDirection: data.textDirection ?? fallbackDirection,
     });
   }
 
   /**
-   * Restores the stored variant index, clamping into the new template's
-   * variant range. Substituted templates and projects saved before
-   * variants existed both fall back to `0` — the first available slot.
+   * Restores the sheet's stored variant preference as written, out of the
+   * template's current range or not — the sheet resolves it against
+   * whatever template it sits on, and clamping here would erase a preset
+   * the project still means to come back to. Substituted templates,
+   * projects saved before variants existed, and malformed values all fall
+   * back to `0` — the first available slot.
    */
   private resolveVariantIndex(template: Template, data: SerializedSheet): number {
     if (template.metadata.id !== data.templateId) return 0;
     if (data.variantIndex === undefined) return 0;
-    if (template.variants.length === 0) return 0;
-    return data.variantIndex % template.variants.length;
+    if (!Number.isInteger(data.variantIndex) || data.variantIndex < 0) return 0;
+    return data.variantIndex;
   }
 
   // When the resolver substitutes a missing template, the stored style
@@ -424,6 +431,6 @@ export class ProjectSerializer {
     if (template.metadata.id !== data.templateId) {
       return StyleValues.fromTemplate(template.styleControls);
     }
-    return new StyleValues(template.styleControls, data.styleValues);
+    return StyleValues.restoredFrom(template.styleControls, data.styleValues);
   }
 }

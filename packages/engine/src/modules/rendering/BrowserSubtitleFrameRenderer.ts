@@ -14,8 +14,10 @@ import { BaselineCssComposer } from '@modules/rendering/styles/BaselineCssCompos
 import { SvgFilterScoper } from '@modules/svg-filter/SvgFilterScoper';
 import { SegmentPaddingCssRuleBuilder } from '@modules/rendering/styles/SegmentPaddingCssRuleBuilder';
 import { PreparedStyleFactory } from '@modules/rendering/subtitle/PreparedStyleFactory';
-import { SpriteSheetSizeProber } from '@modules/rendering/subtitle/SpriteSheetSizeProber';
+import { SpriteSheetSizeProbe } from '@modules/rendering/subtitle/SpriteSheetSizeProbe';
+import { ImageDecodeSpriteSheetRasterProbe } from '@modules/rendering/subtitle/ImageDecodeSpriteSheetRasterProbe';
 import { ActiveRenderSessionFactory } from '@modules/rendering/subtitle/ActiveRenderSessionFactory';
+import type { AnimationStateFingerprintStrategy } from '@modules/rendering/subtitle/AnimationStateFingerprint';
 import { WordFragmenter } from '@modules/bidi/WordFragmenter';
 import { BidiJsAnalyzer } from '@modules/bidi/BidiJsAnalyzer';
 import { CursiveScriptDetector } from '@modules/bidi/CursiveScriptDetector';
@@ -43,10 +45,11 @@ export class BrowserSubtitleFrameRenderer implements SubtitleFrameRenderer {
   private preparedStyles: Record<string, PreparedStyle> | null = null;
   private width: number | undefined;
   private height: number | undefined;
+  private maxTilesPerBatch: number | null = null;
 
   constructor(
     private readonly preparedStyleFactory: PreparedStyleFactory,
-    private readonly sizeProber: SpriteSheetSizeProber,
+    private readonly sizeProbe: SpriteSheetSizeProbe,
     private readonly sessionFactory: ActiveRenderSessionFactory,
   ) {}
 
@@ -54,14 +57,21 @@ export class BrowserSubtitleFrameRenderer implements SubtitleFrameRenderer {
    * Wires the default collaborator graph: a fresh `CssScoper`,
    * `CssMinifier`, `CssVarReferenceScanner`, `BaselineCssComposer`,
    * `SvgFilterScoper`, and `SegmentPaddingCssRuleBuilder` for the
-   * style preparation pipeline, plus the per-batch sprite-size prober
-   * and the per-session render-state factory. Pass `maxBufferPixels`
-   * to override the default per-batch pixel budget.
+   * style preparation pipeline, plus the sprite-size probe and the
+   * per-session render-state factory.
+   *
+   * `sizeProbe` shares one probe across renderers working at the same
+   * output size, which is worth doing — a walk decodes rasters up to
+   * the whole pixel budget. It carries its own budget, so
+   * `maxBufferPixels` is ignored alongside it.
+   *
+   * `animationStateFingerprint` picks which implementation describes
+   * where a segment's animations stand. Defaults to `keyframe-scan`.
    */
   static create(
     cssEmbedder: CssResourceEmbedder,
     wordSplitter: WordSplitter,
-    options?: { maxBufferPixels?: number },
+    options?: { maxBufferPixels?: number; sizeProbe?: SpriteSheetSizeProbe; animationStateFingerprint?: AnimationStateFingerprintStrategy },
   ): BrowserSubtitleFrameRenderer {
     const baselineCssComposer = new BaselineCssComposer();
     const preparedStyleFactory = new PreparedStyleFactory(
@@ -73,15 +83,18 @@ export class BrowserSubtitleFrameRenderer implements SubtitleFrameRenderer {
       new SvgFilterScoper(),
       new SegmentPaddingCssRuleBuilder(),
     );
-    const sizeProber = options?.maxBufferPixels !== undefined
-      ? new SpriteSheetSizeProber(options.maxBufferPixels)
-      : new SpriteSheetSizeProber();
+    const sizeProbe = options?.sizeProbe ?? new SpriteSheetSizeProbe(
+      new ImageDecodeSpriteSheetRasterProbe(),
+      null,
+      options?.maxBufferPixels,
+    );
     const sessionFactory = new ActiveRenderSessionFactory(
       wordSplitter,
       new WordFragmenter(new BidiJsAnalyzer(), new CursiveScriptDetector()),
       baselineCssComposer,
+      options?.animationStateFingerprint ?? 'keyframe-scan',
     );
-    return new BrowserSubtitleFrameRenderer(preparedStyleFactory, sizeProber, sessionFactory);
+    return new BrowserSubtitleFrameRenderer(preparedStyleFactory, sizeProbe, sessionFactory);
   }
 
   async open(
@@ -98,6 +111,7 @@ export class BrowserSubtitleFrameRenderer implements SubtitleFrameRenderer {
       );
     }
     this.width = width;
+    this.maxTilesPerBatch = null;
     this.height = height;
     const prepared: Record<string, PreparedStyle> = {};
     for (const [kind, style] of Object.entries(styles)) {
@@ -107,19 +121,16 @@ export class BrowserSubtitleFrameRenderer implements SubtitleFrameRenderer {
     this.session = this.sessionFactory.create(doc, prepared, width, height, videoFrameSource ?? null);
   }
 
-  async getMaxBatchSize(): Promise<number> {
-    return this.sizeProber.probe(this.width!, this.height!);
+  async getMaxTilesPerBatch(): Promise<number> {
+    if (this.maxTilesPerBatch === null) {
+      this.maxTilesPerBatch = Math.max(1, await this.sizeProbe.probe(this.width!, this.height!));
+    }
+    return this.maxTilesPerBatch;
   }
 
   async getFrames(timestamps: ReadonlyArray<number>): Promise<Array<SubtitleFrame | null>> {
     if (!this.session) return timestamps.map(() => null);
-    return this.session.getFrames(timestamps);
-  }
-
-  async getFrame(timestamp: number): Promise<SubtitleFrame | null> {
-    if (!this.session) return null;
-    const [frame] = await this.session.getFrames([timestamp]);
-    return frame ?? null;
+    return this.session.getFrames(timestamps, await this.getMaxTilesPerBatch());
   }
 
   close(): void {
@@ -134,5 +145,6 @@ export class BrowserSubtitleFrameRenderer implements SubtitleFrameRenderer {
     }
     this.width = undefined;
     this.height = undefined;
+    this.maxTilesPerBatch = null;
   }
 }

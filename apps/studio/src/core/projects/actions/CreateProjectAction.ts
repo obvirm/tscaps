@@ -1,7 +1,19 @@
 import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { ProjectRepository } from '@core/projects/domain/ProjectRepository';
+import type { ProjectName } from '@core/projects/domain/ProjectName';
 import type { ThumbnailGenerator } from '@core/projects/services/ThumbnailGenerator';
-import { ProjectSaveFailedError } from '@core/projects/domain/errors/ProjectSaveFailedError';
+/**
+ * Outcome of {@link CreateProjectAction.execute}.
+ *
+ * `videoStoreFailure` carries what stopped this device from keeping a
+ * copy of the video, or `null` when it kept one. The project exists
+ * either way; whether that failure is worth telling anyone depends on
+ * what happens to the project afterwards, which the caller knows and
+ * this action does not.
+ */
+export interface ProjectCreationOutcome {
+  readonly videoStoreFailure: unknown | null;
+}
 
 /**
  * Establishes a fresh project's identity on top of the currently
@@ -13,24 +25,26 @@ import { ProjectSaveFailedError } from '@core/projects/domain/errors/ProjectSave
  * Idempotent at the call site: callers should check `state.projectId`
  * and skip if a project already exists.
  *
- * Caching the video is the step that fails for real-world reasons —
- * it writes the largest thing the app ever stores — and it raises
- * `ProjectSaveFailedError`. Establishing a project is the first half
- * of persisting it, and nobody outside distinguishes the two, so the
- * failure is named after what the reader was trying to do.
+ * Caching the video writes the largest thing the app ever stores, so
+ * it is the step that fails for real-world reasons. It is handed back
+ * and not raised: the bytes remain reachable through the cache's
+ * in-memory tier, which is what a session with no room left on disk
+ * still uploads from, and refusing to establish the project would
+ * only take the reader's work away for a copy nothing needs yet.
  */
 export class CreateProjectAction {
   constructor(
     private readonly store: EditorStore,
     private readonly repository: ProjectRepository,
     private readonly thumbnails: ThumbnailGenerator,
+    private readonly projectName: ProjectName,
   ) {}
 
-  async execute(): Promise<void> {
+  async execute(): Promise<ProjectCreationOutcome> {
     const file = this.requireLoadedVideoFile();
     const thumbnail = await this.generateThumbnailBestEffort(file);
     const id = crypto.randomUUID();
-    await this.cacheVideoBlob(id, file);
+    const videoStoreFailure = await this.cacheVideoBlobBestEffort(id, file);
     this.store.patch({
       projectId: id,
       projectName: this.deriveProjectName(file.name),
@@ -38,13 +52,21 @@ export class CreateProjectAction {
       projectThumbnail: thumbnail,
       dirty: true,
     });
+    return { videoStoreFailure };
   }
 
-  private async cacheVideoBlob(id: string, file: File): Promise<void> {
+  /**
+   * The bytes stay reachable for the rest of the session whether or
+   * not this device could keep them, so a refused write is not a
+   * reason to leave the reader without a project. Resolves to what
+   * refused the write, or `null` when it went through.
+   */
+  private async cacheVideoBlobBestEffort(id: string, file: File): Promise<unknown | null> {
     try {
       await this.repository.cacheVideoBlob(id, file);
+      return null;
     } catch (cause) {
-      throw new ProjectSaveFailedError({ cause });
+      return cause;
     }
   }
 
@@ -55,13 +77,14 @@ export class CreateProjectAction {
   }
 
   /**
-   * Strips the file extension and trims whitespace. Falls back to
-   * "Untitled" if the result is empty.
+   * Strips the file extension and clamps the result through
+   * `ProjectName`, so a long filename lands as a truncated project
+   * name rather than being rejected on the first save.
    */
   private deriveProjectName(fileName: string): string {
     const dot = fileName.lastIndexOf('.');
-    const base = (dot > 0 ? fileName.slice(0, dot) : fileName).trim();
-    return base.length > 0 ? base : 'Untitled';
+    const base = dot > 0 ? fileName.slice(0, dot) : fileName;
+    return this.projectName.clamp(base);
   }
 
   private async generateThumbnailBestEffort(file: File): Promise<Blob | null> {

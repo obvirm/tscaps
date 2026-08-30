@@ -16,6 +16,7 @@ export interface InitRequest {
   readonly wasmPath: string;
   readonly poseModelUrl: string;
   readonly segmenterModelUrl: string;
+  readonly delegate: 'CPU' | 'GPU';
   readonly maskMaxSide: number;
 }
 

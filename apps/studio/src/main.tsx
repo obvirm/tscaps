@@ -1,9 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import type { PreviewSurfaceVariant } from '@core/preview/domain/VideoPreviewSurface';
-import {
-  PreviewSurfaceVariantSelector,
-  type PreviewSurfaceVariantPreference,
-} from '@core/preview/services/PreviewSurfaceVariantSelector';
+import type { PreviewSurfaceVariantPreference } from '@core/preview/domain/PreviewSurfaceVariantPreference';
 
 
 const appVersion = readEnvString('VITE_RELEASE_VERSION') ?? 'dev';
@@ -34,6 +30,5 @@ const root = createRoot(rootElement);
 
 
 const { createEditorApp } = await import('@bootstrap/editor/createEditorApp');
-const previewSurfaceVariant: PreviewSurfaceVariant = new PreviewSurfaceVariantSelector(previewSurfacePreference).select();
-const app = await createEditorApp({ appVersion, previewProxyEnabled, previewSurfaceVariant, projectPersistenceEnabled: true });
+const app = await createEditorApp({ appVersion, previewProxyEnabled, previewSurfacePreference, projectPersistenceEnabled: true });
 root.render(app);

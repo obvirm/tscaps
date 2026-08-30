@@ -28,8 +28,6 @@ interface TimedToken {
 
 interface AssignedTimes {
   readonly tokens: TimedToken[];
-  readonly segmentStart: number;
-  readonly segmentEnd: number;
 }
 
 /**
@@ -230,11 +228,7 @@ export class SegmentRecompiler {
       this._placeNatural(tokens, naturals, lastAnchor + 1, tokens.length, lower, timed);
     }
 
-    return {
-      tokens: timed,
-      segmentStart: timed[0]!.start,
-      segmentEnd: timed[timed.length - 1]!.end,
-    };
+    return { tokens: timed };
   }
 
   private _distributeProportional(
@@ -264,11 +258,7 @@ export class SegmentRecompiler {
       cursor += dur;
     }
 
-    return {
-      tokens: timed,
-      segmentStart: timed[0]!.start,
-      segmentEnd: timed[timed.length - 1]!.end,
-    };
+    return { tokens: timed };
   }
 
   private _placeNatural(
@@ -327,10 +317,16 @@ export class SegmentRecompiler {
     const lines = Array.from(byLine.keys())
       .sort((a, b) => a - b)
       .map((idx) => new Line({ words: byLine.get(idx)! }));
+    // `customTime` is a caller-imposed window — the recompiler is a
+    // helper, not a caller, so it inherits whatever the original had
+    // rather than manufacturing one from the recomputed word span.
+    // Fabricating a customTime here reads as "someone named this
+    // window" and silently skips passes like GapFreeEffect that
+    // deliberately leave caller-named segments alone.
     return new Segment({
       lines,
       id: original.id,
-      customTime: new TimeFragment(assigned.segmentStart, assigned.segmentEnd),
+      customTime: original.customTime,
     });
   }
 }

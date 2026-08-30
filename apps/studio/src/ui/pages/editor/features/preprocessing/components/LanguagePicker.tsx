@@ -8,8 +8,11 @@ import {
 
 export const AUTO_DETECT_LANGUAGE_VALUE = 'auto';
 
+type UsageHint = 'Most used' | 'Last used';
+
 interface LanguageOption extends AutocompleteOption {
   readonly nativeName?: string | undefined;
+  readonly usageHint?: UsageHint | undefined;
 }
 
 interface LanguagePickerProps {
@@ -26,6 +29,18 @@ interface LanguagePickerProps {
    * deliberately withheld there.
    */
   readonly allowAutoDetect: boolean;
+  /**
+   * Surface code of the user's most-picked language. The matching
+   * option gets a right-aligned "Most used" hint. When it coincides
+   * with `lastUsedCode`, the row shows only the "Last used" wording
+   * instead so the two signals never stack on the same row.
+   */
+  readonly mostUsedCode?: string | null | undefined;
+  /**
+   * Surface code of the user's last-picked language. The matching
+   * option gets a right-aligned "Last used" hint.
+   */
+  readonly lastUsedCode?: string | null | undefined;
   readonly placeholder?: string | undefined;
   /**
    * Renders a small red validation notice below the picker when set.
@@ -49,6 +64,8 @@ export function LanguagePicker({
   value,
   onChange,
   allowAutoDetect,
+  mostUsedCode,
+  lastUsedCode,
   placeholder,
   errorMessage,
 }: LanguagePickerProps) {
@@ -57,12 +74,13 @@ export function LanguagePicker({
       value: l.code,
       label: l.nameEn,
       nativeName: l.nativeName !== l.nameEn ? l.nativeName : undefined,
+      usageHint: resolveUsageHint(l.code, mostUsedCode ?? null, lastUsedCode ?? null),
     }));
     if (allowAutoDetect) {
       base.unshift({ value: AUTO_DETECT_LANGUAGE_VALUE, label: 'Auto-detect' });
     }
     return base;
-  }, [languages, allowAutoDetect]);
+  }, [languages, allowAutoDetect, mostUsedCode, lastUsedCode]);
 
   return (
     <div>
@@ -81,6 +99,16 @@ export function LanguagePicker({
       )}
     </div>
   );
+}
+
+function resolveUsageHint(
+  code: string,
+  mostUsedCode: string | null,
+  lastUsedCode: string | null,
+): UsageHint | undefined {
+  if (code === lastUsedCode) return 'Last used';
+  if (code === mostUsedCode) return 'Most used';
+  return undefined;
 }
 
 interface LanguagePickerBodyProps {
@@ -111,14 +139,25 @@ function LanguagePickerBody({ id, options, value, onChange, placeholder }: Langu
   );
 }
 
+const USAGE_HINT_CLS = 'ml-auto pl-3 shrink-0 text-2xs text-fg-faint';
+
 function renderLanguageOption(option: LanguageOption) {
+  const usageHint = option.usageHint !== undefined ? (
+    <span className={USAGE_HINT_CLS}>{option.usageHint}</span>
+  ) : null;
   if (option.nativeName === undefined) {
-    return <span className="truncate">{option.label}</span>;
+    return (
+      <span className="flex-1 min-w-0 flex items-baseline gap-2">
+        <span className="truncate">{option.label}</span>
+        {usageHint}
+      </span>
+    );
   }
   return (
-    <span className="flex-1 min-w-0 flex items-baseline gap-2 truncate">
+    <span className="flex-1 min-w-0 flex items-baseline gap-2">
       <span className="truncate">{option.label}</span>
       <span className="truncate text-fg-faint text-xs">{option.nativeName}</span>
+      {usageHint}
     </span>
   );
 }

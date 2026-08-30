@@ -1,7 +1,42 @@
 {
   "name": "Selene",
-  "categories": [
-    "decorative"
+  "category": "modern",
+  "variants": [
+    {
+      "label": "White",
+      "overrides": {
+        "primary-color": "#ffffff",
+        "highlight-color": "#ffffff"
+      }
+    },
+    {
+      "label": "Sand",
+      "overrides": {
+        "primary-color": "#ffe6a8",
+        "highlight-color": "#ffe6a8"
+      }
+    },
+    {
+      "label": "Ice",
+      "overrides": {
+        "primary-color": "#b8e6ff",
+        "highlight-color": "#b8e6ff"
+      }
+    },
+    {
+      "label": "Sage",
+      "overrides": {
+        "primary-color": "#bdf5c4",
+        "highlight-color": "#bdf5c4"
+      }
+    },
+    {
+      "label": "Rose",
+      "overrides": {
+        "primary-color": "#ffc4e0",
+        "highlight-color": "#ffc4e0"
+      }
+    }
   ],
   "typography": {
     "fontFamily": "Montserrat Variable",
@@ -37,7 +72,7 @@
     },
     {
       "id": "tag-font-family",
-      "label": "Tag font",
+      "label": "Accent font",
       "type": "font",
       "default": "Montserrat Variable",
       "group": "style",
@@ -46,7 +81,7 @@
     },
     {
       "id": "tag-bold",
-      "label": "Bold tags",
+      "label": "Bold accents",
       "type": "toggle",
       "default": true,
       "valueOn": "900",

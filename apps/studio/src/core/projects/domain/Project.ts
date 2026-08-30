@@ -40,6 +40,30 @@ export class Project {
   ) {}
 
   /**
+   * Copy of this project carrying different sheets. Everything else,
+   * including the document those sheets style, comes over untouched.
+   */
+  withSheets(sheets: ReadonlyArray<Sheet>): Project {
+    return new Project(
+      this.id,
+      this.name,
+      this.createdAt,
+      this.updatedAt,
+      this.video,
+      this.videoLayout,
+      this.document,
+      sheets,
+      this.activeSheetId,
+      this.behindActorOverrides,
+      this.frozenSegments,
+      this.elementStyles,
+      this.decorationOverrides,
+      this.cuts,
+      this.thumbnail,
+    );
+  }
+
+  /**
    * Builds a fresh Project for a newly imported video. Document and sheets
    * are empty; the caller fills them in once transcription completes and
    * sheets are initialised.

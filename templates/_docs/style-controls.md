@@ -45,6 +45,16 @@ Three placements are not free choices:
   `display: inline-block` descendants, and most templates wrap each word in one.
 - **`line-height` is not a universal.** Each template hardcodes its own, typically 1.0 to 1.6,
   as part of its identity. There is no `--tscaps-line-height`.
+- **Its unit answers a question, and the two answers are both right somewhere.** Unitless
+  inherits as a ratio, so a descendant recomputes the leading against its own size; a length
+  (`0.92em`) resolves on `.segment` and inherits as that fixed length, so a descendant of any
+  size keeps it. They are identical until something below `.segment` changes size — a per-tag
+  face, a big last word, or the per-word size the editor lets a user set on any template. Ask
+  whether that size change is **real** or **optical**: milo and luca genuinely enlarge a word
+  and want its row to grow, so they stay unitless and override the leading on that element;
+  enzo scales its serif only to match the grotesque's x-height, so a line holding one must not
+  open up, and it uses `em`. The per-word override is a real change in every template, which is
+  why unitless is the default and a length is the exception that earns itself.
 
 `--tscaps-rotation` is always emitted but reading it is optional: a template that omits the
 var simply ignores the rotation slider, and the loader's missing-var warning does not fire for
@@ -146,6 +156,29 @@ radius and a Gaussian standard deviation are not one control with two ranges, wh
 
 **Bounds are a judgement, and each one wants an argument.** The dataset of what templates
 already pass gives a centre, not edges. Write the reasoning down when you add one.
+
+### One word for the words the speaker leans on
+
+Three tags mark them — `emphasis`, `accent`, `entity` — and a template styles them as one
+family, through `.emphasis, .accent, .entity`. The controls over that family read **accent**
+to the user: `Accent`, `Accent font`, `Accent weight`, `Bold accents`. Never "tag" or
+"tagged" — the marks often arrive on their own rather than by hand, so that word names a
+mechanism the user never met.
+
+The **ids** stay `tag-*`. They name that mechanism — every tag class the rule reaches — and
+`accent-color` is already taken on another template for something unrelated.
+
+A template that treats one part of the family differently names that part instead of the
+family. cleo puts weight on `.emphasis` alone and italics on the other two, so its labels read
+`Emphasis weight` and `Italic accents`, and the contrast between them is what tells the user
+the two controls reach different words.
+
+That split works on the ids too, and there it is only forced when the parts move the **same**
+property. cleo's two reach different halves of the family and are still `tag-weight` and
+`tag-italic`, because the property already tells them apart. Two colours cannot both be
+`tag-color`, so the one over the smaller part carries it: `tag-lift-color` beside
+`tag-color`. Name the part, not "the other one" — a second colour called `tag-color-b` says
+nothing about which words change when it moves.
 
 ## Groups and subgroups
 

@@ -129,3 +129,27 @@ export interface VideoPreviewSurface extends EventTarget {
 
   captureStream(): MediaStream | null;
 }
+
+/**
+ * A {@link VideoPreviewSurface} that can change its concrete variant
+ * mid-session. The playing rule is one-to-one: proxies play on the
+ * canvas variant, raw sources on the native one, so which variant is
+ * active follows from what the caller is about to load.
+ *
+ * Emits `'variantchange'` (on top of the base surface events) when
+ * the active variant flips; `activeVariant` reads the current one.
+ * A surface booted with a forced variant never switches and never
+ * emits it.
+ */
+export interface SwitchableVideoPreviewSurface extends VideoPreviewSurface {
+  readonly activeVariant: PreviewSurfaceVariant;
+
+  /**
+   * Aligns the active variant with the source about to be loaded:
+   * canvas for a proxy blob, native for a raw source. Call before
+   * {@link VideoPreviewSurface.load}; a needed switch tears the
+   * current presentation down and stands the other variant up on the
+   * same container, so the pending load lands on the right surface.
+   */
+  selectVariantForSource(isProxy: boolean): void;
+}

@@ -4,8 +4,6 @@ import type { TemplateMetadata } from '@core/templates/domain/TemplateMetadata';
 import type { ControlField, ControlValue } from '@core/templates/domain/definition/ControlField';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 
-export const USER_TEMPLATE_CATEGORY = 'my templates';
-
 export interface SheetSnapshotMetadata {
   readonly id: string;
   readonly name: string;
@@ -53,7 +51,7 @@ export class TemplateFromSheetBuilder {
     return {
       id: metadata.id,
       name: metadata.name,
-      categories: [USER_TEMPLATE_CATEGORY],
+      category: sheet.template.metadata.category,
       unsupportedUserAgents: sheet.template.metadata.unsupportedUserAgents,
     };
   }

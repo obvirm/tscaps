@@ -4,7 +4,9 @@ import { Tooltip } from '@ui/_shared/components/Tooltip/Tooltip';
 import { ThemeToggle } from '@ui/_shared/components/ThemeToggle/ThemeToggle';
 import { StatusPill } from '@ui/_shared/components/StatusPill/StatusPill';
 import { ExportButton } from '@ui/pages/editor/features/export/components/ExportButton';
+import { SupportButton } from '@ui/pages/editor/features/support/SupportButton';
 import { useEditor } from '@ui/_shared/contexts/modules/EditorContext';
+import { useProjects } from '@ui/_shared/contexts/modules/ProjectsContext';
 import { useTheme } from '@bootstrap/ThemeContext';
 
 export type SaveButtonStatus = 'idle' | 'saving' | 'saved' | 'error';
@@ -64,7 +66,9 @@ export const EditorToolbar = memo(function EditorToolbar({
   onSave,
 }: EditorToolbarProps) {
   const uploading = false;
+  const supportButton = <SupportButton />;
   const { store } = useEditor();
+  const { projectName: projectNameRules } = useProjects();
   const theme = useTheme();
   return (
     <div className="w-full flex items-center gap-1 lg:gap-3 px-1 pt-0.5 pb-1 lg:pt-1 lg:pb-2.5 mb-1 lg:mb-3 border-b border-edge-subtle shrink-0">
@@ -79,7 +83,12 @@ export const EditorToolbar = memo(function EditorToolbar({
             <ArrowLeft size={16} />
           </button>
         </Tooltip>
-        <NameInput value={projectName} disabled={!canRename} onCommit={onRenameProject} />
+        <NameInput
+          value={projectName}
+          disabled={!canRename}
+          maxLength={projectNameRules.maxLength}
+          onCommit={onRenameProject}
+        />
       </div>
       <div className="flex items-center gap-1">
         <Tooltip text="Undo (Ctrl+Z)" position="bottom">
@@ -114,6 +123,7 @@ export const EditorToolbar = memo(function EditorToolbar({
 
       <div className="hidden lg:flex items-center gap-1">
         <ThemeToggle controller={theme} />
+        {supportButton}
       </div>
 
       {canSave && !uploading && (
@@ -138,6 +148,7 @@ export const EditorToolbar = memo(function EditorToolbar({
 interface NameInputProps {
   value: string;
   disabled: boolean;
+  maxLength: number;
   onCommit: (name: string) => void;
 }
 
@@ -149,7 +160,7 @@ interface NameInputProps {
  * Stays in sync with prop changes by re-syncing local state when
  * `value` changes from the outside while the input is not focused.
  */
-function NameInput({ value, disabled, onCommit }: NameInputProps) {
+function NameInput({ value, disabled, maxLength, onCommit }: NameInputProps) {
   const [draft, setDraft] = useState(value);
   const [focused, setFocused] = useState(false);
   const [lastValue, setLastValue] = useState(value);
@@ -168,6 +179,7 @@ function NameInput({ value, disabled, onCommit }: NameInputProps) {
       className={NAME_INPUT}
       value={draft}
       disabled={disabled}
+      maxLength={maxLength}
       onChange={(e) => setDraft(e.target.value)}
       onFocus={() => setFocused(true)}
       onBlur={() => { setFocused(false); commit(); }}

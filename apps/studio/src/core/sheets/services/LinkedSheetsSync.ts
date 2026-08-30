@@ -21,12 +21,11 @@ import type { LinkedSheetsPropagationNotifier } from '@core/sheets/services/Link
  *   own variant baseline, so per-speaker presets survive.
  *
  * - `applyTemplateEdit` covers `SetTemplateAction`. Each sibling calls
- *   `withTemplate` on its own so the new template's defaults land, the
- *   `variantIndex` is carried over modulo the new template's variant
- *   count, and the styleValues are re-seeded from the sibling's own
- *   variant baseline. No delta is needed after a template switch because
- *   the operation resets every shared field on both the source and its
- *   siblings.
+ *   `withTemplate` on its own so the new template's defaults land, its
+ *   `variantIndex` is carried over untouched, and the styleValues are
+ *   re-seeded from the sibling's own variant baseline. No delta is needed
+ *   after a template switch because the operation resets every shared
+ *   field on both the source and its siblings.
  *
  * Both methods return the full replacement sheets array (source updated
  * plus siblings synchronised) and publish a propagation event when at
@@ -70,7 +69,7 @@ export class LinkedSheetsSync {
   /**
    * Replaces the source sheet in the array and, when the source is part of
    * a link group, switches every sibling to the same template while each
-   * keeps its own `variantIndex` (modulo the new template's variant count).
+   * keeps its own `variantIndex`.
    * Every shared field falls back to the new template's defaults on both
    * source and siblings — the same reset `withTemplate` performs solo.
    */

@@ -1,5 +1,8 @@
-import type { CatalogFont, FontScript, FontScriptFallbacks } from '@core/fonts/domain/FontCatalog';
+import type { CatalogFont, FontScript } from '@core/fonts/domain/FontCatalog';
 import { DEFAULT_SCRIPT_FALLBACKS, FONT_CATALOG } from '@core/fonts/domain/FontCatalog';
+
+// Scripts a family can carry a stand-in for, in the order a stack lists them.
+const STAND_IN_SCRIPTS = ['arabic', 'hebrew', 'urdu', 'cyrillic', 'greek', 'devanagari'] as const;
 
 /**
  * Turns a chosen font family into the CSS `font-family` value that renders
@@ -46,6 +49,25 @@ export class FontStackResolver {
   }
 
   /**
+   * The stand-in this family carries for each script it cannot draw,
+   * keyed by that script — the mapping a flat stack throws away, for
+   * callers that need to tell which of a stack's families are there
+   * only to cover a writing system. Two scripts naming the same
+   * stand-in both point at it.
+   */
+  standInsByScript(family: string): ReadonlyMap<FontScript, string> {
+    const font = this.byFamily.get(family);
+    const fallbacks = font?.fallbacks ?? DEFAULT_SCRIPT_FALLBACKS;
+    const out = new Map<FontScript, string>();
+    for (const script of STAND_IN_SCRIPTS) {
+      const standIn = fallbacks[script];
+      if (!standIn || standIn === family || this.draws(font, script)) continue;
+      out.set(script, standIn);
+    }
+    return out;
+  }
+
+  /**
    * The family whose designed script matches, or `null` when the chosen
    * family should keep the lead. Latin never displaces the chosen family:
    * every face in the catalog ships Latin glyphs, and the chosen family
@@ -55,23 +77,22 @@ export class FontStackResolver {
     if (script === null || script === 'latin') return null;
     const font = this.byFamily.get(family);
     if (font === undefined) return null;
-    if (font.script === script) return null;
+    if (font.script === script || this.draws(font, script)) return null;
     return font.fallbacks[script] ?? DEFAULT_SCRIPT_FALLBACKS[script] ?? null;
   }
 
-  private standInsFor(family: string): string[] {
-    const fallbacks = this.byFamily.get(family)?.fallbacks ?? DEFAULT_SCRIPT_FALLBACKS;
-    return this.fallbackFamilies(family, fallbacks);
+  /**
+   * Whether the family paints `script` with its own glyphs. A family that
+   * does keeps the lead: a stand-in would be a face the reader did not
+   * choose, replacing type that fits the template with type that merely
+   * covers the letters.
+   */
+  private draws(font: CatalogFont | undefined, script: FontScript): boolean {
+    return font?.covers?.includes(script) ?? false;
   }
 
-  private fallbackFamilies(family: string, fallbacks: FontScriptFallbacks): string[] {
-    const candidates = [fallbacks.arabic, fallbacks.hebrew, fallbacks.urdu];
-    const out: string[] = [];
-    for (const candidate of candidates) {
-      if (!candidate || candidate === family || out.includes(candidate)) continue;
-      out.push(candidate);
-    }
-    return out;
+  private standInsFor(family: string): string[] {
+    return [...new Set(this.standInsByScript(family).values())];
   }
 
   private quoteAll(families: ReadonlyArray<string>): string {

@@ -15,6 +15,15 @@ import type { RenderingConfig } from '@modules/rendering/types/RenderingConfig';
 import type { DecorationPlacementSide } from '@modules/rendering/types/DecorationPlacementSide';
 import type { PreparedStyle } from '@modules/rendering/subtitle/PreparedStyle';
 
+// `!important`, so a sheet declaring any of them for its own layout
+// cannot bring the probe container back on screen.
+const PROBE_CONTAINER_STYLES: Record<string, string> = {
+  position: 'fixed',
+  left: '-99999px',
+  visibility: 'hidden',
+  'pointer-events': 'none',
+};
+
 /**
  * Prepares a `SubtitleStyle` for downstream rendering: minifies and
  * embeds the CSS, scopes it to a unique class, mounts a probe
@@ -58,7 +67,9 @@ export class PreparedStyleFactory {
 
     const probeContainer = document.createElement('div');
     probeContainer.className = scopeClass;
-    probeContainer.style.cssText = 'position:fixed;left:-99999px;visibility:hidden;pointer-events:none;';
+    for (const [property, value] of Object.entries(PROBE_CONTAINER_STYLES)) {
+      probeContainer.style.setProperty(property, value, 'important');
+    }
     document.body.appendChild(probeContainer);
 
     const usedCssVars = this.cssVarReferenceScanner.scan(baselineCss + scopedCss);
@@ -80,6 +91,7 @@ export class PreparedStyleFactory {
       probeStyleElement: probeStyleEl,
       probeContainer,
       scopeClass,
+      usedCssVars,
       inlineStyleEmitter: new InlineStyleEmitter(usedCssVars),
       baselineNeeds,
       baselineCss,

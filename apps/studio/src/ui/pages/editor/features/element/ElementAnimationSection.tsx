@@ -1,5 +1,5 @@
 import { memo, useCallback } from 'react';
-import type { ElementAnimationScope } from '@core/elements/domain/ElementAnimationScope';
+import { ANIMATED_KIND_BY_SCOPE, type ElementAnimationScope } from '@core/elements/domain/ElementAnimationScope';
 import type { AuthoredElementControl } from '@core/elements/domain/ElementControl';
 import type { ElementKind } from '@core/elements/domain/ElementKind';
 import type { ElementAnimation } from '@core/elements/domain/ElementAnimation';
@@ -110,6 +110,7 @@ export const ElementAnimationSection = memo(function ElementAnimationSection({
       <CustomizedFieldOverlay customized={controlledByCss} label={SECTION_TITLE}>
         <div className="flex flex-col gap-5">
           <ElementAnimationGrid
+            animatedKind={ANIMATED_KIND_BY_SCOPE[scope] ?? kind}
             animation={animation}
             inheritedLabel="Inherited"
             onInherit={handleInherit}

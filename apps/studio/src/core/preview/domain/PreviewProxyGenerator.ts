@@ -18,7 +18,15 @@ export type PreviewProxyProgressCallback = (progress: number) => void;
  * doing for a while and run it inside a blocking pipeline step
  * with a visible splash, not as a side effect during interactive
  * work. Optionally pass `onProgress` to drive a progress bar.
+ *
+ * `signal` abandons a run in flight, rejecting with an `AbortError`
+ * left unwrapped so callers can tell it from a generation failure.
+ * Partial output is discarded and cannot be resumed.
  */
 export interface PreviewProxyGenerator {
-  generate(source: Blob, onProgress?: PreviewProxyProgressCallback): Promise<PreviewProxy>;
+  generate(
+    source: Blob,
+    onProgress?: PreviewProxyProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<PreviewProxy>;
 }

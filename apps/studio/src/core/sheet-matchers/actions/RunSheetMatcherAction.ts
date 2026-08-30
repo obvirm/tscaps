@@ -53,7 +53,18 @@ export class RunSheetMatcherAction {
     private readonly deriver: DocumentDeriver,
   ) {}
 
-  execute<TParams>(sheetId: string, matcher: SheetMatcher<TParams>, params: TParams): SheetMatcherRunResult {
+  /**
+   * `coalesceKey` folds this run into the undo entry a caller already
+   * opened with the same key, so a gesture that creates a sheet and
+   * fills it in one go undoes as one step instead of leaving the empty
+   * sheet behind. Omit it when the run is the whole gesture.
+   */
+  execute<TParams>(
+    sheetId: string,
+    matcher: SheetMatcher<TParams>,
+    params: TParams,
+    coalesceKey?: string,
+  ): SheetMatcherRunResult {
     const nothingMoved: SheetMatcherRunResult = { granularity: matcher.granularity, movedCount: 0 };
     const { sheets, document, video, frozenSegments, decorationOverrides } = this.store.snapshot();
     if (!document) return nothingMoved;
@@ -71,8 +82,8 @@ export class RunSheetMatcherAction {
     };
 
     return matcher.granularity === 'word'
-      ? this._runWordMatcher(document, sheetId, targetSheet, matcher, params, ctx)
-      : this._runSegmentMatcher(document, sheetId, targetSheet, matcher, params, ctx);
+      ? this._runWordMatcher(document, sheetId, targetSheet, matcher, params, ctx, coalesceKey)
+      : this._runSegmentMatcher(document, sheetId, targetSheet, matcher, params, ctx, coalesceKey);
   }
 
   private _runSegmentMatcher<TParams>(
@@ -82,6 +93,7 @@ export class RunSheetMatcherAction {
     matcher: SegmentSheetMatcher<TParams>,
     params: TParams,
     ctx: DocumentDeriverContext,
+    coalesceKey: string | undefined,
   ): SheetMatcherRunResult {
     // Snapshot ids first; the doc mutates as we move segments.
     const movingIds: string[] = [];
@@ -94,7 +106,7 @@ export class RunSheetMatcherAction {
     }
     if (movingIds.length === 0) return { granularity: 'segment', movedCount: 0 };
 
-    this.store.commit();
+    this.store.commit(coalesceKey);
 
     let doc = document;
     let movedCount = 0;
@@ -119,6 +131,7 @@ export class RunSheetMatcherAction {
     matcher: WordSheetMatcher<TParams>,
     params: TParams,
     ctx: DocumentDeriverContext,
+    coalesceKey: string | undefined,
   ): SheetMatcherRunResult {
     // Snapshot ids first; the doc mutates as we carve segments apart.
     const movingIds: string[] = [];
@@ -131,7 +144,7 @@ export class RunSheetMatcherAction {
     }
     if (movingIds.length === 0) return { granularity: 'word', movedCount: 0 };
 
-    this.store.commit();
+    this.store.commit(coalesceKey);
 
     let doc = document;
     let movedCount = 0;

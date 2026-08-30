@@ -2,6 +2,8 @@ import { memo, useMemo, type CSSProperties } from 'react';
 import type { Segment, Word, WordFragment, WordSplitter } from '@tscaps/engine';
 import { LetterAnimationStyleBuilder } from '@presentation/editor/services/LetterAnimationStyleBuilder';
 import { useBoundWord } from '@ui/pages/editor/features/overlay/hooks/useOverlayBinding';
+import { useMeasuredWidth } from '@ui/pages/editor/features/overlay/hooks/useMeasuredWidth';
+import { useEngine } from '@ui/_shared/contexts/modules/EngineContext';
 import { useDraggableWord } from '@ui/pages/editor/features/overlay/hooks/useDraggableWord';
 import { WordDecorationSpan } from '@ui/pages/editor/features/overlay/components/words/WordDecorationSpan';
 import { CAPTION_ELEMENT_ID_ATTRIBUTE } from '@presentation/editor/services/CaptionElementAttribute';
@@ -38,6 +40,8 @@ export const WordView = memo(function WordView({
   carriesTrail,
 }: WordViewProps) {
   const ref = useBoundWord(word, segment, indexInLine);
+  const { constants } = useEngine();
+  useMeasuredWidth(ref, constants.WORD_WIDTH_EM_VARIABLE);
   useDraggableWord(word, segment.id, ref);
   const overrideStyle = useMemo<CSSProperties>(
     () => fontFamily === undefined ? {} : { fontFamily },

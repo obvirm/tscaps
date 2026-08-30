@@ -2,8 +2,11 @@ import { useState } from 'react';
 import { Link, Link2, Plus, X } from 'lucide-react';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 import { MAIN_SHEET_ID } from '@core/sheets/domain/Sheet';
+import type { SheetCreationOption } from '@core/sheets/domain/SheetCreationOption';
 import { ConfirmDialog } from '@ui/_shared/components/Dialog/ConfirmDialog';
 import { Tooltip } from '@ui/_shared/components/Tooltip/Tooltip';
+import { useRetainedValue } from '@ui/_shared/hooks/useRetainedValue';
+import { AddSheetPopover } from '@ui/pages/editor/components/sidebar/AddSheetPopover';
 import { EditSheetDialog, type EditSheetDialogResult } from '@ui/pages/editor/components/sidebar/EditSheetDialog';
 import { SheetSettingsPopover } from '@ui/pages/editor/components/sidebar/SheetSettingsPopover';
 import { SheetLinkPopover } from '@ui/pages/editor/components/sidebar/SheetLinkPopover';
@@ -13,11 +16,15 @@ interface SheetSelectorProps {
   activeSheetId: string;
   onSetActive: (sheetId: string) => void;
   onCreate: (name: string) => unknown;
+  /** Sheets the project can add by name. Empty hides the menu. */
+  creationOptions: ReadonlyArray<SheetCreationOption>;
+  onCreateFromOption: (option: SheetCreationOption) => void;
   onRename: (sheetId: string, name: string) => void;
   onDelete: (sheetId: string) => void;
   onCopyStylesFromSheet: (targetSheetId: string, sourceSheetId: string) => void;
   onLinkSheet: (targetSheetId: string, sourceSheetId: string) => void;
   onUnlinkSheet: (sheetId: string) => void;
+  onResetSheetToTemplateDefaults: (sheetId: string) => void;
 }
 
 const CHIP_BASE =
@@ -33,6 +40,14 @@ const CHIP_SELECT_INACTIVE = `${CHIP_SELECT_BASE} text-fg-secondary group-hover/
 const CHIP_SELECT_ACTIVE = `${CHIP_SELECT_BASE} text-fg-primary`;
 
 const CHIP_DOT = 'w-2.5 h-2.5 rounded-full bg-edge-strong shrink-0 ring-1 ring-inset ring-black/30';
+
+const ADD_SHEET_TOOLTIP =
+  'Add a new sheet. Sheets let you define different looks and assign them to scenes.';
+const ADD_SHEET_BUTTON =
+  'inline-flex items-center justify-center w-8 h-8 rounded-sm border border-dashed border-edge-medium ' +
+  'bg-transparent text-fg-faint cursor-pointer transition-colors duration-quick ease-standard ' +
+  'hover:bg-surface-2 hover:border-edge-strong hover:text-fg-secondary ' +
+  'focus-visible:outline-none focus-visible:border-accent focus-visible:text-fg-secondary';
 
 const CHIP_ICON_BASE =
   'inline-flex items-center justify-center w-5 h-5 rounded-xs border-none bg-transparent cursor-pointer ' +
@@ -57,13 +72,17 @@ export function SheetSelector({
   activeSheetId,
   onSetActive,
   onCreate,
+  creationOptions,
+  onCreateFromOption,
   onRename,
   onDelete,
   onCopyStylesFromSheet,
   onLinkSheet,
   onUnlinkSheet,
+  onResetSheetToTemplateDefaults,
 }: SheetSelectorProps) {
   const [createOpen, setCreateOpen] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
   // Settings popover state. Both left-click on the active chip and
   // right-click on any chip open this popover anchored under the chip;
   // right-click is just an alternative entry point for discoverability.
@@ -76,6 +95,10 @@ export function SheetSelector({
   // animates in.
   const [renaming, setRenaming] = useState<Sheet | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Sheet | null>(null);
+  // Both dialogs outlive their subject by one exit animation, so they read
+  // the sheet through the retainer and keep showing its name while closing.
+  const renamingSheet = useRetainedValue(renaming);
+  const deletingSheet = useRetainedValue(pendingDelete);
 
   if (sheets.length === 0) return null;
 
@@ -169,15 +192,31 @@ export function SheetSelector({
             </div>
           );
         })}
-        <Tooltip text="Add a new sheet. Sheets let you define different looks and assign them to scenes." position="bottom">
-          <button
-            className="inline-flex items-center justify-center w-8 h-8 rounded-sm border border-dashed border-edge-medium bg-transparent text-fg-faint cursor-pointer transition-colors duration-quick ease-standard hover:bg-surface-2 hover:border-edge-strong hover:text-fg-secondary focus-visible:outline-none focus-visible:border-accent focus-visible:text-fg-secondary"
-            onClick={() => setCreateOpen(true)}
-            aria-label="Add sheet"
-          >
-            <Plus size={14} />
-          </button>
-        </Tooltip>
+        {creationOptions.length > 0 ? (
+          <AddSheetPopover
+            open={addMenuOpen}
+            onOpenChange={setAddMenuOpen}
+            triggerTooltip={ADD_SHEET_TOOLTIP}
+            trigger={
+              <button className={ADD_SHEET_BUTTON} aria-label="Add sheet">
+                <Plus size={14} />
+              </button>
+            }
+            creationOptions={creationOptions}
+            onCreateFromOption={onCreateFromOption}
+            onPickCustom={() => setCreateOpen(true)}
+          />
+        ) : (
+          <Tooltip text={ADD_SHEET_TOOLTIP} position="bottom">
+            <button
+              className={ADD_SHEET_BUTTON}
+              onClick={() => setCreateOpen(true)}
+              aria-label="Add sheet"
+            >
+              <Plus size={14} />
+            </button>
+          </Tooltip>
+        )}
       </div>
 
       {menu && (
@@ -191,6 +230,7 @@ export function SheetSelector({
           onCopyStylesFromSheet={(sourceId) => onCopyStylesFromSheet(menu.sheet.id, sourceId)}
           onLinkTo={(sourceId) => { setMenu(null); onLinkSheet(menu.sheet.id, sourceId); }}
           onUnlink={() => { setMenu(null); onUnlinkSheet(menu.sheet.id); }}
+          onResetToTemplateDefaults={() => { setMenu(null); onResetSheetToTemplateDefaults(menu.sheet.id); }}
         />
       )}
 
@@ -215,14 +255,14 @@ export function SheetSelector({
 
       <EditSheetDialog
         open={renaming !== null}
-        sheet={renaming}
+        sheet={renamingSheet}
         onConfirm={(result) => { if (renaming) handleRenameConfirm(renaming, result); }}
         onCancel={() => setRenaming(null)}
       />
 
       <ConfirmDialog
         open={pendingDelete !== null}
-        message={`Delete sheet "${pendingDelete?.name}"? Scenes using it will fall back to Main.`}
+        message={`Delete sheet "${deletingSheet?.name ?? ''}"? Scenes using it will fall back to Main.`}
         confirmLabel="Delete"
         danger
         onConfirm={() => { if (pendingDelete) onDelete(pendingDelete.id); setPendingDelete(null); }}

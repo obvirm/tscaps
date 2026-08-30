@@ -43,4 +43,12 @@ test('video without an audio track warns, starts, and opens the editor', async (
   await expect(page.getByText('No captions yet.')).toBeVisible();
   await page.getByRole('button', { name: 'Add first scene' }).click();
   await expect(page.getByText('No captions yet.')).toBeHidden();
+
+  // And what is written by hand must paint. A scene is drawn only under
+  // the sheet its section names, so one born under a name no sheet
+  // answers to reads back fine in the panel and leaves the video bare.
+  await page.locator('textarea[data-segment-id]').first().fill('written by hand');
+  const words = page.locator('.subtitle-overlay-scaler .word');
+  await expect(words).toHaveCount(3);
+  await expect(words.first()).toHaveText('written');
 });

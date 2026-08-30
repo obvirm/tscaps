@@ -1,8 +1,6 @@
 {
   "name": "Luna",
-  "categories": [
-    "hook"
-  ],
+  "category": "key-moments",
   "typography": {
     "fontFamily": "Poppins",
     "fontWeight": 900,
@@ -56,7 +54,7 @@
     "type": "balanced-pixel-width",
     "minLines": 1,
     "maxLines": 4,
-    "maxWidthRatio": 0.55
+    "maxWidthRatio": 0.52
   },
   "alignment": {
     "verticalAlign": "top",

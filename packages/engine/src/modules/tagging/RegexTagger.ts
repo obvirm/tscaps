@@ -36,6 +36,6 @@ export class RegexTagger extends Tagger {
       const newSemanticTags = new Set([...word.semanticTags, Tag.of(this.tagName)]);
       return word.with({ semanticTags: newSemanticTags });
     });
-    return new Line({ words, structureTags: line.structureTags });
+    return line.with({ words });
   }
 }

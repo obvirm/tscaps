@@ -62,7 +62,7 @@ export function buildAnimationPresets(libraryDir: string): void {
   for (const kind of ELEMENT_KINDS) {
     const timingVariable = timingVariableResolver.resolve(kind, ElementAnimationScope.SELF);
     const compiled = compilePresets(libraryDir, kind, timingVariable);
-    collectInto(presets, timingVariable, compiled.css);
+    collectInto(presets, kind, timingVariable, compiled.css);
     for (const animation of compiled.declared) declared.set(animation.id, animation.values);
   }
   if (presets.size === 0) throw new Error(`${SOURCE_MODULE} declared no entrances.`);
@@ -213,39 +213,105 @@ function compilePresets(libraryDir: string, kind: ElementKind, timingVariable: s
  */
 function collectInto(
   presets: Map<string, CompiledPreset>,
+  kind: ElementKind,
   timingVariable: string,
   css: string,
 ): void {
   const blocks = topLevelBlocks(css);
   const keyframesByName = keyframeBlocksByName(blocks);
-  for (const rule of blocks.filter(isPresetRule)) {
-    const id = rule.prelude.trim().slice(1);
-    const declarations = dedent(rule.body);
-    const keyframeName = soleKeyframeReference(id, declarations);
-    const keyframes = keyframesByName.get(keyframeName);
-    if (!keyframes) {
-      throw new Error(`Entrance "${id}" animates "${keyframeName}", which the library never defines.`);
-    }
-    const existing = presets.get(id);
-    if (!existing) {
-      presets.set(id, {
-        id,
-        keyframeName,
-        customProperties: [...customPropertyScanner.scan(minifier.minify(declarations))],
-        keyframes,
-        declarationsByTimingVariable: { [timingVariable]: declarations },
-      });
-      continue;
-    }
-    if (existing.keyframes !== keyframes) {
-      throw new Error(`Entrance "${id}" compiles different keyframes depending on the clock it anchors to.`);
-    }
-    presets.set(id, {
-      ...existing,
-      declarationsByTimingVariable: { ...existing.declarationsByTimingVariable, [timingVariable]: declarations },
-    });
+  const rules = blocks.filter(isPresetRule);
+  for (const rule of rules.filter((candidate) => !isGeneratedBoxRule(candidate))) {
+    collectEntrance(presets, rule, kind, timingVariable, keyframesByName);
+  }
+  // After the entrances, because a box belongs to one and cannot be
+  // folded into an entrance that has not been read yet.
+  for (const rule of rules.filter(isGeneratedBoxRule)) {
+    collectGeneratedBox(presets, rule, timingVariable, keyframesByName);
   }
   rejectSharedKeyframes(presets);
+}
+
+function collectEntrance(
+  presets: Map<string, CompiledPreset>,
+  rule: CssBlock,
+  kind: ElementKind,
+  timingVariable: string,
+  keyframesByName: ReadonlyMap<string, string>,
+): void {
+  const id = rule.prelude.trim().slice(1);
+  const declarations = dedent(rule.body);
+  const keyframeName = soleKeyframeReference(id, declarations);
+  const keyframes = keyframesByName.get(keyframeName);
+  if (!keyframes) {
+    throw new Error(`Entrance "${id}" animates "${keyframeName}", which the library never defines.`);
+  }
+  const existing = presets.get(id);
+  if (!existing) {
+    presets.set(id, {
+      id,
+      kinds: [kind],
+      keyframeName,
+      customProperties: [...customPropertyScanner.scan(minifier.minify(declarations))],
+      keyframes,
+      declarationsByTimingVariable: { [timingVariable]: declarations },
+      generatedBox: null,
+    });
+    return;
+  }
+  if (existing.keyframes !== keyframes) {
+    throw new Error(`Entrance "${id}" compiles different keyframes depending on the clock it anchors to.`);
+  }
+  presets.set(id, {
+    ...existing,
+    kinds: [...existing.kinds, kind],
+    declarationsByTimingVariable: { ...existing.declarationsByTimingVariable, [timingVariable]: declarations },
+  });
+}
+
+/**
+ * Folds a rule written for an entrance's own generated box into that
+ * entrance, rather than reading it as a second entrance whose name
+ * happens to carry a pseudo-element.
+ */
+function collectGeneratedBox(
+  presets: Map<string, CompiledPreset>,
+  rule: CssBlock,
+  timingVariable: string,
+  keyframesByName: ReadonlyMap<string, string>,
+): void {
+  const selector = rule.prelude.trim();
+  const separator = selector.indexOf('::');
+  const id = selector.slice(1, separator);
+  const pseudo = selector.slice(separator);
+  const entrance = presets.get(id);
+  if (!entrance) {
+    throw new Error(`A generated box was written as "${selector}", but "${id}" is not an entrance.`);
+  }
+  const declarations = dedent(rule.body);
+  const keyframeName = soleKeyframeReference(selector, declarations);
+  const keyframes = keyframesByName.get(keyframeName);
+  if (!keyframes) {
+    throw new Error(`Entrance "${id}" moves its ${pseudo} with "${keyframeName}", which the library never defines.`);
+  }
+  const existing = entrance.generatedBox;
+  if (existing && existing.pseudo !== pseudo) {
+    throw new Error(`Entrance "${id}" paints a ${existing.pseudo} for one kind of element and a ${pseudo} for another.`);
+  }
+  presets.set(id, {
+    ...entrance,
+    generatedBox: {
+      pseudo,
+      keyframes,
+      declarationsByTimingVariable: {
+        ...existing?.declarationsByTimingVariable,
+        [timingVariable]: declarations,
+      },
+    },
+  });
+}
+
+function isGeneratedBoxRule(block: CssBlock): boolean {
+  return block.prelude.includes('::');
 }
 
 /**

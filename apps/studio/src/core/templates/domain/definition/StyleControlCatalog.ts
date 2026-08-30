@@ -72,6 +72,20 @@ const CONCEPTS: Readonly<Record<string, StyleControlConcept>> = {
     max: 2.0,
     step: 0.01,
   },
+  // Every halo the gallery ships falls between 0.09 and 0.37em. The ceiling
+  // sits well past that because a heavier face needs more reach before it
+  // reads as lit at all, and a radius wide enough to be a mistake is one the
+  // user can see going wrong.
+  'glow-radius': {
+    label: 'Glow',
+    type: 'float',
+    unit: 'em',
+    group: 'style',
+    subgroup: 'appearance',
+    min: 0,
+    max: 0.6,
+    step: 0.01,
+  },
   'filter-shadow-distance': {
     label: 'Shadow distance',
     type: 'float',

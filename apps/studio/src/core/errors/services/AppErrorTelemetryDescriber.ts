@@ -1,9 +1,10 @@
 import type { AppError } from '@core/errors/domain/AppError';
 import type { TelemetryEventProperties } from '@shared/telemetry';
 
-const MAX_DEPTH = 8;
+const MAX_LINKS = 8;
 const MAX_MESSAGE_CHARS = 500;
 const CHAIN_SEPARATOR = ' -> ';
+const BRANCH_SEPARATOR = ' | ';
 
 /**
  * Turns an `AppError` into the property bag every telemetry site uses
@@ -14,37 +15,53 @@ const CHAIN_SEPARATOR = ' -> ';
  * already filter on. `error_chain` joins every link of the cause
  * chain as `Name: message` fragments, so a failure whose real reason
  * is nested several wrappers deep still tells its full story from a
- * single event without adding a field per level.
+ * single event without adding a field per level. An `AggregateError`
+ * has no single reason: its branches are rendered together inside
+ * brackets, because a step that tried several strategies is only
+ * diagnosable when every attempt's failure is readable at once.
  *
- * The walk is capped at MAX_DEPTH links and guards against a cause
- * that points back into the chain; each message is truncated at
- * MAX_MESSAGE_CHARS. Together those keep the joined field well within
- * the per-property size caps telemetry backends enforce even under
- * pathological chains.
+ * The rendering is capped at MAX_LINKS errors in total — across the
+ * chain and every branch — and guards against a cause that points
+ * back into what it came from; each message is truncated at
+ * MAX_MESSAGE_CHARS. Together those keep the joined field well
+ * within the per-property size caps telemetry backends enforce even
+ * under pathological chains.
  */
 export class AppErrorTelemetryDescriber {
   describe(appError: AppError): TelemetryEventProperties {
-    const chain = this.walk(appError);
-    const cause = chain[1] ?? null;
+    const cause = appError.cause;
     return {
       error_name: appError.name,
       error_message: appError.message,
-      error_cause_name: cause ? cause.name : null,
-      error_cause_message: cause ? cause.message : null,
-      error_chain: chain.map((link) => this.formatLink(link)).join(CHAIN_SEPARATOR),
+      error_cause_name: cause instanceof Error ? cause.name : null,
+      error_cause_message: cause instanceof Error ? cause.message : null,
+      error_chain: this.render(appError, new Set<Error>()),
     };
   }
 
-  private walk(outer: Error): Error[] {
-    const chain: Error[] = [];
-    const seen = new Set<Error>();
-    let current: unknown = outer;
-    while (current instanceof Error && !seen.has(current) && chain.length < MAX_DEPTH) {
-      chain.push(current);
-      seen.add(current);
-      current = (current as { cause?: unknown }).cause;
-    }
-    return chain;
+  private render(error: Error, rendered: Set<Error>): string {
+    rendered.add(error);
+    const head = this.formatLink(error);
+    if (rendered.size >= MAX_LINKS) return head;
+    const branches = this.branchesOf(error);
+    if (branches.length > 0) return this.renderBranches(head, branches, rendered);
+    const cause = (error as { cause?: unknown }).cause;
+    if (!(cause instanceof Error) || rendered.has(cause)) return head;
+    return head + CHAIN_SEPARATOR + this.render(cause, rendered);
+  }
+
+  private renderBranches(head: string, branches: Error[], rendered: Set<Error>): string {
+    const parts = branches
+      .filter((branch) => !rendered.has(branch))
+      .map((branch) => this.render(branch, rendered));
+    if (parts.length === 0) return head;
+    return `${head} [${parts.join(BRANCH_SEPARATOR)}]`;
+  }
+
+  private branchesOf(error: Error): Error[] {
+    const branches = (error as { errors?: unknown }).errors;
+    if (!Array.isArray(branches)) return [];
+    return branches.filter((branch): branch is Error => branch instanceof Error);
   }
 
   private formatLink(error: Error): string {

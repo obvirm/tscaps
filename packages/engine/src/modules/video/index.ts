@@ -8,6 +8,8 @@ export type {
   RenderQuality,
   AudioDiscardReason,
   FallbackDecoderInfo,
+  VideoFrameDecoderKind,
+  VideoFrameDecoderSelection,
 } from '@modules/video/RenderJob';
 
 export { MediaBunnyVideoRenderer } from '@modules/video/mediabunny/MediaBunnyVideoRenderer';
@@ -20,7 +22,7 @@ export type {
   MediaBunnyTranscodeResult,
 } from '@modules/video/mediabunny/MediaBunnyTranscodeCoordinator';
 
-export type { FramePainter } from '@modules/video/mediabunny/painter/FramePainter';
+export type { FramePainter, FramePaintRequest } from '@modules/video/mediabunny/painter/FramePainter';
 export { CaptionsOverlayFramePainter } from '@modules/video/mediabunny/painter/CaptionsOverlayFramePainter';
 export { CaptionsOverlayFramePainterFactory } from '@modules/video/mediabunny/painter/CaptionsOverlayFramePainterFactory';
 
@@ -42,6 +44,8 @@ export type {
   VideoFrameDecoderRequest,
 } from '@modules/video/mediabunny/frame/VideoFrameDecoderFactory';
 export { DefaultVideoFrameDecoderFactory } from '@modules/video/mediabunny/frame/DefaultVideoFrameDecoderFactory';
+export { WebCodecsOnlyVideoFrameDecoderFactory } from '@modules/video/mediabunny/frame/WebCodecsOnlyVideoFrameDecoderFactory';
+export { VideoFrameDecoderSelectionFailedError } from '@modules/video/mediabunny/frame/VideoFrameDecoderSelectionFailedError';
 export { WebCodecsVideoFrameDecoder } from '@modules/video/mediabunny/frame/WebCodecsVideoFrameDecoder';
 export { HtmlVideoElementVideoFrameDecoder } from '@modules/video/mediabunny/frame/HtmlVideoElementVideoFrameDecoder';
 
@@ -63,7 +67,10 @@ export {
 export type { FrameCompositor } from '@modules/video/mediabunny/frame/FrameCompositor';
 export { LayeredFrameCompositor } from '@modules/video/mediabunny/frame/LayeredFrameCompositor';
 
-export type { SubtitleLayerSource } from '@modules/video/mediabunny/caption/SubtitleLayerSource';
+export type {
+  SubtitleLayerSource,
+  SubtitleLayerRequest,
+} from '@modules/video/mediabunny/caption/SubtitleLayerSource';
 export { BatchedSubtitleLayerSource } from '@modules/video/mediabunny/caption/BatchedSubtitleLayerSource';
 export { VideoBoundSubtitleLayerSource } from '@modules/video/mediabunny/caption/VideoBoundSubtitleLayerSource';
 export { ComposedSubtitleLayerSource } from '@modules/video/mediabunny/caption/ComposedSubtitleLayerSource';

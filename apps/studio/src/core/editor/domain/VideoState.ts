@@ -1,3 +1,5 @@
+import type { VideoPreview } from '@core/preview/domain/VideoPreview';
+
 /**
  * Intrinsic dimensions of the video, captured from the `<video>` element once metadata loads.
  */
@@ -33,20 +35,11 @@ export interface VideoState {
   readonly file: File | null;
   readonly url: string | null;
   /**
-   * Re-encoded 480p H.264 version of `file`, generated during the
-   * preprocessing pipeline and loaded by the preview surface in
-   * place of the original. `null` until generation completes.
-   * Export keeps using `file`.
+   * What the preview surface loads: the re-encoded 480p H.264 proxy,
+   * or the original bytes with the reason none was produced. `null`
+   * until a preview is published. Export always uses `file`.
    */
-  readonly previewFile: Blob | null;
-  /**
-   * Whether `previewFile` holds a real proxy rather than the original
-   * bytes. The preview surface plays the source verbatim when the
-   * proxy pipeline is off and when generation failed, so a non-null
-   * `previewFile` on its own says nothing about the quality on
-   * screen. Consumers describing the preview to the user read this.
-   */
-  readonly previewIsProxy: boolean;
+  readonly preview: VideoPreview | null;
   readonly fileName: string | null;
   readonly mimeType: string | null;
   readonly size: number | null;

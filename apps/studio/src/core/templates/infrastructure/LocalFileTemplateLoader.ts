@@ -7,6 +7,7 @@ import type { StyleControlResolver } from '@core/templates/services/controls/Sty
 import TemplateLoader from '@core/templates/domain/TemplateLoader';
 import { Template } from '@core/templates/domain/Template';
 import { TemplateMetadata } from '@core/templates/domain/TemplateMetadata';
+import { TEMPLATE_CATEGORIES, type TemplateCategory } from '@core/templates/domain/TemplateCategory';
 import type { RenderingConfig } from '@core/templates/domain/definition/RenderingConfig';
 import type { AnimationSupport, FeaturesConfig, RotationSupport } from '@core/templates/domain/definition/FeaturesConfig';
 import type { BehindActorTemplateConfig } from '@core/person-segmentation/domain/BehindActorTemplateConfig';
@@ -57,6 +58,7 @@ const FEATURES_DEFAULT: FeaturesConfig = {
   animation: { segment: true, line: true, word: true, decoration: true },
   behindActorOverride: true,
 };
+const CATEGORY_DEFAULT: TemplateCategory = 'lab';
 const SEGMENT_SPLITTERS_DEFAULT: SegmentSplitterEntry[] = [
   { type: 'boundary' },
   { type: 'limit_by_chars' },
@@ -216,9 +218,14 @@ export class LocalFileTemplateLoader implements TemplateLoader {
     return {
       id: name,
       name,
-      categories: config.categories ?? [],
+      category: this.resolveCategory(config.category),
       unsupportedUserAgents: config.unsupportedUserAgents ?? [],
     };
+  }
+
+  private resolveCategory(declared: string | undefined): TemplateCategory {
+    if (declared !== undefined && declared in TEMPLATE_CATEGORIES) return declared as TemplateCategory;
+    return CATEGORY_DEFAULT;
   }
 
   private loadTypography(config?: Partial<TypographyConfig>): TypographyConfig {

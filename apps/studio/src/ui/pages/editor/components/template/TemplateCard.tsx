@@ -1,5 +1,5 @@
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Star, Trash2, Pencil } from 'lucide-react';
+import { Check, Star, Trash2, Pencil } from 'lucide-react';
 import type { Template } from '@core/templates/domain/Template';
 import type { WordSplitter } from '@tscaps/engine';
 import { useTemplatePreviewArtifactsBuilder } from '@ui/pages/editor/contexts/TemplatePreviewArtifactsContext';
@@ -43,6 +43,20 @@ const OFFSCREEN_RENDER_SKIP_CLASS = '[content-visibility:auto] [contain-intrinsi
 // fixed reference dimensions (matching the authoring reference) give
 // template `cqh` / `cqw` units a stable resolution independent of the
 // browser viewport.
+// Selection reads the same here as it does on a clip card and in the
+// asset picker: the accent edge plus a halo, and a mark that survives
+// whatever the card is showing behind it.
+const FRAME_BASE =
+  'w-full bg-transparent border-[1.5px] rounded-md cursor-pointer flex flex-col overflow-hidden p-0 ' +
+  'transition-colors duration-quick ease-standard focus-visible:outline-none';
+const FRAME_SELECTED = 'border-accent';
+const FRAME_IDLE =
+  'border-edge-subtle hover:border-edge-strong focus-visible:border-accent ' +
+  'focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent/40';
+const ACTIVE_BADGE =
+  'absolute bottom-1 left-1 inline-flex items-center justify-center w-4 h-4 rounded-full ' +
+  'bg-accent text-fg-on-accent pointer-events-none';
+
 const VIRTUAL_VIDEO_W = 720;
 const VIRTUAL_VIDEO_H = 1280;
 
@@ -138,12 +152,10 @@ export const TemplateCard = memo(function TemplateCard({
       onMouseLeave={() => setIsHovered(false)}
     >
       <button
-        className={
-          isSelected
-            ? 'w-full bg-transparent border-[1.5px] rounded-md cursor-pointer flex flex-col overflow-hidden p-0 transition-colors duration-quick ease-standard border-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent/40'
-            : 'w-full bg-transparent border-[1.5px] rounded-md cursor-pointer flex flex-col overflow-hidden p-0 transition-colors duration-quick ease-standard border-edge-subtle hover:border-edge-strong focus-visible:outline-none focus-visible:border-accent focus-visible:ring-2 focus-visible:ring-accent/30'
-        }
+        className={isSelected ? `${FRAME_BASE} ${FRAME_SELECTED}` : `${FRAME_BASE} ${FRAME_IDLE}`}
         onClick={() => onSelect(template)}
+        aria-label={template.metadata.name}
+        aria-pressed={isSelected}
       >
         {/* `scopeClass` MUST be present — it's the scope anchor for the CSS injected below. */}
         <div
@@ -191,6 +203,12 @@ export const TemplateCard = memo(function TemplateCard({
           </div>
         </div>
       </button>
+
+      {isSelected && (
+        <span className={ACTIVE_BADGE}>
+          <Check size={10} strokeWidth={3} />
+        </span>
+      )}
 
       <button
         type="button"

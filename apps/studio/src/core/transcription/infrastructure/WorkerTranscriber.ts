@@ -93,6 +93,9 @@ export class WorkerTranscriber implements ConfigurableTranscriber {
   }
 
   private runInference(pcm: Float32Array, options?: TranscriberOptions): Promise<Document> {
+    // Transferring moves the whole buffer, and a decoder pre-sizes it
+    // from an estimated duration, so the range it filled travels too.
+    // The slack past that range is silence the model hallucinates on.
     const pcmBuffer = pcm.buffer as ArrayBuffer;
     return new Promise<Document>((resolve, reject) => {
       this.currentJob = { resolve, reject };
@@ -100,6 +103,8 @@ export class WorkerTranscriber implements ConfigurableTranscriber {
         {
           type: 'transcribe',
           audio: pcmBuffer,
+          audioByteOffset: pcm.byteOffset,
+          audioSampleCount: pcm.length,
           options,
           transcriberConfig: this.config,
         },

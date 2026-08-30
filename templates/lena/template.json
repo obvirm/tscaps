@@ -1,7 +1,12 @@
 {
   "name": "Lena",
-  "categories": [
-    "decorative"
+  "category": "lab",
+  "variants": [
+    { "label": "Blue", "overrides": { "bg-color": "#2997ff" } },
+    { "label": "Rose", "overrides": { "bg-color": "#e0457b" } },
+    { "label": "Green", "overrides": { "bg-color": "#12924a" } },
+    { "label": "Ember", "overrides": { "bg-color": "#c2410c" } },
+    { "label": "Violet", "overrides": { "bg-color": "#7c4dff" } }
   ],
   "typography": {
     "fontFamily": "Inter Variable",
@@ -31,7 +36,7 @@
     },
     {
       "id": "tag-font-family",
-      "label": "Tag font",
+      "label": "Accent font",
       "type": "font",
       "default": "Inter Variable",
       "group": "style",
@@ -40,7 +45,7 @@
     },
     {
       "id": "tag-font-weight",
-      "label": "Tag weight",
+      "label": "Accent weight",
       "type": "integer",
       "default": 900,
       "min": 100,
@@ -110,7 +115,7 @@
     "type": "balanced-pixel-width",
     "minLines": 1,
     "maxLines": 3,
-    "maxWidthRatio": 0.55
+    "maxWidthRatio": 0.5
   },
   "alignment": {
     "verticalAlign": "bottom",

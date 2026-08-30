@@ -1,4 +1,5 @@
 @use '../_lib/animation/typewriter' as *;
+@use '../_lib/glow' as *;
 @use '../_lib/segment-typography' as *;
 @use '../_lib/word-layout' as *;
 
@@ -80,7 +81,7 @@
 
 .word {
   @include word-layout(0.14em);
-  text-shadow: 0 0 var(--tscaps-glow-radius, 0.18em) var(--tscaps-primary-color, #00ff41);
+  text-shadow: glow(0.18, $color: var(--tscaps-primary-color, #00ff41));
 }
 
 .letter {
@@ -92,5 +93,5 @@
    different screen. */
 .letter::after {
   color: var(--tscaps-primary-color, #00ff41);
-  text-shadow: 0 0 var(--tscaps-glow-radius, 0.18em) var(--tscaps-primary-color, #00ff41);
+  text-shadow: glow(0.18, $color: var(--tscaps-primary-color, #00ff41));
 }

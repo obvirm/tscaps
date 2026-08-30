@@ -1,7 +1,12 @@
 {
   "name": "Otto",
-  "categories": [
-    "clean"
+  "category": "classic",
+  "variants": [
+    { "label": "Gold", "overrides": { "highlight-color": "#ffd700" } },
+    { "label": "Cyan", "overrides": { "highlight-color": "#00e5ff" } },
+    { "label": "Green", "overrides": { "highlight-color": "#3ddc84" } },
+    { "label": "Pink", "overrides": { "highlight-color": "#ff4fa3" } },
+    { "label": "Violet", "overrides": { "highlight-color": "#b388ff" } }
   ],
   "typography": {
     "fontFamily": "Inter Variable",

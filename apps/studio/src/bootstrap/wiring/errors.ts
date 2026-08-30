@@ -11,6 +11,7 @@ import { UnsupportedCodecFailureReasonRule } from '@core/errors/services/failure
 import { WorkerErrorMonitor } from '@core/_shared/workers/WorkerErrorMonitor';
 
 export interface ErrorsModule {
+  readonly errorReporter: ErrorReporter;
   readonly workerErrorMonitor: WorkerErrorMonitor;
   readonly errorClassifier: AppErrorClassifier;
   readonly errorTelemetryDescriber: AppErrorTelemetryDescriber;
@@ -24,9 +25,13 @@ export interface ErrorsModule {
  *
  * Every build reports crashes to the console; a build with a reporting
  * backend configured also sends the report there. The composite hides
- * which channels are active behind one port, and the worker monitor is
- * its only consumer — everything on the main thread is already covered
- * by the reporting SDK's own global handlers.
+ * which channels are active behind one port.
+ *
+ * Most of the main thread never needs it — the reporting SDK's global
+ * handlers already cover anything that propagates. What reaches this
+ * port is what those handlers cannot see: a worker's unhandled
+ * rejection, and a failure some `catch` recovered from without anybody
+ * upstream ever learning it happened.
  *
  * Rules are listed most specific first — the resolver takes the first
  * match, so their order is the tie-break when one failure could be
@@ -38,8 +43,10 @@ export interface ErrorsModule {
  */
 export function bootErrors(): ErrorsModule {
   const reporters: ErrorReporter[] = [new ConsoleErrorReporter()];
+  const errorReporter = new CompositeErrorReporter(reporters);
   return {
-    workerErrorMonitor: new WorkerErrorMonitor(new CompositeErrorReporter(reporters)),
+    errorReporter,
+    workerErrorMonitor: new WorkerErrorMonitor(errorReporter),
     errorClassifier: new AppErrorClassifier(),
     errorTelemetryDescriber: new AppErrorTelemetryDescriber(),
     appNoticeChannel: new AppNoticeChannel(),

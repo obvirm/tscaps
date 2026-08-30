@@ -12,13 +12,13 @@ export class BalancedPixelWidthLineSplitterDescriptor
     type: 'balanced-pixel-width',
     maxLines: 2,
     minLines: 1,
-    maxWidthRatio: 0.8,
+    maxWidthRatio: 0.72,
   };
 
   readonly controlsSchema: readonly ControlField[] = [
     { id: 'maxLines', label: 'Max lines', type: 'integer', default: 2, min: 1, max: 8 },
     { id: 'minLines', label: 'Min lines', type: 'integer', default: 1, min: 1, max: 8 },
-    { id: 'maxWidthRatio', label: 'Max line width', type: 'float', default: 0.8, min: 0.3, max: 1.0, step: 0.01 },
+    { id: 'maxWidthRatio', label: 'Max line width', type: 'float', default: 0.72, min: 0.3, max: 1.0, step: 0.01 },
   ];
 
   build(config: BalancedPixelWidthLineSplitterConfig, context: LineSplitterContext): LineSplitter {

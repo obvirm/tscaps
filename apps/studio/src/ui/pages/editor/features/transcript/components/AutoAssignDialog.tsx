@@ -53,8 +53,6 @@ const UNAVAILABLE_LEGENDS: Record<string, Record<string, string>> = {
   speaker: {
     'insufficient-speakers':
       'Grouping by speaker needs at least two speakers detected in the recording. This one has only one.',
-    'mixed-speaker-segments':
-      'Some scenes mix multiple speakers. Enable "Split scenes by speaker" in the Layout tab so each scene carries a single voice, then come back.',
   },
   tag: {
     'no-tags':

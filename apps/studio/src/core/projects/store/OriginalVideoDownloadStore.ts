@@ -1,7 +1,5 @@
-import type {
-  OriginalVideoDownloadFailureReason,
-  OriginalVideoDownloadStatus,
-} from '@core/projects/domain/OriginalVideoDownloadStatus';
+import type { AppError } from '@core/errors/domain/AppError';
+import type { OriginalVideoDownloadStatus } from '@core/projects/domain/OriginalVideoDownloadStatus';
 
 const IDLE: OriginalVideoDownloadStatus = { kind: 'idle' };
 
@@ -52,10 +50,15 @@ export class OriginalVideoDownloadStore extends EventTarget {
     this.publish({ kind: 'ready' });
   }
 
-  /** Marks the fetch as failed for the supplied reason. */
-  fail(reason: OriginalVideoDownloadFailureReason): void {
-    if (this._status.kind === 'failed' && this._status.reason === reason) return;
-    this.publish({ kind: 'failed', reason });
+  /**
+   * Marks the fetch as failed, carrying the error that ended it.
+   * Keeps the failure it already holds: every retry starts from
+   * `start()`, so a second failure only ever arrives after the status
+   * has left this state.
+   */
+  fail(error: AppError): void {
+    if (this._status.kind === 'failed') return;
+    this.publish({ kind: 'failed', error });
   }
 
   /**
@@ -65,7 +68,7 @@ export class OriginalVideoDownloadStore extends EventTarget {
    */
   waitUntilReady(): Promise<void> {
     if (this._status.kind === 'ready') return Promise.resolve();
-    if (this._status.kind === 'failed') return Promise.reject(this.toError(this._status.reason));
+    if (this._status.kind === 'failed') return Promise.reject(this._status.error);
     return this.subscribeUntilTerminal();
   }
 
@@ -79,7 +82,7 @@ export class OriginalVideoDownloadStore extends EventTarget {
         }
         if (this._status.kind === 'failed') {
           this.removeEventListener('change', listener);
-          reject(this.toError(this._status.reason));
+          reject(this._status.error);
         }
       };
       this.addEventListener('change', listener);
@@ -93,9 +96,5 @@ export class OriginalVideoDownloadStore extends EventTarget {
 
   private clamp01(value: number): number {
     return Math.max(0, Math.min(1, value));
-  }
-
-  private toError(reason: OriginalVideoDownloadFailureReason): Error {
-    return new Error(`Original video download failed: ${reason}`);
   }
 }

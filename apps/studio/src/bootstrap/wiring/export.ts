@@ -7,8 +7,11 @@ import type { AppErrorTelemetryDescriber } from '@core/errors/services/AppErrorT
 import type { NonBlockingFailureReporter } from '@core/errors/services/NonBlockingFailureReporter';
 import { ExportPauseCoordinator } from '@core/export/services/ExportPauseCoordinator';
 import { ExportVideoAction } from '@core/export/actions/ExportVideoAction';
+import { ExportRenderPlanner } from '@core/export/services/ExportRenderPlanner';
+import { SubtitleStyleSetBuilder } from '@core/export/services/SubtitleStyleSetBuilder';
 import { ExportSubtitlesAction } from '@core/export/actions/ExportSubtitlesAction';
 import { SubtitleFileSerializerRegistry } from '@core/export/services/SubtitleFileSerializerRegistry';
+import { DrawableFamilyResolver } from '@core/fonts/services/DrawableFamilyResolver';
 import { SheetFontFamilyCollector } from '@core/fonts/services/SheetFontFamilyCollector';
 import { DocumentUsedCodepointCollector } from '@core/fonts/services/DocumentUsedCodepointCollector';
 import { SheetCustomizationDiff } from '@core/sheets/services/SheetCustomizationDiff';
@@ -26,6 +29,7 @@ import type { UtilsModule } from '@bootstrap/wiring/utils';
 import type { TelemetryModule } from '@bootstrap/wiring/telemetry';
 import type { UserBlobsModule } from '@bootstrap/wiring/user-blobs';
 import type { WorkerErrorMonitor } from '@core/_shared/workers/WorkerErrorMonitor';
+import { DocumentVisibilityTracker } from '@core/_shared/infrastructure/DocumentVisibilityTracker';
 
 export interface ExportDependencies {
   readonly engine: EngineModule;
@@ -60,22 +64,35 @@ export function bootExport(deps: ExportDependencies) {
   const progressStore = new ExportProgressStore();
   const pauseCoordinator = new ExportPauseCoordinator(deps.runStore);
   const writerFactory = new DefaultExportWriterFactory(deps.utils.userAgentInspector, deps.workerErrorMonitor);
-  const run = new ExportVideoAction(
-    deps.store,
-    deps.runStore,
-    deps.originalVideoDownloadStore,
-    deps.engine.renderer,
+  const styleSetBuilder = new SubtitleStyleSetBuilder(
     deps.rendering.sheetCssVarsBuilder,
     deps.rendering.layeredCaptionCssBuilder,
     deps.rendering.captionFontOverridesBuilder,
     deps.rendering.segmentColorRotation,
     deps.fonts.fontFaceCssBuilder,
-    new SheetFontFamilyCollector(deps.rendering.fontStackResolver),
+    new SheetFontFamilyCollector(
+      deps.rendering.fontStackResolver,
+      new DrawableFamilyResolver(deps.rendering.fontStackResolver),
+      deps.rendering.fontScriptClassifier,
+      deps.rendering.captionTextCollector,
+    ),
     new DocumentUsedCodepointCollector(),
     deps.rendering.svgFilterDefinitionsResolver,
     deps.sheets.decorationPlacementResolver,
-    deps.sheets.decorationFilter,
+  );
+  const planner = new ExportRenderPlanner(
     deps.cuts.services.cutAwareDocumentBuilder,
+    deps.sheets.decorationFilter,
+    styleSetBuilder,
+    deps.renderContributors,
+    deps.overlayResolver,
+  );
+  const run = new ExportVideoAction(
+    deps.store,
+    deps.runStore,
+    deps.originalVideoDownloadStore,
+    deps.engine.renderer,
+    planner,
     pauseCoordinator,
     writerFactory,
     deps.utils.fileDownloader,
@@ -85,8 +102,7 @@ export function bootExport(deps: ExportDependencies) {
     deps.saveFailureReporter,
     deps.errorTelemetryDescriber,
     new SheetCustomizationDiff(),
-    deps.renderContributors,
-    deps.overlayResolver,
+    new DocumentVisibilityTracker(),
   );
   const runSubtitles = new ExportSubtitlesAction(
     deps.store,

@@ -13,6 +13,8 @@ import { StructureTagger } from '@modules/tagging/StructureTagger';
 import type { Effect } from '@modules/effect/Effect';
 import type { SubtitleFrameRenderer, SubtitleStyle } from '@modules/rendering/SubtitleFrameRenderer';
 import { BrowserSubtitleFrameRenderer } from '@modules/rendering/BrowserSubtitleFrameRenderer';
+import { SpriteSheetSizeProbe } from '@modules/rendering/subtitle/SpriteSheetSizeProbe';
+import { ImageDecodeSpriteSheetRasterProbe } from '@modules/rendering/subtitle/ImageDecodeSpriteSheetRasterProbe';
 import type { OverlayFrameRenderer } from '@modules/rendering/OverlayFrameRenderer';
 import { BrowserOverlayFrameRenderer } from '@modules/rendering/BrowserOverlayFrameRenderer';
 import type { AlignmentConfig } from '@modules/rendering/types/AlignmentConfig';
@@ -75,10 +77,15 @@ const DEFAULT_SEGMENT_SPLITTER_CONFIG: DefaultSegmentSplitterConfig = {
   scale: 1,
 };
 
+// A centred caption at `maxWidthRatio` leaves half of what it does not take
+// clear on each side, and the short-form players draw an action rail down the
+// right edge — the widest of them claims around 11% of the width. Anything
+// past 0.78 puts a full line under it, so the default sits below that with
+// room for the rail's own imprecision.
 const DEFAULT_LINE_SPLITTER_CONFIG: DefaultLineSplitterConfig = {
   maxLines: 2,
   minLines: 1,
-  maxWidthRatio: 0.8,
+  maxWidthRatio: 0.72,
 };
 
 const DEFAULT_ALIGNMENT: AlignmentConfig = {
@@ -252,7 +259,7 @@ export class RenderPipelineBuilder {
     return this;
   }
 
-  /** Replaces the single-style default wholesale; subsequent style atajos layer on top of this. */
+  /** Replaces the single-style default wholesale; subsequent style shortcuts layer on top of this. */
   withSubtitleStyle(style: SubtitleStyle): this {
     this.style = style;
     return this;
@@ -413,9 +420,16 @@ export class RenderPipelineBuilder {
     cssResourceEmbedder: CssResourceEmbedder,
     wordSplitter: WordSplitter,
   ): ComposedSubtitleLayerSource {
+    // Shared by both renderers: a walk decodes rasters up to the whole
+    // pixel budget, and the two work at the same output size.
+    const sizeProbe = new SpriteSheetSizeProbe(new ImageDecodeSpriteSheetRasterProbe());
     return new ComposedSubtitleLayerSource(
-      new BatchedSubtitleLayerSource(this.resolveSubtitleFrameRenderer(cssResourceEmbedder, wordSplitter)),
-      new VideoBoundSubtitleLayerSource(this.resolveSubtitleFrameRenderer(cssResourceEmbedder, wordSplitter)),
+      new BatchedSubtitleLayerSource(
+        this.resolveSubtitleFrameRenderer(cssResourceEmbedder, wordSplitter, sizeProbe),
+      ),
+      new VideoBoundSubtitleLayerSource(
+        this.resolveSubtitleFrameRenderer(cssResourceEmbedder, wordSplitter, sizeProbe),
+      ),
     );
   }
 
@@ -426,8 +440,9 @@ export class RenderPipelineBuilder {
   private resolveSubtitleFrameRenderer(
     cssResourceEmbedder: CssResourceEmbedder,
     wordSplitter: WordSplitter,
+    sizeProbe: SpriteSheetSizeProbe,
   ): SubtitleFrameRenderer {
     if (this.subtitleFrameRenderer !== null) return this.subtitleFrameRenderer;
-    return BrowserSubtitleFrameRenderer.create(cssResourceEmbedder, wordSplitter);
+    return BrowserSubtitleFrameRenderer.create(cssResourceEmbedder, wordSplitter, { sizeProbe });
   }
 }

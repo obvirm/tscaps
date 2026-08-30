@@ -12,9 +12,17 @@ export interface SerializedUntranscribedRegion {
   end: number;
 }
 
+/**
+ * A transcription request. `audio` is the transferred backing buffer
+ * of a mono PCM `Float32Array`; the byte offset and sample count
+ * delimit the part that holds audio, since a decoder may hand back a
+ * view of a larger buffer it pre-sized.
+ */
 export type TranscriberWorkerInbound = {
   type: 'transcribe';
   audio: ArrayBuffer;
+  audioByteOffset: number;
+  audioSampleCount: number;
   options?: TranscriberOptions;
   transcriberConfig?: unknown;
 };
@@ -64,7 +72,8 @@ export class TranscriberWorkerHost {
     const data = event.data;
     if (data.type !== 'transcribe') return;
     const transcriber = this.resolveTranscriber(data.transcriberConfig);
-    void this.run(transcriber, new Blob([data.audio]), data.options);
+    const pcm = new Float32Array(data.audio, data.audioByteOffset, data.audioSampleCount);
+    void this.run(transcriber, new Blob([pcm]), data.options);
   };
 
   private resolveTranscriber(config: unknown): Transcriber {

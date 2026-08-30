@@ -6,15 +6,20 @@ import type { LineSplitterConfig } from '@core/line-splitter/domain/LineSplitter
 import type { EffectConfig } from '@core/effect/domain/EffectConfig';
 import type { TypographyConfig } from '@core/sheets/domain/TypographyConfig';
 import type { RotationConfig } from '@core/sheets/domain/RotationConfig';
-import type { SheetRole } from '@core/sheets/domain/SheetRole';
+import { SHEET_ROLES, type SheetRole } from '@core/sheets/domain/SheetRole';
 import { SheetAnimationSet } from '@core/sheets/domain/SheetAnimationSet';
 import { StyleValues } from '@core/sheets/domain/StyleValues';
 
 export const MAIN_SHEET_ID = 'main';
-export const HOOK_SHEET_ID = 'hook';
-
 export const MAIN_SHEET_COLOR = '#94a3b8';
-export const HOOK_SHEET_COLOR = '#EBB85C';
+
+/**
+ * Hook's identity, named separately because the transcript paints its
+ * own hook affordances in these and reads better for it. The role table
+ * stays the source — see `SHEET_ROLES`.
+ */
+export const HOOK_SHEET_ID = SHEET_ROLES.hook.sheetId;
+export const HOOK_SHEET_COLOR = SHEET_ROLES.hook.color;
 
 export interface SheetProps {
   readonly id: string;
@@ -56,6 +61,12 @@ export class Sheet {
   readonly name: string;
   readonly color: string | null;
   readonly template: Template;
+  /**
+   * Which preset this sheet wants — a preference, not a position: never
+   * clamped to the current template's range, so it survives a template
+   * that ships fewer presets, or none. Index into `template.variants`
+   * through `resolveVariantIndex()`.
+   */
   readonly variantIndex: number;
   readonly styleValues: StyleValues;
   readonly typographyConfig: TypographyConfig;
@@ -64,7 +75,6 @@ export class Sheet {
   readonly lineSplitterConfig: LineSplitterConfig;
   readonly alignmentConfig: AlignmentConfig;
   readonly effectConfigs: ReadonlyArray<EffectConfig>;
-  /** How everything under this sheet moves, unless an element says otherwise. */
   /** How everything under this sheet moves, unless an element says otherwise. */
   readonly animations: SheetAnimationSet;
   readonly cssOverride: string | null;
@@ -143,20 +153,16 @@ export class Sheet {
   /**
    * Applies a new Template, resetting style values, typography, splitter
    * configs, alignment, effects, and any user-edited source overrides
-   * (CSS and filters.svg) to template defaults. The current
-   * `variantIndex` carries over (modulo the new template's variant
-   * count) so a sheet representing "the second preset" stays on the
-   * second preset of whichever template it lands on; templates with
-   * no variants reset the index to 0.
+   * (CSS and filters.svg) to template defaults. The `variantIndex`
+   * survives untouched, so a sheet representing "the second preset"
+   * stays on the second preset of whichever template it lands on — and
+   * comes back to it after a detour through a template that ships fewer
+   * variants, or none.
    */
   withTemplate(template: Template): Sheet {
-    const variantIndex = template.variants.length > 0
-      ? this.variantIndex % template.variants.length
-      : 0;
     return this.with({
       template,
-      variantIndex,
-      styleValues: StyleValues.fromTemplateVariant(template, variantIndex),
+      styleValues: StyleValues.fromTemplateVariant(template, this.variantIndex),
       typographyConfig: template.typography,
       rotationConfig: template.rotation,
       segmentSplitterConfigs: template.segmentSplitterConfigs,
@@ -171,25 +177,30 @@ export class Sheet {
 
   /**
    * Re-seeds `styleValues` from the current template defaults plus the
-   * picked variant's overrides. Manual per-field edits made before the
-   * switch are dropped — switching variant follows the same
-   * "preset replaces local edits" rule as switching template. Indices
-   * are wrapped into a valid slot; templates without variants behave
-   * as `variantIndex = 0`.
+   * overrides of the variant this index resolves to. Manual per-field
+   * edits made before the switch are dropped — switching variant follows
+   * the same "preset replaces local edits" rule as switching template.
+   * The index is stored as given, out of the current template's range or
+   * not: it states which preset the sheet wants, and the template it sits
+   * on decides what that comes out as today.
    */
   withVariant(variantIndex: number): Sheet {
-    const count = this.template.variants.length;
-    if (count === 0) {
-      return this.with({
-        variantIndex: 0,
-        styleValues: StyleValues.fromTemplateVariant(this.template, 0),
-      });
-    }
-    const safeIndex = ((variantIndex % count) + count) % count;
     return this.with({
-      variantIndex: safeIndex,
-      styleValues: StyleValues.fromTemplateVariant(this.template, safeIndex),
+      variantIndex,
+      styleValues: StyleValues.fromTemplateVariant(this.template, variantIndex),
     });
+  }
+
+  /**
+   * The slot in the current template's variants this sheet reads today.
+   * Every consumer that indexes into `template.variants` — a picker
+   * showing which preset is on, a baseline rebuild — asks this rather
+   * than `variantIndex`, which is a preference and may name a slot the
+   * current template does not have. `0` when the template ships no
+   * variants.
+   */
+  resolveVariantIndex(): number {
+    return this.template.resolveVariantIndex(this.variantIndex);
   }
 
   /**
@@ -226,10 +237,19 @@ export class Sheet {
   /**
    * Builds a Sheet from a Template, using the template's defaults
    * (with the first variant's overrides layered in, when the template
-   * ships variants) for every styling field. Used when creating a new
-   * sheet or bootstrapping `main`.
+   * ships variants) for every styling field.
+   *
+   * `textDirection` is a parameter rather than a default because a
+   * template carries no answer to it: it states the language of the
+   * captions, and every other argument here describes the look.
    */
-  static fromTemplate(id: string, name: string, color: string | null, template: Template): Sheet {
+  static fromTemplate(
+    id: string,
+    name: string,
+    color: string | null,
+    template: Template,
+    textDirection: TextDirection,
+  ): Sheet {
     return new Sheet({
       id,
       name,
@@ -243,6 +263,7 @@ export class Sheet {
       lineSplitterConfig: template.lineSplitter,
       alignmentConfig: template.alignment,
       effectConfigs: template.effectConfigs,
+      textDirection,
     });
   }
 
@@ -251,16 +272,27 @@ export class Sheet {
    * Template. Centralises these literals so every entry point that resets
    * the editing session — startup, new-video upload, video clear — produces
    * an identical baseline.
+   *
+   * Reads left to right, which is the only honest answer at this point:
+   * the session is being reset, so there is no transcript yet to read a
+   * direction off. Preprocessing seeds the real one once there is.
    */
   static createMain(template: Template): Sheet {
-    return Sheet.fromTemplate(MAIN_SHEET_ID, 'Main', MAIN_SHEET_COLOR, template);
+    return Sheet.fromTemplate(MAIN_SHEET_ID, 'Main', MAIN_SHEET_COLOR, template, 'ltr');
   }
 
   /**
-   * Builds the canonical `hook` Sheet (id, name, color, and role fixed)
-   * from a Template.
+   * Builds the canonical Sheet for a role, with the id, name, color and
+   * role its definition fixes, from the given Template.
+   *
+   * @param textDirection how this sheet's captions read. A role names a
+   *   part of the same recording as every other sheet, so this is the
+   *   project's answer rather than one derived from the role's content.
    */
-  static createHook(template: Template): Sheet {
-    return Sheet.fromTemplate(HOOK_SHEET_ID, 'Hook', HOOK_SHEET_COLOR, template).with({ role: 'hook' });
+  static createForRole(role: SheetRole, template: Template, textDirection: TextDirection): Sheet {
+    const definition = SHEET_ROLES[role];
+    return Sheet
+      .fromTemplate(definition.sheetId, definition.name, definition.color, template, textDirection)
+      .with({ role });
   }
 }

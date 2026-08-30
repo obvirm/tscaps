@@ -184,7 +184,12 @@ export const TranscriptPanel = memo(function TranscriptPanel(props: TranscriptPa
       constraint: 'contiguous-from-start',
       initialSelection: currentHookSegmentIds,
     });
-  }, [scenePickController, currentHookSegmentIds]);
+    // The selection runs from the first scene, and what the user picks is
+    // where it ends. Reading that off a list scrolled to the middle of the
+    // video means guessing what is selected above the fold.
+    const first = sorted[0];
+    if (first) search.scrollTo(first.segment.id);
+  }, [scenePickController, currentHookSegmentIds, sorted, search]);
 
   const handleOpenAutoAssign = useCallback(() => {
     setWandMenuOpen(false);

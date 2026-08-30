@@ -1,10 +1,9 @@
 import { memo, useCallback, useMemo, useState } from 'react';
-import { AlertCircle, BookmarkPlus, CheckCircle2, Save } from 'lucide-react';
+import { AlertCircle, BookmarkPlus, CheckCircle2, Loader2, Save } from 'lucide-react';
 import type { Template } from '@core/templates/domain/Template';
 import type { TemplateLibraryView } from '@core/templates/store/TemplateLibraryStore';
-import { SHEET_ROLE_TEMPLATE_CATEGORIES } from '@core/sheets/domain/SheetRole';
 import { TemplateSelector } from '@ui/pages/editor/components/template/TemplateSelector';
-import { Section } from '@ui/_shared/components/controls/sections/Section';
+import { AiTagsMissingWarning } from '@ui/pages/editor/components/template/AiTagsMissingWarning';
 import { EditorTab, type SheetScope } from '@ui/pages/editor/components/sidebar/tabs/EditorTab';
 import { Tooltip } from '@ui/_shared/components/Tooltip/Tooltip';
 import { PromptDialog } from '@ui/_shared/components/Dialog/PromptDialog';
@@ -12,6 +11,8 @@ import { ConfirmDialog } from '@ui/_shared/components/Dialog/ConfirmDialog';
 import { Toast, TOAST_AUTO_DISMISS_MS } from '@ui/_shared/components/Toast/Toast';
 import { useSheets } from '@ui/_shared/contexts/modules/SheetsContext';
 import { useUserTemplates } from '@ui/_shared/contexts/modules/UserTemplatesContext';
+
+const MODERN_MISSING_TAGS_ADORNMENTS = { modern: <AiTagsMissingWarning /> } as const;
 
 interface TemplatesTabProps {
   sheetScope: SheetScope;
@@ -26,11 +27,15 @@ const HEADER_BUTTON_CLASS =
 export const TemplatesTab = memo(function TemplatesTab({ sheetScope, templates, library }: TemplatesTabProps) {
   const sheets = useSheets();
   const userTemplatesContext = useUserTemplates();
+  const sectionAdornments = MODERN_MISSING_TAGS_ADORNMENTS;
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [savingChanges, setSavingChanges] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [pendingRenameId, setPendingRenameId] = useState<string | null>(null);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState(false);
   const [toastError, setToastError] = useState<string | null>(null);
   const dismissToastError = useCallback(() => setToastError(null), []);
   const [toastSuccess, setToastSuccess] = useState<string | null>(null);
@@ -60,6 +65,7 @@ export const TemplatesTab = memo(function TemplatesTab({ sheetScope, templates, 
   const onSaveConfirm = useCallback(
     async (name: string) => {
       setSaveError(null);
+      setSaving(true);
       try {
         const saved = await userTemplatesContext.save({
           name,
@@ -68,8 +74,11 @@ export const TemplatesTab = memo(function TemplatesTab({ sheetScope, templates, 
         });
         setSaveDialogOpen(false);
         sheets.actions.style.setTemplate.execute(saved.template);
+        setToastSuccess('Template saved');
       } catch (err) {
         setSaveError(err instanceof Error ? err.message : 'Could not save the template.');
+      } finally {
+        setSaving(false);
       }
     },
     [userTemplatesContext, sheetScope.activeSheet, sheets],
@@ -117,6 +126,7 @@ export const TemplatesTab = memo(function TemplatesTab({ sheetScope, templates, 
       const id = pendingRenameId;
       if (!id) return;
       setRenameError(null);
+      setRenaming(true);
       try {
         const renamed = await userTemplatesContext.rename(id, newName);
         setPendingRenameId(null);
@@ -127,6 +137,8 @@ export const TemplatesTab = memo(function TemplatesTab({ sheetScope, templates, 
         }
       } catch (err) {
         setRenameError(err instanceof Error ? err.message : 'Could not rename the template.');
+      } finally {
+        setRenaming(false);
       }
     },
     [pendingRenameId, userTemplatesContext, sheetScope.activeSheet, sheets],
@@ -144,6 +156,7 @@ export const TemplatesTab = memo(function TemplatesTab({ sheetScope, templates, 
 
   const onSaveChanges = useCallback(async () => {
     if (!activeSheetUserTemplateId) return;
+    setSavingChanges(true);
     try {
       const overwritten = await userTemplatesContext.overwrite(
         activeSheetUserTemplateId,
@@ -153,6 +166,8 @@ export const TemplatesTab = memo(function TemplatesTab({ sheetScope, templates, 
       setToastSuccess('Template saved');
     } catch (err) {
       setToastError(err instanceof Error ? err.message : 'Could not save changes to the template.');
+    } finally {
+      setSavingChanges(false);
     }
   }, [activeSheetUserTemplateId, userTemplatesContext, sheetScope.activeSheet, sheets]);
 
@@ -163,11 +178,14 @@ export const TemplatesTab = memo(function TemplatesTab({ sheetScope, templates, 
           <button
             type="button"
             onClick={onSaveChanges}
+            disabled={savingChanges}
             aria-label="Save changes to this template"
             title="Save changes to this template"
             className={HEADER_BUTTON_CLASS}
           >
-            <Save size={15} strokeWidth={2} />
+            {savingChanges
+              ? <Loader2 size={15} strokeWidth={2} className="animate-spin" />
+              : <Save size={15} strokeWidth={2} />}
           </button>
         </Tooltip>
       )}
@@ -186,20 +204,16 @@ export const TemplatesTab = memo(function TemplatesTab({ sheetScope, templates, 
 
   return (
     <EditorTab title="Templates" sheetScope={sheetScope} headerAction={headerAction}>
-      <Section>
-        <TemplateSelector
-          templates={templates}
-          userTemplates={userTemplates}
-          selectedTemplate={sheetScope.activeSheet.template}
-          onSelect={onSelectTemplate}
-          onDeleteUserTemplate={onDeleteRequest}
-          onRenameUserTemplate={onRenameRequest}
-          library={library}
-          preferredCategory={sheetScope.activeSheet.role
-            ? SHEET_ROLE_TEMPLATE_CATEGORIES[sheetScope.activeSheet.role]
-            : null}
-        />
-      </Section>
+      <TemplateSelector
+        templates={templates}
+        userTemplates={userTemplates}
+        selectedTemplate={sheetScope.activeSheet.template}
+        onSelect={onSelectTemplate}
+        onDeleteUserTemplate={onDeleteRequest}
+        onRenameUserTemplate={onRenameRequest}
+        library={library}
+        sectionAdornments={sectionAdornments}
+      />
 
       <PromptDialog
         open={saveDialogOpen}
@@ -209,6 +223,7 @@ export const TemplatesTab = memo(function TemplatesTab({ sheetScope, templates, 
         validate={userTemplatesContext.validateName}
         maxLength={userTemplatesContext.nameMaxLength}
         errorMessage={saveError}
+        loading={saving}
         onConfirm={onSaveConfirm}
         onCancel={onSaveCancel}
       />
@@ -221,6 +236,7 @@ export const TemplatesTab = memo(function TemplatesTab({ sheetScope, templates, 
         validate={userTemplatesContext.validateName}
         maxLength={userTemplatesContext.nameMaxLength}
         errorMessage={renameError}
+        loading={renaming}
         onConfirm={onRenameConfirm}
         onCancel={onRenameCancel}
       />

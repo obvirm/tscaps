@@ -22,8 +22,13 @@ Guide: [../AUTHORING.md](../AUTHORING.md) · Controls: [style-controls.md](style
   // Display name shown in the gallery. The only required field.
   "name": "Juno",
 
-  // Free-form tags. The picker derives its category tabs from the union across all templates.
-  "categories": ["impact"],
+  // The one family the gallery lists this template under: "key-moments", "modern", "viral",
+  // "classic" or "lab". Every template is in exactly one — a look that could be argued into
+  // two is filed where someone would go looking for it first. Absent means "lab", and the
+  // contract refuses a name that is not one of the five. "key-moments" is the family a template
+  // does not choose on looks: it holds the ones composed against the whole frame, which the
+  // gallery shows as clips because a caption on its own does not carry them.
+  "category": "viral",
 
   // Case-insensitive substrings matched against navigator.userAgent. If any matches, the
   // template is marked unrenderable on that browser so the editor can flag it and skip it
@@ -69,8 +74,8 @@ the video's dimension.
 ```jsonc
 {
   "alignment": {
-    "verticalAlign": "bottom",   // "top" | "center" | "bottom"
-    "verticalOffset": 0.12,      // fraction of video height
+    "verticalAlign": "top",      // "top" | "center" | "bottom" — which edge of the box lands on the anchor
+    "verticalOffset": 0.86,      // fraction of video height, ALWAYS measured from the top edge
     "horizontalAlign": "center", // "left" | "center" | "right", or "start" | "end"
     "horizontalOffset": 0.5      // fraction of video width, from the left edge
   }
@@ -131,6 +136,9 @@ Every config carries a `type` discriminator; every other field is optional.
 
   // How a segment is broken into visible lines. Three implementations:
   //   "balanced"             — character-balanced; needs no DOM measurement.
+  //                            `minCharsPerLine` refuses a break that would leave any line
+  //                            shorter than it and falls back to one line fewer, down to a
+  //                            single line. Absent (0) accepts every break.
   //   "balanced-pixel-width" — pixel-balanced; uses the engine's text measurer.
   //   "fixed-tail"           — reserves the last `tailWordCount` words for their own closing
   //                            line; big-last-word layouts pair it with CSS.
@@ -223,6 +231,19 @@ template ships, whether it declared it by hand or received it from a primitive. 
 variants expose a preset picker in the Style tab and power the multi-speaker flow, one
 variant per speaker sheet, cyclic by index. Omit for a fixed-look template.
 
+Three rules the shipped sets follow:
+
+- **The first variant reproduces the template's own defaults**, so a sheet that never picks
+  a preset looks exactly as authored.
+- **A variant moves the colour a viewer would name as the template's**, and leaves the
+  structural ones alone — outline, shadow, page background, inactive word. It carries a
+  second field only where one colour is expressed twice (a fill and its own halo) or where
+  two only read as a pair (a chromatic-aberration offset, a text colour that ships equal to
+  its highlight).
+- **A preset is assigned, not browsed** — the multi-speaker flow pins one per speaker, and
+  whoever sees the result reads it as how the template looks. Author to "as good as the
+  default", and ship none rather than one that reads worse.
+
 ```jsonc
 {
   "variants": [
@@ -287,6 +308,6 @@ Handled by the engine and the loader before the CSS is applied.
   // Opt into the text-behind-actor effect. tagCondition is a boolean tag expression scoping
   // which segments activate automatically; absent means every scene-valid segment qualifies.
   // See rendering.md#text-behind-the-actor.
-  "behindActor": { "required": true, "tagCondition": "highlight or hook" }
+  "behindActor": { "required": true, "tagCondition": "peak or hook" }
 }
 ```

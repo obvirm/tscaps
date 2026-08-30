@@ -1,6 +1,13 @@
 import type { VideoState } from '@core/editor/domain/VideoState';
 
 /**
+ * Opaque stand-in for "which video this is". Two identities that
+ * compare equal name the same file; nothing else about the value is
+ * meaningful to a caller.
+ */
+export type ScanVideoSourceIdentity = Blob | string;
+
+/**
  * Playable URL for a detector pass, plus the release of any resource
  * created to produce it. Call `dispose` once the scan is done with the
  * URL; for URLs the resolver did not create, `dispose` is a no-op.
@@ -20,9 +27,19 @@ export interface ScanVideoSource {
  */
 export class ScanVideoSourceResolver {
 
+  /**
+   * The thing `resolve` would decode, as a value that stays the same
+   * while the video does and changes when it is swapped. Every call to
+   * `resolve` mints a fresh URL, so the URL itself cannot answer that.
+   * `null` when no playable source is loaded.
+   */
+  identityOf(video: VideoState): ScanVideoSourceIdentity | null {
+    return video.preview?.file ?? video.url;
+  }
+
   resolve(video: VideoState): ScanVideoSource | null {
-    if (video.previewFile !== null) {
-      const url = URL.createObjectURL(video.previewFile);
+    if (video.preview !== null) {
+      const url = URL.createObjectURL(video.preview.file);
       return { url, dispose: () => URL.revokeObjectURL(url) };
     }
     if (video.url !== null) {

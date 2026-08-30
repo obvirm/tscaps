@@ -6,13 +6,14 @@ import type { TranscribeAction } from '@core/transcription/actions/TranscribeAct
 import type { TranscriptionAudioLengthPolicy } from '@core/transcription/domain/TranscriptionAudioLengthPolicy';
 import type { RunTaggersAction } from '@core/tagging/actions/RunTaggersAction';
 import { PreprocessVideoAction } from '@core/preprocessing/actions/PreprocessVideoAction';
-import { ApplyHookSheetAction } from '@core/preprocessing/actions/ApplyHookSheetAction';
-import { HookTemplatePicker } from '@core/sheets/services/HookTemplatePicker';
 import { ApplyMultipleSpeakersAction } from '@core/preprocessing/actions/ApplyMultipleSpeakersAction';
 import { ApplyTextDirectionAction } from '@core/preprocessing/actions/ApplyTextDirectionAction';
 import { PreprocessingFlowStore } from '@core/preprocessing/store/PreprocessingFlowStore';
 import { PreprocessingProgressStore } from '@core/preprocessing/store/PreprocessingProgressStore';
 import { VideoValidator } from '@core/preprocessing/services/VideoValidator';
+import { PreprocessProjectPersistence } from '@core/preprocessing/services/PreprocessProjectPersistence';
+import { PreprocessingTelemetryReporter } from '@core/preprocessing/services/PreprocessingTelemetryReporter';
+import { PreviewProxyStage } from '@core/preprocessing/services/PreviewProxyStage';
 import type { ProxyTiming } from '@core/preprocessing/domain/ProxyTiming';
 import { MediaBunnyVideoMetadataProbe } from '@core/videos/infrastructure/MediaBunnyVideoMetadataProbe';
 import type { AppErrorClassifier } from '@core/errors/services/AppErrorClassifier';
@@ -24,6 +25,11 @@ import type { ProjectsModule } from '@bootstrap/wiring/projects';
 import type { StoragePersistence } from '@core/_shared/infrastructure/StoragePersistence';
 import type { TelemetryModule } from '@bootstrap/wiring/telemetry';
 import type { VideosModule } from '@bootstrap/wiring/videos';
+import type { LocalStorageClient } from '@core/_shared/infrastructure/LocalStorageClient';
+import { LocalStorageLanguageUsageRepository } from '@core/preprocessing/infrastructure/repositories/LocalStorageLanguageUsageRepository';
+import { BrowserLocaleInspector } from '@core/preprocessing/services/BrowserLocaleInspector';
+import { LanguageCanonicalCodeResolver } from '@core/preprocessing/services/LanguageCanonicalCodeResolver';
+import { LanguageRanker } from '@core/preprocessing/services/LanguageRanker';
 
 export interface PreprocessingDependencies {
   readonly store: EditorStore;
@@ -40,6 +46,7 @@ export interface PreprocessingDependencies {
   readonly errorClassifier: AppErrorClassifier;
   readonly errorTelemetryDescriber: AppErrorTelemetryDescriber;
   readonly storagePersistence: StoragePersistence;
+  readonly localStorageClient: LocalStorageClient;
   readonly previewProxyEnabled: boolean;
   /** When false, the pipeline runs without touching the project repository. */
   readonly projectPersistenceEnabled: boolean;
@@ -63,8 +70,18 @@ export function bootPreprocessing(deps: PreprocessingDependencies) {
   const videoValidator = new VideoValidator(deps.store, deps.audioLengthPolicy);
   videoValidator.start();
 
+  const languageCanonicalCodeResolver = new LanguageCanonicalCodeResolver();
+  const languageUsageRepository = new LocalStorageLanguageUsageRepository(
+    deps.localStorageClient,
+    languageCanonicalCodeResolver,
+  );
+  const languageRanker = new LanguageRanker(
+    languageUsageRepository,
+    new BrowserLocaleInspector(),
+    languageCanonicalCodeResolver,
+  );
 
-  const applyHookSheet = new ApplyHookSheetAction(deps.store, new HookTemplatePicker());
+
   const applyTextDirection = new ApplyTextDirectionAction(
     deps.store,
     new StrongCharacterMajorityTextDirectionDetector(new BidiJsCharacterClassifier()),
@@ -78,39 +95,60 @@ export function bootPreprocessing(deps: PreprocessingDependencies) {
 
   const canPersist = () => deps.projectPersistenceEnabled;
   const surfaceLabel = 'web';
+  const transcribesOnDevice = true;
   const proxyTiming: ProxyTiming = 'sequential-after-transcribe';
+  const videoIsUploaded = false;
+
+  const previewProxyStage = new PreviewProxyStage(
+    deps.store,
+    deps.preview.proxyResolver,
+    deps.preview.proxyRepository,
+    deps.progressStore,
+    proxyTiming,
+    deps.previewProxyEnabled,
+  );
+  const persistence = new PreprocessProjectPersistence(
+    deps.store,
+    deps.projects.actions.create,
+    deps.projects.actions.save,
+    canPersist,
+    deps.projects.saveFailureReporter,
+    deps.projects.videoStoreFailureReporter,
+    videoIsUploaded,
+  );
+  const telemetryReporter = new PreprocessingTelemetryReporter(
+    deps.store,
+    deps.telemetry.telemetry,
+    deps.errorTelemetryDescriber,
+    surfaceLabel,
+    transcribesOnDevice,
+  );
 
   return {
     flow,
     progressStore: deps.progressStore,
     audioLengthPolicy: deps.audioLengthPolicy,
     videoValidator,
+    languageRanker,
+    languageUsageRepository,
     actions: {
       preprocessVideo: new PreprocessVideoAction(
         deps.store,
         deps.transcribe,
         deps.runTaggers,
-        applyHookSheet,
         applyMultipleSpeakers,
         applyTextDirection,
         deps.refresh,
-        deps.projects.actions.create,
-        deps.projects.actions.save,
-        deps.preview.proxyResolver,
-        deps.preview.proxyRepository,
+        previewProxyStage,
+        persistence,
         deps.videos.services.compatibilityChecker,
         deps.audioLengthPolicy,
         deps.progressStore,
-        proxyTiming,
-        deps.previewProxyEnabled,
-        canPersist,
-        surfaceLabel,
-        deps.telemetry.telemetry,
+        telemetryReporter,
         new MediaBunnyVideoMetadataProbe(),
         deps.errorClassifier,
-        deps.errorTelemetryDescriber,
-        deps.projects.saveFailureReporter,
         deps.storagePersistence,
+        languageCanonicalCodeResolver,
       ),
     },
   };

@@ -1,7 +1,52 @@
 {
   "name": "Lyra",
-  "categories": [
-    "impact"
+  "category": "lab",
+  "variants": [
+    {
+      "label": "Prism",
+      "overrides": {
+        "gradient-color-1": "#ff6ec4",
+        "gradient-color-2": "#4dd4ff",
+        "gradient-color-3": "#b6f56d",
+        "gradient-color-4": "#ffc857"
+      }
+    },
+    {
+      "label": "Sunset",
+      "overrides": {
+        "gradient-color-1": "#ffb347",
+        "gradient-color-2": "#ff6b6b",
+        "gradient-color-3": "#ffd76e",
+        "gradient-color-4": "#ff8fb1"
+      }
+    },
+    {
+      "label": "Ice",
+      "overrides": {
+        "gradient-color-1": "#7be6ff",
+        "gradient-color-2": "#a8c8ff",
+        "gradient-color-3": "#e0f4ff",
+        "gradient-color-4": "#86ffe0"
+      }
+    },
+    {
+      "label": "Neon",
+      "overrides": {
+        "gradient-color-1": "#b388ff",
+        "gradient-color-2": "#7bff9e",
+        "gradient-color-3": "#ffe066",
+        "gradient-color-4": "#ff8ad4"
+      }
+    },
+    {
+      "label": "Ember",
+      "overrides": {
+        "gradient-color-1": "#ffd166",
+        "gradient-color-2": "#ff8a5a",
+        "gradient-color-3": "#ffe9b0",
+        "gradient-color-4": "#ffb27a"
+      }
+    }
   ],
   "typography": {
     "fontFamily": "Bricolage Grotesque Variable",

@@ -1,5 +1,6 @@
 @use '../_lib/animation/settle-in' as *;
 @use '../_lib/dynamic-font-size' as *;
+@use '../_lib/glow' as *;
 @use '../_lib/segment-typography' as *;
 @use '../_lib/soft-drop-shadow' as *;
 @use '../_lib/word-layout' as *;
@@ -16,12 +17,22 @@
     $color: null,
   );
 
+  /* The warm halo comes last on purpose. Each function in a filter chain feeds
+     the one after it, so a glow placed before the four outline passes becomes
+     their input and they draw a hard black edge around the halo itself. Last,
+     it is thrown by the finished letters, which is what it is meant to be.
+
+     It has to be a filter rather than a `text-shadow`: the letters are filled
+     by a `background-clip: text` gradient, and a background paints *under* the
+     text shadow, so a shadow here would cover the gold it was meant to sit
+     behind and flood the word with the halo's colour. */
   filter:
     drop-shadow(var(--tscaps-outline-thickness, 0.015em) 0 0 var(--tscaps-outline-color, #000))
     drop-shadow(calc(var(--tscaps-outline-thickness, 0.015em) * -1) 0 0 var(--tscaps-outline-color, #000))
     drop-shadow(0 var(--tscaps-outline-thickness, 0.015em) 0 var(--tscaps-outline-color, #000))
     drop-shadow(0 calc(var(--tscaps-outline-thickness, 0.015em) * -1) 0 var(--tscaps-outline-color, #000))
-    drop-shadow(soft-drop-shadow(0.08, 0.5));
+    drop-shadow(soft-drop-shadow(0.08, 0.5))
+    glow-filter(0.12, $color: var(--tscaps-primary-color, #ffd84d));
 
   @include settle-in(
     $element: 'segment',

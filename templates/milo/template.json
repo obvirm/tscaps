@@ -1,9 +1,6 @@
 {
   "name": "Milo",
-  "categories": [
-    "hook",
-    "impact"
-  ],
+  "category": "key-moments",
   "typography": {
     "fontFamily": "Lobster",
     "fontWeight": 600,
@@ -62,7 +59,7 @@
     "type": "balanced-pixel-width",
     "minLines": 1,
     "maxLines": 1,
-    "maxWidthRatio": 0.75
+    "maxWidthRatio": 0.67
   },
   "alignment": {
     "verticalAlign": "top",

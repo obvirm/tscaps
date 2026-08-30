@@ -11,6 +11,17 @@ export interface TimelineChannel {
 }
 
 /**
+ * The channel every sheet that overlaps nothing is read in.
+ *
+ * Fixed, never borrowed from whichever sheet leads the pool: the main
+ * sheet drops out of it the moment it holds no segments, so an id
+ * following the lead changes under a reader who never left the channel.
+ * Anything comparing channels then reads that as every sheet in the
+ * pool having moved somewhere else.
+ */
+const MAIN_CHANNEL_ID = 'main-channel';
+
+/**
  * Which channel each sheet is read in.
  *
  * The timeline draws **one channel at a time**, and a channel is a single
@@ -61,11 +72,12 @@ export class TimelineChannelResolver {
 
   // Named after the main sheet when it is in there, and after whatever
   // leads the pool otherwise — a channel the reader cannot name is a
-  // channel they cannot choose.
+  // channel they cannot choose. The name follows the lead; the identity
+  // does not.
   private mainChannel(pooled: ReadonlyArray<string>, sheets: ReadonlyArray<Sheet>): TimelineChannel {
     const anchorId = pooled.includes(MAIN_SHEET_ID) ? MAIN_SHEET_ID : pooled[0]!;
     const anchor = sheets.find((sheet) => sheet.id === anchorId);
-    return { id: anchorId, name: anchor?.name ?? 'Main', sheetIds: pooled };
+    return { id: MAIN_CHANNEL_ID, name: anchor?.name ?? 'Main', sheetIds: pooled };
   }
 
   private extentsBySheetId(document: Document): Map<string, TimelineSceneExtent[]> {

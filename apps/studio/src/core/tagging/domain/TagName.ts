@@ -10,7 +10,7 @@ export const TAG_NAMES = [
   'quote',
   'emphasis',
   'accent',
-  'highlight',
+  'peak',
   'hook',
   'entity',
   'cta',
@@ -51,13 +51,15 @@ export const TAG_METADATA = {
     label: 'Emphasis',
     description: 'The punch word of a sentence: a key noun, strong verb, or vivid adjective worth lifting. Roughly one per sentence.',
   },
+  // Named for what the word does rather than "accent", which templates
+  // use for the whole family of lifted words their style controls reach.
   accent: {
-    label: 'Accent',
+    label: 'Lift',
     description: 'Short supporting lifts sprinkled through each sentence to give captions rhythm. Two to four per sentence.',
   },
-  highlight: {
-    label: 'Highlight',
-    description: 'The thesis of the whole video, the line a viewer would screenshot. At most one or two per video.',
+  peak: {
+    label: 'Peak',
+    description: 'A high point of the video: a closed phrase carrying the message, the line a viewer would screenshot. At most three per video, and many have none.',
   },
   hook: {
     label: 'Hook',

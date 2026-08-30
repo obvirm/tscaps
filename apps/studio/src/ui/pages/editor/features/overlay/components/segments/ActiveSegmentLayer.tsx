@@ -87,8 +87,11 @@ export const ActiveSegmentLayer = memo(function ActiveSegmentLayer({
   );
 
   const videoFrameRequired = sheet.template.rendering.videoFrame.required;
-  const segmentSubtitleRegionVars = useMemo<Readonly<Record<string, string>>>(
-    () => videoFrameRequired ? alignmentCssBuilder.buildSubtitleRegionVars(segmentAlignment, sheet.textDirection) : EMPTY_VARS,
+  const segmentAlignmentVars = useMemo<Readonly<Record<string, string>>>(
+    () => ({
+      ...alignmentCssBuilder.buildAnchorVars(segmentAlignment),
+      ...(videoFrameRequired ? alignmentCssBuilder.buildSubtitleRegionVars(segmentAlignment, sheet.textDirection) : EMPTY_VARS),
+    }),
     [alignmentCssBuilder, videoFrameRequired, segmentAlignment, sheet.textDirection],
   );
 
@@ -125,17 +128,17 @@ export const ActiveSegmentLayer = memo(function ActiveSegmentLayer({
   const wrapperStyle = useMemo<CSSProperties>(
     () => {
       if (!supportsSegmentRotation) {
-        return { ...wrapperBaseStyles, ...segmentSubtitleRegionVars };
+        return { ...wrapperBaseStyles, ...segmentAlignmentVars };
       }
       return {
         ...wrapperBaseStyles,
-        ...segmentSubtitleRegionVars,
+        ...segmentAlignmentVars,
         ['--tscaps-rotation' as string]: '0deg',
         transform: segmentRotationDeg === 0 ? 'none' : `rotate(${segmentRotationDeg}deg)`,
         transformOrigin: 'center',
       };
     },
-    [supportsSegmentRotation, wrapperBaseStyles, segmentSubtitleRegionVars, segmentRotationDeg],
+    [supportsSegmentRotation, wrapperBaseStyles, segmentAlignmentVars, segmentRotationDeg],
   );
 
   const positionedWords = useMemo<ReadonlyArray<PositionedWordEntry>>(

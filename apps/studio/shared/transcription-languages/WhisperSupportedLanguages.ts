@@ -49,7 +49,7 @@ export const WHISPER_SUPPORTED_LANGUAGES: readonly SupportedLanguage[] = [
   { code: 'id',  nameEn: 'Indonesian',      nativeName: 'Bahasa Indonesia' },
   { code: 'it',  nameEn: 'Italian',         nativeName: 'Italiano' },
   { code: 'ja',  nameEn: 'Japanese',        nativeName: '日本語' },
-  { code: 'jw',  nameEn: 'Javanese',        nativeName: 'Basa Jawa' },
+  { code: 'jw',  nameEn: 'Javanese',        nativeName: 'Basa Jawa', iso639_1: 'jv' },
   { code: 'kn',  nameEn: 'Kannada',         nativeName: 'ಕನ್ನಡ' },
   { code: 'kk',  nameEn: 'Kazakh',          nativeName: 'Қазақша' },
   { code: 'km',  nameEn: 'Khmer',           nativeName: 'ភាសាខ្មែរ' },

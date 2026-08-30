@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import type { ElementAnimationScope } from '@core/elements/domain/ElementAnimationScope';
+import { ANIMATED_KIND_BY_SCOPE, type ElementAnimationScope } from '@core/elements/domain/ElementAnimationScope';
 import type { AuthoredElementControl } from '@core/elements/domain/ElementControl';
 import type { ElementControlValue } from '@core/elements/services/css/ElementControlCssWriter';
 import type { SheetAnimationSet } from '@core/sheets/domain/SheetAnimationSet';
@@ -138,12 +138,18 @@ export const SheetAnimationSection = memo(function SheetAnimationSection({
   const handleControlChange = (control: AuthoredElementControl, next: ElementControlValue) =>
     setAnimation.setControl(scope, control, next);
 
+  // Every scope a sheet answers names a kind — it is not a rendered
+  // element, so `self` would have nothing to land on.
+  const animatedKind = ANIMATED_KIND_BY_SCOPE[scope];
   const supported = support.supports(animationSupport, scope, null);
+
+  if (animatedKind === null) return null;
 
   return (
     <Section disabled={!supported} disabledMessage={UNSUPPORTED_ANIMATION_MESSAGE}>
       <div className="flex flex-col gap-5">
         <ElementAnimationGrid
+          animatedKind={animatedKind}
           animation={animation}
           inheritedLabel="Template"
           inheritedPresetId={inheritedPresetId}

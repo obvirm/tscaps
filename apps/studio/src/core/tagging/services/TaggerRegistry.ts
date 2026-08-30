@@ -50,7 +50,7 @@ export class TaggerRegistry {
 
   private rebuildLine(line: Line, aggregator: SemanticTagAggregator): Line {
     const words = line.words.map((word) => this.rebuildWord(word, aggregator));
-    return new Line({ words, structureTags: line.structureTags, id: line.id });
+    return line.with({ words });
   }
 
   private rebuildWord(word: Word, aggregator: SemanticTagAggregator): Word {

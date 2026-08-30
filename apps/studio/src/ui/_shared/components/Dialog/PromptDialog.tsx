@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { AppDialog, AppDialogActions } from '@ui/_shared/components/Dialog/AppDialog';
 import { BTN_PRIMARY_SM, BTN_SECONDARY_SM } from '@ui/_shared/styles/buttons';
 
@@ -24,6 +25,13 @@ interface PromptDialogProps {
    * of `validate` so the dialog can stay open after a failed submit.
    */
   errorMessage?: string | null;
+  /**
+   * When true, both buttons are disabled and the confirm button shows
+   * a spinner. The field also turns read-only and Enter stops
+   * confirming, so an `onConfirm` still in flight cannot be fired a
+   * second time.
+   */
+  loading?: boolean;
   onConfirm: (value: string) => void;
   onCancel: () => void;
 }
@@ -47,6 +55,7 @@ export function PromptDialog({
   validate,
   maxLength,
   errorMessage = null,
+  loading = false,
   onConfirm,
   onCancel,
 }: PromptDialogProps) {
@@ -82,7 +91,7 @@ export function PromptDialog({
   // confirm already conveys that state, and the message reads as noisy
   // on first open.
   const visibleError = trimmed.length === 0 ? errorMessage : (localError ?? errorMessage);
-  const canConfirm = trimmed.length > 0 && localError === null;
+  const canConfirm = trimmed.length > 0 && localError === null && !loading;
 
   const handleConfirm = () => {
     if (!canConfirm) return;
@@ -108,6 +117,7 @@ export function PromptDialog({
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleConfirm(); }}
+          readOnly={loading}
           aria-invalid={visibleError ? true : undefined}
           aria-describedby={visibleError ? 'prompt-error' : undefined}
           autoFocus
@@ -117,8 +127,9 @@ export function PromptDialog({
         )}
       </div>
       <AppDialogActions>
-        <button type="button" className={BTN_SECONDARY_SM} onClick={onCancel}>Cancel</button>
+        <button type="button" className={BTN_SECONDARY_SM} onClick={onCancel} disabled={loading}>Cancel</button>
         <button type="button" className={BTN_PRIMARY_SM} onClick={handleConfirm} disabled={!canConfirm}>
+          {loading && <Loader2 size={12} className="animate-spin" />}
           {confirmLabel}
         </button>
       </AppDialogActions>

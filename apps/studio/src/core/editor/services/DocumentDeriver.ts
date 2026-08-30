@@ -9,6 +9,7 @@ import type { FrozenSegmentSet } from '@core/captions/domain/FrozenSegmentSet';
 import type { DecorationOverrideRegistry } from '@core/captions/domain/DecorationOverrideRegistry';
 import type { DecorationTimeResolver } from '@core/effect/services/DecorationTimeResolver';
 import type { InlineEmojiPunctuationAbsorber } from '@core/effect/services/InlineEmojiPunctuationAbsorber';
+import type { LineSplitterContext } from '@core/line-splitter/domain/LineSplitterDescriptor';
 
 export interface DerivationGeometry {
   videoWidth: number;
@@ -67,6 +68,16 @@ export class DocumentDeriver {
     const withEffects = this.applyEffects(tagged, sheets, ctx.videoDurationSeconds);
     const withOverrides = this.applyDecorationOverrides(withEffects, sheetById, ctx.decorationOverrides);
     return this.inlineEmojiPunctuationAbsorber.absorb(withOverrides, sheetById);
+  }
+
+
+  private splitterContextFor(sheet: Sheet, geometry: DerivationGeometry): LineSplitterContext {
+    return {
+      css: sheet.template.getCss(),
+      cssVars: this.sheetCssVarsBuilder.build(sheet),
+      videoWidth: geometry.videoWidth,
+      videoHeight: geometry.videoHeight,
+    };
   }
 
   /**
@@ -162,12 +173,8 @@ export class DocumentDeriver {
       referenceFontSize: sheet.template.typography.fontSize,
     });
     const segmented = segmentPipeline.split([merged]);
-    const lineSplitter = this.lineSplitters.build(sheet.lineSplitterConfig, {
-      css: sheet.template.getCss(),
-      cssVars: this.sheetCssVarsBuilder.build(sheet),
-      videoWidth: geometry.videoWidth,
-      videoHeight: geometry.videoHeight,
-    });
+    const splitterContext = this.splitterContextFor(sheet, geometry);
+    const lineSplitter = this.lineSplitters.build(sheet.lineSplitterConfig, splitterContext);
     const piped = lineSplitter.split(segmented);
     return this.preserveInputIds(piped, segments);
   }

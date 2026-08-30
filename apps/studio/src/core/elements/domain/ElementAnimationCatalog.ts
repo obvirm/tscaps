@@ -1,4 +1,5 @@
 import type { ElementAnimationPreset } from '@core/elements/domain/ElementAnimationPreset';
+import type { ElementKind } from '@core/elements/domain/ElementKind';
 
 /**
  * The entrances an element can be given, in the order the animation
@@ -9,6 +10,18 @@ export class ElementAnimationCatalog {
 
   all(): ReadonlyArray<ElementAnimationPreset> {
     return this.presets;
+  }
+
+  /**
+   * The entrances that exist for one kind of element.
+   *
+   * An entrance the library writes for a single kind is offered for that
+   * kind alone, and asking for another gets a shorter list rather than
+   * an entrance that would be applied against a clock it was never
+   * compiled for.
+   */
+  forKind(kind: ElementKind): ReadonlyArray<ElementAnimationPreset> {
+    return this.presets.filter((preset) => preset.kinds.includes(kind));
   }
 
   byId(id: string): ElementAnimationPreset | null {

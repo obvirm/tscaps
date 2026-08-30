@@ -1,7 +1,12 @@
 {
   "name": "Tito",
-  "categories": [
-    "impact"
+  "category": "viral",
+  "variants": [
+    { "label": "Mint", "overrides": { "highlight-color": "#00ffb3" } },
+    { "label": "Gold", "overrides": { "highlight-color": "#ffd700" } },
+    { "label": "Pink", "overrides": { "highlight-color": "#ff4fa3" } },
+    { "label": "Violet", "overrides": { "highlight-color": "#b388ff" } },
+    { "label": "Sky", "overrides": { "highlight-color": "#4dd4ff" } }
   ],
   "typography": {
     "fontFamily": "Bungee",

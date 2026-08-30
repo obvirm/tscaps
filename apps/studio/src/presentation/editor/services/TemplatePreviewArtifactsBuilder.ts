@@ -79,7 +79,7 @@ export class TemplatePreviewArtifactsBuilder {
     const definitions = template.svgFilterDefinitions;
     if (definitions.isEmpty()) return { filterDefsHtml: '', filterUrlVars: {} };
 
-    const sheet = Sheet.fromTemplate(template.metadata.id, template.metadata.name, null, template);
+    const sheet = Sheet.fromTemplate(template.metadata.id, template.metadata.name, null, template, 'ltr');
     const provider = new SheetSvgFilterScopeProvider(sheet);
     const context = { currentTime: 0, renderHeightPx: virtualVideoHeightPx };
     const { defs, bindings } = this.svgFilterDefsRenderer.render(

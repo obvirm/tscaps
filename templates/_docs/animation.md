@@ -259,7 +259,7 @@ If a template's look genuinely cannot survive being animated, say so in
 
 ## The library
 
-Fourteen recipes live in `_lib/animation/<id>/`, each a folder holding `_index.scss`, a
+Fifteen recipes live in `_lib/animation/<id>/`, each a folder holding `_index.scss`, a
 `controls.json` listing the fields it offers, and an `icon.svg` where the picker offers it.
 `@use '../_lib/animation/rise-in'` resolves through the index file.
 
@@ -276,6 +276,7 @@ Fourteen recipes live in `_lib/animation/<id>/`, each a folder holding `_index.s
 | `wobble-in` | swings into place | `$swing`, `$rest` |
 | `settle-in` | microscopic travel, for polish across a whole caption | `$distance`, `$from-opacity` |
 | `glitch-in` | stepped displacement | `$x`, `$y` |
+| `flash-in` | a plate of light covers the element, holds, and cuts away as it arrives | `$plate`, `$duration` |
 
 **Emphasis and loops** — run for the element's whole life, or mark a state:
 
@@ -313,6 +314,20 @@ Two rules the build enforces. An entrance must animate **exactly one** `@keyfram
 rule including two primitives keeps only the second — each writes its own `animation`. And two
 entrances may not animate the same keyframes.
 
+**An entrance may exist for some kinds and not others.** The mixin receives the kind it is
+compiling for, so a rule inside `@if $element == 'word'` produces an entrance offered for words
+alone, and the picker shows it only there. Nothing declares that separately: where an entrance
+compiled is where it exists. Reach for it where a look means something on one kind and not on
+another — `flash-in` paints a plate the width of what it covers, which reads as a word struck by
+light and as a rectangle sitting on anything larger.
+
+**An entrance may paint a generated box of its own**, which is how `flash-in` gets an opaque
+layer over the element: nothing else can cover an element's own text, since the only thing that
+paints above it is a child. Write it as `&::after` inside the mixin and the build folds it into
+the entrance rather than reading it as a second one. Applying an entrance otherwise silences the
+element's generated boxes — so a box a template was moving does not keep moving under a new
+answer — and the entrance's own box is taken back out of that, by name.
+
 Adding a rule is three obligations: its fields at `<id>/controls.json`, its picture at
 `<id>/icon.svg`, and a name that reads as what it does. The build refuses the first two
 missing. The picture is drawn rather than rendered from the animation, because these travel in
@@ -320,7 +335,10 @@ missing. The picture is drawn rather than rendered from the animation, because t
 
 **Entrances only, and not all of them.** `bob` and `shimmer` run for the element's whole life,
 `highlight-pulse` needs two colours, `typewriter` needs the engine to have split the word
-first: none survives being picked blind for an arbitrary element. `settle-in` is an entrance
+first: none survives being picked blind for an arbitrary element. Needing a colour is what
+keeps an animation off the list rather than what it is: a picked entrance has none to be given,
+which is why `flash-in` hides its element with `visibility` instead of repainting it — that
+takes the text, its shadow and its stroke together and puts all three back without naming any. `settle-in` is an entrance
 and still not on the list — it travels 5px where `rise-in` travels 20px on the same text, so
 beside it it reads as nothing rather than as a second option. Templates go on using both. The
 list is a set of looks a user can tell apart, not an inventory of the library.

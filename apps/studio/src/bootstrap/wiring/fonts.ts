@@ -1,6 +1,7 @@
 import { BrowserStyleSheetFontFaceReader } from '@core/fonts/infrastructure/BrowserStyleSheetFontFaceReader';
 import { UnicodeRangeParser } from '@core/fonts/services/UnicodeRangeParser';
 import { FontFaceCssBuilder } from '@core/fonts/services/FontFaceCssBuilder';
+import { FontFaceSourceTrimmer } from '@core/fonts/services/FontFaceSourceTrimmer';
 import { UserFontRegistrar } from '@core/fonts/services/UserFontRegistrar';
 import { UploadUserFontAction } from '@core/fonts/actions/UploadUserFontAction';
 import { DeleteUserFontAction } from '@core/fonts/actions/DeleteUserFontAction';
@@ -23,7 +24,11 @@ export type FontsModule = Awaited<ReturnType<typeof bootFonts>>;
 export async function bootFonts(deps: FontsDependencies) {
   const fontFaceCssReader = new BrowserStyleSheetFontFaceReader();
   const unicodeRangeParser = new UnicodeRangeParser();
-  const fontFaceCssBuilder = new FontFaceCssBuilder(fontFaceCssReader, unicodeRangeParser);
+  const fontFaceCssBuilder = new FontFaceCssBuilder(
+    fontFaceCssReader,
+    unicodeRangeParser,
+    new FontFaceSourceTrimmer(),
+  );
   const registrar = new UserFontRegistrar(deps.userBlobs.store, deps.userBlobs.urlResolver);
   registrar.start();
   return {

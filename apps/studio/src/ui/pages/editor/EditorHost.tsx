@@ -35,7 +35,7 @@ import { DragTransformPainter } from '@presentation/editor/services/DragTransfor
 import { NextClickSuppressor } from '@presentation/editor/services/NextClickSuppressor';
 import { EditorPage } from '@ui/pages/editor/components/EditorPage';
 import { ProjectLoadingIndicator } from '@ui/pages/editor/components/ProjectLoadingIndicator';
-import { PreviewLoadFailedDialog } from '@ui/pages/editor/components/PreviewLoadFailedDialog';
+import { ProjectBlockedDialog } from '@ui/pages/editor/components/dialogs/ProjectBlockedDialog';
 import { LeaveWithUnsavedChangesDialog } from '@ui/pages/editor/components/dialogs/LeaveWithUnsavedChangesDialog';
 import { useEditorState } from '@ui/_shared/hooks/useEditorState';
 import { EditorStoreProvider } from '@ui/_shared/contexts/EditorStoreContext';
@@ -299,8 +299,8 @@ export function EditorHost({
   }, [store, cutAwareDocumentBuilder, previewSurface]);
 
   useEffect(() => {
-    const previewSource = state.video.previewFile;
-    if (!previewSource) {
+    const preview = state.video.preview;
+    if (!preview) {
       previewSurface.unload();
       return;
     }
@@ -308,7 +308,8 @@ export function EditorHost({
     let cancelled = false;
     (async () => {
       try {
-        await previewSurface.load(previewSource);
+        previewSurface.selectVariantForSource(preview.kind === 'proxy');
+        await previewSurface.load(preview.file);
         if (cancelled) return;
         if (persistedSourceTimeSec > 0) previewSurface.seek(persistedSourceTimeSec);
       } catch (err) {
@@ -318,7 +319,7 @@ export function EditorHost({
       }
     })();
     return () => { cancelled = true; };
-  }, [state.video.previewFile, previewSurface, store]);
+  }, [state.video.preview, previewSurface, store]);
 
   const needsLiveStream = useMemo(
     () => state.sheets.some((s) => s.template.rendering.videoFrame.previewMode === 'live'),
@@ -463,8 +464,10 @@ export function EditorHost({
               onBack={requestBack}
               onRenameProject={renameProject}
               videoOverlay={videoOverlay}
+              banner={originalVideoDownload.kind === 'failed'
+                ? <OriginalVideoDownloadBanner error={originalVideoDownload.error} onBackToProjects={onBack} />
+                : null}
             />
-            {originalVideoDownloadFailed && <OriginalVideoDownloadBanner onBackToProjects={onBack} />}
             <LeaveWithUnsavedChangesDialog
               open={unsavedDialogOpen}
               saving={leaveBusy}
@@ -485,7 +488,7 @@ export function EditorHost({
         </div>
       )}
       {state.error?.name === 'PreviewLoadFailedError' && (
-        <PreviewLoadFailedDialog error={state.error} onBackToProjects={onBack} />
+        <ProjectBlockedDialog error={state.error} onBackToProjects={onBack} />
       )}
     </EditorStoreProvider>
   );

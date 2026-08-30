@@ -2,9 +2,8 @@ import { DocumentEditor, type Document } from '@tscaps/engine';
 import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { RefreshDocumentAction } from '@core/editor/actions/RefreshDocumentAction';
 import type { Telemetry } from '@core/telemetry/domain/Telemetry';
-import type { Template } from '@core/templates/domain/Template';
-import type { HookTemplatePicker } from '@core/sheets/services/HookTemplatePicker';
-import { Sheet, HOOK_SHEET_ID, HOOK_SHEET_COLOR, MAIN_SHEET_ID } from '@core/sheets/domain/Sheet';
+import type { RoleSheetProvisioner } from '@core/sheets/services/RoleSheetProvisioner';
+import { Sheet, HOOK_SHEET_ID, MAIN_SHEET_ID } from '@core/sheets/domain/Sheet';
 
 const docEditor = new DocumentEditor();
 
@@ -28,7 +27,7 @@ export class SetHookScenesAction {
   constructor(
     private readonly store: EditorStore,
     private readonly refresh: RefreshDocumentAction,
-    private readonly hookTemplatePicker: HookTemplatePicker,
+    private readonly roleSheetProvisioner: RoleSheetProvisioner,
     private readonly telemetry: Telemetry,
   ) {}
 
@@ -38,7 +37,7 @@ export class SetHookScenesAction {
     const main = sheets.find((s) => s.id === MAIN_SHEET_ID);
     if (!main) return;
 
-    const existingHook = sheets.find((s) => s.id === HOOK_SHEET_ID) ?? null;
+    const existingHook = this.roleSheetProvisioner.find('hook', sheets);
     const currentHookIds = this.currentHookSegmentIds(document);
     if (this.sameSet(currentHookIds, targetSegmentIds)) return;
 
@@ -51,7 +50,7 @@ export class SetHookScenesAction {
       return;
     }
 
-    const hookSheet = existingHook ?? this.buildHookSheet(main, availableTemplates);
+    const hookSheet = existingHook ?? this.roleSheetProvisioner.create('hook', main, availableTemplates);
     const nextDocument = this.rerouteSegments(document, currentHookIds, targetSegmentIds);
     const nextSheets = existingHook ? sheets : [...sheets, hookSheet];
 
@@ -78,14 +77,6 @@ export class SetHookScenesAction {
       document: nextDocument,
       activeSheetId: activeSheetId === HOOK_SHEET_ID ? MAIN_SHEET_ID : activeSheetId,
     });
-  }
-
-  private buildHookSheet(main: Sheet, availableTemplates: ReadonlyArray<Template>): Sheet {
-    const template = this.hookTemplatePicker.pick(availableTemplates, main.template);
-    const base = template
-      ? Sheet.fromTemplate(HOOK_SHEET_ID, 'Hook', HOOK_SHEET_COLOR, template)
-      : main.with({ id: HOOK_SHEET_ID, name: 'Hook', color: HOOK_SHEET_COLOR, linkGroupId: null });
-    return base.with({ role: 'hook' });
   }
 
   private rerouteSegments(

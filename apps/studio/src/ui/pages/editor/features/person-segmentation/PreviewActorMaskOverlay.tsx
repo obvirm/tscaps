@@ -1,7 +1,27 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
+import type { PreviewSurfaceVariant, SwitchableVideoPreviewSurface } from '@core/preview/domain/VideoPreviewSurface';
+import type { BehindActorPreviewSupportChecker } from '@core/person-segmentation/services/BehindActorPreviewSupportChecker';
+import type { EditorStore } from '@core/editor/store/EditorStore';
 import { PreviewActorMaskOverlayController } from '@presentation/person-segmentation/controllers/PreviewActorMaskOverlayController';
 import { useEditor } from '@ui/_shared/contexts/modules/EditorContext';
 import { usePersonSegmentation } from '@ui/_shared/contexts/modules/PersonSegmentationContext';
+import { usePreview } from '@ui/_shared/contexts/modules/PreviewContext';
+
+function useBehindActorSupported(store: EditorStore, checker: BehindActorPreviewSupportChecker): boolean {
+  const subscribe = useCallback((onChange: () => void) => {
+    store.addEventListener('change', onChange);
+    return () => store.removeEventListener('change', onChange);
+  }, [store]);
+  return useSyncExternalStore(subscribe, useCallback(() => checker.isSupported(), [checker]));
+}
+
+function useActiveVariant(surface: SwitchableVideoPreviewSurface): PreviewSurfaceVariant {
+  const subscribe = useCallback((onChange: () => void) => {
+    surface.addEventListener('variantchange', onChange);
+    return () => surface.removeEventListener('variantchange', onChange);
+  }, [surface]);
+  return useSyncExternalStore(subscribe, useCallback(() => surface.activeVariant, [surface]));
+}
 
 /**
  * Mounts the actor-cutout canvas that occludes captions with the
@@ -9,11 +29,15 @@ import { usePersonSegmentation } from '@ui/_shared/contexts/modules/PersonSegmen
  * overlay's occlusion slot: the parent element is the caption
  * coordinate space (and the gating DOM root), while the preview
  * canvas to sample is found by walking up to the nearest ancestor
- * that contains one. The mount is gated on the shared
- * preview-support checker so sessions that cannot sample the preview
- * canvas do not spin up the overlay. Templates whose effect depends
- * on this path are filtered out of the picker upstream, but the
- * guard remains as a defensive backstop.
+ * that contains one.
+ *
+ * The mount waits on two signals, and needs both. Support says the
+ * session is playing a proxy at all. The active variant says the
+ * canvas surface has actually been stood up — a surface that flips
+ * mid-session does so from an effect in an ancestor, which React runs
+ * *after* this one, so on the support signal alone the canvas to
+ * sample would not exist yet and the overlay would sit dead until the
+ * next reload.
  *
  * The canvas is `pointer-events: none` and paints above the caption
  * layers so its pixels visually replace whatever text the actor
@@ -22,11 +46,15 @@ import { usePersonSegmentation } from '@ui/_shared/contexts/modules/PersonSegmen
 export function PreviewActorMaskOverlay() {
   const personSegmentation = usePersonSegmentation();
   const editor = useEditor();
+  const previewSurface = usePreview().surface;
   const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
-  const overlaySupported = personSegmentation.previewSupportChecker.isSupported();
+
+  const overlaySupported = useBehindActorSupported(editor.store, personSegmentation.previewSupportChecker);
+  const activeVariant = useActiveVariant(previewSurface);
+  const canSamplePreview = overlaySupported && activeVariant === 'canvas';
 
   useEffect(() => {
-    if (!overlaySupported) return;
+    if (!canSamplePreview) return;
     const overlayCanvas = overlayCanvasRef.current;
     if (overlayCanvas === null) return;
     const segmentDomRoot = overlayCanvas.parentElement;
@@ -42,9 +70,9 @@ export function PreviewActorMaskOverlay() {
     );
     controller.start();
     return () => controller.stop();
-  }, [overlaySupported, editor.store, personSegmentation.loadedCacheStore]);
+  }, [canSamplePreview, editor.store, personSegmentation.loadedCacheStore]);
 
-  if (!overlaySupported) return null;
+  if (!canSamplePreview) return null;
   return (
     <canvas
       ref={overlayCanvasRef}

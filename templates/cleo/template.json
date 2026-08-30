@@ -1,9 +1,6 @@
 {
   "name": "Cleo",
-  "categories": [
-    "clean",
-    "multi-speakers"
-  ],
+  "category": "modern",
   "variants": [
     {
       "label": "White",
@@ -100,7 +97,7 @@
     },
     {
       "id": "tag-italic",
-      "label": "Italic tags",
+      "label": "Italic accents",
       "type": "toggle",
       "default": true,
       "valueOn": "italic",
@@ -125,7 +122,7 @@
     "type": "balanced-pixel-width",
     "minLines": 1,
     "maxLines": 1,
-    "maxWidthRatio": 0.8
+    "maxWidthRatio": 0.73
   },
   "alignment": {
     "verticalAlign": "bottom",

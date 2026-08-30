@@ -44,20 +44,32 @@ export class MediaBunnyPreviewProxyGenerator implements PreviewProxyGenerator {
     private readonly codecPolicy: CodecPolicy,
   ) {}
 
-  async generate(source: Blob, onProgress?: PreviewProxyProgressCallback): Promise<PreviewProxy> {
+  async generate(
+    source: Blob,
+    onProgress?: PreviewProxyProgressCallback,
+    signal?: AbortSignal,
+  ): Promise<PreviewProxy> {
     const strategy = this.outputStrategyFactory.create();
     try {
-      return await this.runGeneration(source, onProgress, strategy);
+      return await this.runGeneration(source, onProgress, signal, strategy);
     } catch (cause) {
+      // Wrapping an abort would surface it as a generation failure,
+      // which reports and notifies.
+      if (this.isAbort(cause)) throw cause;
       throw new PreviewProxyGenerationFailedError({ cause });
     } finally {
       strategy.dispose();
     }
   }
 
+  private isAbort(cause: unknown): boolean {
+    return cause instanceof Error && cause.name === 'AbortError';
+  }
+
   private async runGeneration(
     source: Blob,
     onProgress: PreviewProxyProgressCallback | undefined,
+    signal: AbortSignal | undefined,
     strategy: PreviewProxyOutputStrategy,
   ): Promise<PreviewProxy> {
     const sourceFile = this.toFile(source);
@@ -70,6 +82,7 @@ export class MediaBunnyPreviewProxyGenerator implements PreviewProxyGenerator {
       outputResolution: { width: dimensions.widthPx, height: dimensions.heightPx },
       outputFormat: MediaBunnyPreviewProxyGenerator.OUTPUT_FORMAT,
       outputStream,
+      ...(signal ? { signal } : {}),
       ...(onProgress ? { onProgress: (p) => onProgress(p.percent / 100) } : {}),
     });
     return {

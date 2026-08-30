@@ -3,13 +3,11 @@ import type { Template } from '@core/templates/domain/Template';
 import type { TemplateRepository } from '@core/templates/domain/TemplateRepository';
 
 /**
- * `TemplateRepository` decorator that hides templates whose rendering
- * depends on person segmentation when the current session cannot
- * preview them (native surface or proxy pipeline disabled). Both
- * `getAll()` and `getById(id)` filter — `getById` returning `null`
- * for an incompatible template lets the reference-resolver's
- * fallback path substitute the default template and notify the user,
- * matching the flow used for templates the catalog no longer carries.
+ * `TemplateRepository` decorator that hides templates depending on
+ * person segmentation when the session cannot preview them. Filters
+ * `getAll()` only; `getById` keeps answering, because a saved
+ * project referencing one is substituted after its preview is
+ * published rather than starved here.
  */
 export class BehindActorPreviewCompatibleTemplateRepository implements TemplateRepository {
 
@@ -25,10 +23,6 @@ export class BehindActorPreviewCompatibleTemplateRepository implements TemplateR
   }
 
   async getById(id: string): Promise<Template | null> {
-    const template = await this.inner.getById(id);
-    if (template === null) return null;
-    if (!template.behindActor.required) return template;
-    if (this.supportChecker.isSupported()) return template;
-    return null;
+    return this.inner.getById(id);
   }
 }

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, type ReactElement, type ReactNode } from 'react';
+import { useCallback, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import * as RadixPopover from '@radix-ui/react-popover';
 import { Tooltip } from '@ui/_shared/components/Tooltip/Tooltip';
 import { PopoverNavContext, type PopoverNav } from '@ui/_shared/components/Popover/usePopoverNav';
@@ -65,6 +65,7 @@ export function Popover(props: PopoverProps) {
     side = 'bottom', align = 'start', sideOffset = 4, alignOffset = 0, collisionPadding = 8,
   } = props;
 
+  const hasTrigger = 'trigger' in props && props.trigger !== undefined;
   const screenKeys = useMemo(() => Object.keys(screens), [screens]);
   const initial = initialScreen ?? screenKeys[0]!;
   const [stack, setStack] = useState<string[]>([initial]);
@@ -82,7 +83,22 @@ export function Popover(props: PopoverProps) {
   const back = useCallback(() => {
     setStack((s) => (s.length > 1 ? s.slice(0, -1) : s));
   }, []);
-  const close = useCallback(() => onOpenChange(false), [onOpenChange]);
+  // Radix hands focus back to the trigger on close, which is right for a
+  // dismissal and wrong for a pick: a trigger carrying a tooltip opens it
+  // on focus, and the pointer that walked into the menu is no longer over
+  // the trigger to dismiss it again, so the tooltip hangs over the page.
+  // Only the trigger variant has this problem — a point anchor returns
+  // focus to whatever the user was on, which is what should happen.
+  const closedByPick = useRef(false);
+  const close = useCallback(() => {
+    closedByPick.current = true;
+    onOpenChange(false);
+  }, [onOpenChange]);
+  const handleCloseAutoFocus = useCallback((event: Event) => {
+    const picked = closedByPick.current;
+    closedByPick.current = false;
+    if (picked && hasTrigger) event.preventDefault();
+  }, [hasTrigger]);
   const canGoBack = stack.length > 1;
 
   const nav = useMemo<PopoverNav>(
@@ -126,6 +142,7 @@ export function Popover(props: PopoverProps) {
           sideOffset={sideOffset}
           alignOffset={alignOffset}
           collisionPadding={collisionPadding}
+          onCloseAutoFocus={handleCloseAutoFocus}
           className={CHROME}
           data-floating-layer
           onClick={(e) => e.stopPropagation()}

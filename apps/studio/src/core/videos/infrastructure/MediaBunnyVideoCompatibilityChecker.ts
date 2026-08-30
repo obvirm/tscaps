@@ -6,6 +6,8 @@ import {
   VideoSampleSink,
   getFirstEncodableAudioCodec,
   getFirstEncodableVideoCodec,
+  type AudioCodec,
+  type InputAudioTrack,
   type InputVideoTrack,
 } from 'mediabunny';
 import type { VideoCompatibilityChecker } from '@core/videos/domain/VideoCompatibilityChecker';
@@ -81,26 +83,28 @@ export class MediaBunnyVideoCompatibilityChecker implements VideoCompatibilityCh
     throw new UnsupportedVideoCodecError({ codec: `${codec}-encoder` });
   }
 
+  /**
+   * Confirms there is some way to carry the source audio codec into
+   * the proxy container. Passthrough (the container accepts the codec
+   * as-is) is a packet copy and needs no decoder, so it must not be
+   * gated on `canDecode` — WebCodecs without an `AudioDecoder`
+   * (Safari before 26 is video-only) still carries AAC fine, and the
+   * decode paths downstream fall back to the Web Audio API. Only the
+   * transcode path needs the WebCodecs pair to exist.
+   */
   private async checkAudioCarriable(input: Input): Promise<void> {
     const track = await input.getPrimaryAudioTrack();
     if (!track) return;
     const codec = await track.getCodec();
     if (!codec) throw new UnsupportedAudioCodecError({ codec: 'unknown' });
-    if (!(await track.canDecode())) throw new UnsupportedAudioCodecError({ codec });
-    await this.assertAudioCodecHasContainerPath(codec);
+    const supported = new Mp4OutputFormat().getSupportedAudioCodecs();
+    if ((supported as readonly string[]).includes(codec)) return;
+    if (await this.canTranscodeAudio(track, supported)) return;
+    throw new UnsupportedAudioCodecError({ codec });
   }
 
-  /**
-   * Confirms there is some way to carry the source audio codec into
-   * the proxy container — either because the container already
-   * accepts it (passthrough) or because the browser can transcode to
-   * one of the container's supported codecs.
-   */
-  private async assertAudioCodecHasContainerPath(sourceCodec: string): Promise<void> {
-    const supported = new Mp4OutputFormat().getSupportedAudioCodecs();
-    if ((supported as readonly string[]).includes(sourceCodec)) return;
-    const transcodeTarget = await getFirstEncodableAudioCodec(supported);
-    if (transcodeTarget) return;
-    throw new UnsupportedAudioCodecError({ codec: sourceCodec });
+  private async canTranscodeAudio(track: InputAudioTrack, targetCodecs: AudioCodec[]): Promise<boolean> {
+    if (!(await track.canDecode())) return false;
+    return (await getFirstEncodableAudioCodec(targetCodecs)) !== null;
   }
 }

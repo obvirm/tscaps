@@ -1,8 +1,6 @@
 {
   "name": "Elio",
-  "categories": [
-    "hook"
-  ],
+  "category": "key-moments",
   "typography": {
     "fontFamily": "Bebas Neue",
     "fontWeight": 400,
@@ -43,7 +41,7 @@
     "type": "balanced-pixel-width",
     "minLines": 2,
     "maxLines": 6,
-    "maxWidthRatio": 0.8
+    "maxWidthRatio": 0.77
   },
   "alignment": {
     "verticalAlign": "center",

@@ -4,6 +4,10 @@ export type OperatingSystem = 'windows' | 'macos' | 'linux' | 'ios' | 'android' 
 export interface BrowserEnvironment {
   readonly browser: BrowserName;
   readonly os: OperatingSystem;
+  /** Dotted release number (`"18.5"`), or `null` when the user agent hides it. */
+  readonly osVersion: string | null;
+  /** Dotted release number (`"26.0"`), or `null` when the user agent hides it. */
+  readonly browserVersion: string | null;
   readonly isMobile: boolean;
   readonly humanBrowser: string;
   readonly humanOs: string;
@@ -31,14 +35,17 @@ export class UserAgentInspector {
 
   private readonly environment: BrowserEnvironment;
 
-  constructor() {
-    const userAgent = this.readUserAgent();
-    const browser = this.parseBrowser(userAgent);
-    const os = this.parseOs(userAgent);
+  /** `userAgent` overrides the global user-agent read — for tests. */
+  constructor(userAgent?: string) {
+    const resolvedUserAgent = userAgent ?? this.readUserAgent();
+    const browser = this.parseBrowser(resolvedUserAgent);
+    const os = this.parseOs(resolvedUserAgent);
     this.environment = {
       browser,
       os,
-      isMobile: this.parseIsMobile(userAgent),
+      osVersion: this.parseOsVersion(resolvedUserAgent, os),
+      browserVersion: this.parseBrowserVersion(resolvedUserAgent, browser),
+      isMobile: this.parseIsMobile(resolvedUserAgent),
       humanBrowser: this.humanizeBrowser(browser),
       humanOs: this.humanizeOs(os),
     };
@@ -54,6 +61,14 @@ export class UserAgentInspector {
 
   getOs(): OperatingSystem {
     return this.environment.os;
+  }
+
+  getOsVersion(): string | null {
+    return this.environment.osVersion;
+  }
+
+  getBrowserVersion(): string | null {
+    return this.environment.browserVersion;
   }
 
   isMobile(): boolean {
@@ -90,6 +105,40 @@ export class UserAgentInspector {
     if (/mac os x|macintosh/i.test(userAgent)) return 'macos';
     if (/linux/i.test(userAgent)) return 'linux';
     return 'unknown';
+  }
+
+  /**
+   * Best-effort. Notable gaps: Linux user agents carry no distro
+   * version, and macOS has been frozen at `10.15.7` in every modern
+   * browser's user agent — on Apple platforms the Safari
+   * `Version/` token (see `parseBrowserVersion`) is the honest
+   * signal of how recent the runtime is.
+   */
+  private parseOsVersion(userAgent: string, os: OperatingSystem): string | null {
+    switch (os) {
+      case 'ios': return this.matchVersion(userAgent, /OS (\d+(?:[._]\d+)*) like Mac OS X/i);
+      case 'android': return this.matchVersion(userAgent, /Android (\d+(?:\.\d+)*)/i);
+      case 'macos': return this.matchVersion(userAgent, /Mac OS X (\d+(?:[._]\d+)*)/i);
+      case 'windows': return this.matchVersion(userAgent, /Windows NT (\d+(?:\.\d+)*)/i);
+      default: return null;
+    }
+  }
+
+  private parseBrowserVersion(userAgent: string, browser: BrowserName): string | null {
+    switch (browser) {
+      case 'edge': return this.matchVersion(userAgent, /Edg\/(\d+(?:\.\d+)*)/i);
+      case 'opera': return this.matchVersion(userAgent, /(?:OPR|Opera)\/(\d+(?:\.\d+)*)/i);
+      case 'firefox': return this.matchVersion(userAgent, /Firefox\/(\d+(?:\.\d+)*)/i);
+      case 'chrome': return this.matchVersion(userAgent, /Chrome\/(\d+(?:\.\d+)*)/i);
+      case 'safari': return this.matchVersion(userAgent, /Version\/(\d+(?:\.\d+)*)/i);
+      default: return null;
+    }
+  }
+
+  private matchVersion(userAgent: string, pattern: RegExp): string | null {
+    const match = pattern.exec(userAgent);
+    if (!match || match[1] === undefined) return null;
+    return match[1].replace(/_/g, '.');
   }
 
   private parseIsMobile(userAgent: string): boolean {

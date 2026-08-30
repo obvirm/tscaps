@@ -96,19 +96,23 @@ export class PersonSegmenterWorkerHost {
   }
 
   private async ensureLoaded(request: InitRequest): Promise<void> {
-    const key = `${request.wasmPath}|${request.poseModelUrl}|${request.segmenterModelUrl}|${request.maskMaxSide}`;
+    const key = `${request.wasmPath}|${request.poseModelUrl}|${request.segmenterModelUrl}|${request.delegate}|${request.maskMaxSide}`;
     if (this.currentInitKey === key) return;
     const vision = await FilesetResolver.forVisionTasks(request.wasmPath);
     this.disposeCurrent();
-    this.poseLandmarker = await this.createPoseLandmarker(vision, request.poseModelUrl);
-    this.imageSegmenter = await this.createImageSegmenter(vision, request.segmenterModelUrl);
+    this.poseLandmarker = await this.createPoseLandmarker(vision, request.poseModelUrl, request.delegate);
+    this.imageSegmenter = await this.createImageSegmenter(vision, request.segmenterModelUrl, request.delegate);
     this.maskDownsampler = new MaskDownsampler(request.maskMaxSide);
     this.currentInitKey = key;
   }
 
-  private createPoseLandmarker(vision: Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>, modelUrl: string): Promise<PoseLandmarker> {
+  private createPoseLandmarker(
+    vision: Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>,
+    modelUrl: string,
+    delegate: InitRequest['delegate'],
+  ): Promise<PoseLandmarker> {
     return PoseLandmarker.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: modelUrl, delegate: 'GPU' },
+      baseOptions: { modelAssetPath: modelUrl, delegate },
       runningMode: 'VIDEO',
       numPoses: 1,
       minPoseDetectionConfidence: 0.5,
@@ -117,9 +121,13 @@ export class PersonSegmenterWorkerHost {
     });
   }
 
-  private createImageSegmenter(vision: Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>, modelUrl: string): Promise<ImageSegmenter> {
+  private createImageSegmenter(
+    vision: Awaited<ReturnType<typeof FilesetResolver.forVisionTasks>>,
+    modelUrl: string,
+    delegate: InitRequest['delegate'],
+  ): Promise<ImageSegmenter> {
     return ImageSegmenter.createFromOptions(vision, {
-      baseOptions: { modelAssetPath: modelUrl, delegate: 'GPU' },
+      baseOptions: { modelAssetPath: modelUrl, delegate },
       runningMode: 'VIDEO',
       outputCategoryMask: false,
       outputConfidenceMasks: true,

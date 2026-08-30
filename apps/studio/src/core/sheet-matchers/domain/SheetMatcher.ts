@@ -14,7 +14,7 @@ export interface SheetMatcherContext {
 /**
  * Result of querying a matcher's `availability(ctx)`. When unavailable,
  * the matcher reports a `code` describing *why* — typically a short
- * kebab-case identifier ("insufficient-speakers", "mixed-speaker-segments")
+ * kebab-case identifier ("insufficient-speakers", "no-tags")
  * the UI maps to a human-readable message. The core stays free of
  * UI-bound copy and tab names; the dialog owns the translation.
  */

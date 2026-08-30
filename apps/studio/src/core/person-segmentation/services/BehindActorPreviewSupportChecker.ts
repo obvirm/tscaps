@@ -1,21 +1,24 @@
-import type { PreviewSurfaceVariant } from '@core/preview/domain/VideoPreviewSurface';
+import type { EditorStore } from '@core/editor/store/EditorStore';
 
 /**
- * Answers whether the current session can render the text-behind-actor
- * effect during editor playback. The effect needs to sample source
- * pixels from a canvas the surface owns, which only exists when the
- * canvas surface variant is active and the proxy pipeline is on. On
- * the native `<video>` surface or with the proxy pipeline off, the
- * canvas overlay path is not available and the effect stays off.
+ * Answers whether the session can render the text-behind-actor effect
+ * on the video it currently holds. The effect samples source pixels
+ * from a canvas only the proxy-playing surface owns, so the answer is
+ * whether the preview is a proxy.
+ *
+ * Reads the published preview, not the surface's variant: the
+ * surface follows the preview, so the preview is the same fact one
+ * step earlier, known while a project is still loading. Never
+ * cached — an on-demand generation flips the answer mid-session.
  */
 export class BehindActorPreviewSupportChecker {
 
   constructor(
     private readonly proxyPipelineEnabled: boolean,
-    private readonly surfaceVariant: PreviewSurfaceVariant,
+    private readonly editorStore: EditorStore,
   ) {}
 
   isSupported(): boolean {
-    return this.proxyPipelineEnabled && this.surfaceVariant === 'canvas';
+    return this.proxyPipelineEnabled && this.editorStore.snapshot().video.preview?.kind === 'proxy';
   }
 }

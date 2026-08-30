@@ -20,7 +20,6 @@ type TextTransform = 'none' | 'uppercase' | 'lowercase' | 'capitalize';
 interface ResolvedTypography {
   font: string;
   letterSpacingPx: number;
-  wordSpacingPx: number;
   paddingX: number;
   marginX: number;
   textTransform: TextTransform;
@@ -44,9 +43,11 @@ let _appliedWidth: number | null = null;
 let _appliedHeight: number | null = null;
 let _appliedCssVars: Map<string, string> = new Map();
 
-// Resolved typography keyed by the `(css, size, cssVars)` signature that
-// produced it. Cache hits skip the probe entirely — no DOM writes, no
-// `getComputedStyle`, no style flush.
+// Resolved typography keyed by the `(css, size, cssVars, classes)` signature
+// that produced it. Cache hits skip the probe entirely — no DOM writes, no
+// `getComputedStyle`, no style flush. A caption reaches a handful of distinct
+// class sets at most, so the per-set entries stay a rounding error next to the
+// per-word measuring they spare from being wrong.
 const _typographyCache = new Map<string, ResolvedTypography>();
 
 /**
@@ -59,48 +60,56 @@ const _typographyCache = new Map<string, ResolvedTypography>();
  * `@font-face` blocks are stripped from `css` before injection: re-applying
  * them resets `document.fonts.status` to 'loading'.
  *
- * Repeated constructions with the same `(css, cssVars, container size)`
- * reuse a previously resolved typography from a module-level cache and
- * touch no DOM.
+ * Typography is resolved per set of classes the measured run carries, since
+ * a stylesheet is free to size `.emphasis` differently from a plain word.
+ * Repeated resolutions of the same `(css, cssVars, container size, classes)`
+ * reuse a module-level cache and touch no DOM.
  */
 export class DomProbeCanvasTextMeasurer implements TextMeasurer {
-  private readonly _typography: ResolvedTypography;
+  private readonly _css: string;
+  private readonly _signature: string;
 
-  constructor(params: DomProbeCanvasTextMeasurerParams) {
-    const css = params.css.replace(/@font-face[^{]*\{[^}]*\}/g, '');
-    const signature = this.signatureOf(css, params);
-    const cached = _typographyCache.get(signature);
-    if (cached) {
-      this._typography = cached;
-      return;
-    }
-    this._typography = this.probe(css, params);
-    _typographyCache.set(signature, this._typography);
+  constructor(private readonly _params: DomProbeCanvasTextMeasurerParams) {
+    this._css = _params.css.replace(/@font-face[^{]*\{[^}]*\}/g, '');
+    this._signature = this.signatureOf(this._css, _params);
   }
 
-  measure(text: string): number {
-    const t = this.applyTransform(text, this._typography.textTransform);
+  measure(text: string, cssClasses: ReadonlyArray<string>): number {
+    const typography = this.typographyFor(cssClasses);
+    const t = this.applyTransform(text, typography.textTransform);
     const cctx = this.ensureCanvasContext();
-    cctx.font = this._typography.font;
+    cctx.font = typography.font;
+    // Letter spacing lands after every character, the last one included, so
+    // the run is one gap wider than the gaps *between* its letters.
     return (
       cctx.measureText(t).width +
-      Math.max(0, t.length - 1) * this._typography.letterSpacingPx +
-      this._typography.paddingX +
-      this._typography.marginX
+      t.length * typography.letterSpacingPx +
+      typography.paddingX +
+      typography.marginX
     );
   }
 
-  spaceWidth(): number {
-    const cctx = this.ensureCanvasContext();
-    cctx.font = this._typography.font;
-    return cctx.measureText(' ').width + this._typography.wordSpacingPx + this._typography.letterSpacingPx;
+  /**
+   * The typography a run carrying `cssClasses` resolves to.
+   *
+   * Order is not part of the identity — the same classes in another order
+   * cascade the same and must not probe twice.
+   */
+  private typographyFor(cssClasses: ReadonlyArray<string>): ResolvedTypography {
+    const key = `${this._signature}|${[...cssClasses].sort().join('.')}`;
+    const cached = _typographyCache.get(key);
+    if (cached) return cached;
+    const resolved = this.probe(cssClasses);
+    _typographyCache.set(key, resolved);
+    return resolved;
   }
 
-  private probe(css: string, params: DomProbeCanvasTextMeasurerParams): ResolvedTypography {
+  private probe(cssClasses: ReadonlyArray<string>): ResolvedTypography {
     const probe = this.ensureProbe();
-    this.syncContainerSize(probe.container, params.containerWidth, params.containerHeight);
-    this.syncCss(css);
-    this.syncCssVars(probe.container, params.cssVars);
+    this.syncContainerSize(probe.container, this._params.containerWidth, this._params.containerHeight);
+    this.syncCss(this._css);
+    this.syncCssVars(probe.container, this._params.cssVars);
+    probe.word.className = [Word.CSS_CLASS, LineState.NOT_NARRATED_YET, ...cssClasses].join(' ');
 
     const cs = getComputedStyle(probe.word);
     const fontStyle = this.requireValue(cs.fontStyle, 'font-style');
@@ -110,7 +119,6 @@ export class DomProbeCanvasTextMeasurer implements TextMeasurer {
     return {
       font: `${fontStyle} ${fontWeight} ${fontSize} ${fontFamily}`,
       letterSpacingPx: this.parsePx(cs.letterSpacing),
-      wordSpacingPx: this.parsePx(cs.wordSpacing),
       paddingX: this.parsePx(cs.paddingLeft) + this.parsePx(cs.paddingRight),
       marginX: this.parsePx(cs.marginLeft) + this.parsePx(cs.marginRight),
       textTransform: this.normalizeTextTransform(cs.textTransform),
@@ -147,7 +155,6 @@ export class DomProbeCanvasTextMeasurer implements TextMeasurer {
     this.pinAnimations(lineEl);
 
     _word = document.createElement('span');
-    _word.className = `${Word.CSS_CLASS} ${LineState.NOT_NARRATED_YET}`;
     _word.textContent = 'M';
     this.pinAnimations(_word);
 

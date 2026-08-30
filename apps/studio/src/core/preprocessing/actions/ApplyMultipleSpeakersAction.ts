@@ -119,10 +119,13 @@ export class ApplyMultipleSpeakersAction {
    * index 0 is `main` renamed to "Speaker 1" (id preserved), and
    * subsequent entries are fresh sheets cloned from the same base.
    * Every sheet receives a distinct UI accent from the shared sheet
-   * color palette and is pinned to a different style variant
-   * (cyclic by index) so each speaker reads its own preset. Every
-   * sheet also shares a freshly minted `linkGroupId`, so any later
-   * style edit on one speaker rides across to the rest by default.
+   * color palette and is pinned to the style variant matching its own
+   * position, so each speaker reads its own preset. The position is
+   * kept whole rather than folded into the current template's range —
+   * a speaker past the last preset shares a look today and takes its
+   * own back on a template with enough of them. Every sheet also shares
+   * a freshly minted `linkGroupId`, so any later style edit on one
+   * speaker rides across to the rest by default.
    */
   private _buildSpeakerSheets(
     base: Sheet,

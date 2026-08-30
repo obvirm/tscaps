@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactElement } from 'react';
-import { ChevronsUp, ChevronsDown, Clock3, Trash2, Palette, Plus, Check, SwatchBook, UserRound, RotateCcw, Loader2 } from 'lucide-react';
+import { ChevronsUp, ChevronsDown, Clock3, Trash2, Palette, Plus, Check, SwatchBook, UserRound, Loader2 } from 'lucide-react';
 import type { Document, Segment } from '@tscaps/engine';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 import type { BehindActorSegmentOverride } from '@core/person-segmentation/domain/BehindActorSegmentOverride';
@@ -104,7 +104,7 @@ function SegmentMenuScreen({
   const showBehindActor = sheet !== null
     && sheet.template.features.behindActorOverride
     && personSegmentation.previewSupportChecker.isSupported();
-  const validWindows = detectorResult?.windows ?? [];
+  const validWindows = detectorResult?.windows ?? null;
   const behindActorOn = showBehindActor
     && sheet !== null
     && personSegmentation.gatingService.isEffectivelyOn(
@@ -119,11 +119,6 @@ function SegmentMenuScreen({
         .execute({ segmentId: segment.id, range: { start: segment.time.start, end: segment.time.end } })
         .catch((error) => console.error('[behind-actor] segment mask backfill failed', error));
     }
-    close();
-  };
-
-  const handleResetBehindActorToAuto = () => {
-    captions.actions.segments.setBehindActorOverride.execute(segment.id, 'auto');
     close();
   };
 
@@ -145,11 +140,6 @@ function SegmentMenuScreen({
           {isComputingMasks ? <Loader2 size={13} className="animate-spin" /> : <UserRound size={13} />}
           <span className="flex-1 text-left">Hide behind person</span>
           {behindActorOn && <Check size={12} />}
-        </button>
-      )}
-      {showBehindActor && behindActorOverride !== 'auto' && (
-        <button className={POPOVER_ITEM} onClick={handleResetBehindActorToAuto}>
-          <RotateCcw size={13} /> Reset to auto
         </button>
       )}
       {!isFirstSegment && (

@@ -14,6 +14,7 @@ import type {
   RenderQuality,
   AudioDiscardReason,
   FallbackDecoderInfo,
+  VideoFrameDecoderSelection,
 } from '@modules/video/RenderJob';
 import type { CodecPolicy, VideoCodecResolution } from '@modules/video/mediabunny/codec/CodecPolicy';
 import type { VideoFrameDecoderFactory } from '@modules/video/mediabunny/frame/VideoFrameDecoderFactory';
@@ -23,7 +24,9 @@ import type { AudioTrackBridge } from '@modules/video/mediabunny/audio/AudioTrac
 import type { OutputTargetBuilder } from '@modules/video/mediabunny/output/OutputTargetBuilder';
 import type { VideoTrackEncoder } from '@modules/video/mediabunny/encoder/VideoTrackEncoder';
 import type { VideoTrackEncoderFactory } from '@modules/video/mediabunny/encoder/VideoTrackEncoderFactory';
-import type { FramePainter } from '@modules/video/mediabunny/painter/FramePainter';
+import type { FramePainter, FramePaintRequest } from '@modules/video/mediabunny/painter/FramePainter';
+import type { DecodedVideoFrame } from '@modules/video/mediabunny/frame/VideoFrameDecoder';
+import { RetainedVideoFrame } from '@modules/video/mediabunny/frame/RetainedVideoFrame';
 
 export interface MediaBunnyTranscodeCoordinatorConfig {
   videoFrameDecoderFactory: VideoFrameDecoderFactory;
@@ -70,9 +73,17 @@ export interface MediaBunnyTranscodeRequest {
    * the window's duration. Defaults to an empty map (nothing skipped).
    */
   timeMap?: RenderTimeMap;
+  /**
+   * Abandons the run. Checked between frames, so it stops cleanly
+   * rather than mid-write; the partial output is discarded and cannot
+   * be resumed. Rejects with an `AbortError`, which callers should
+   * distinguish from a transcode failure by name.
+   */
+  signal?: AbortSignal;
   onProgress?: (progress: RenderProgress) => void;
   onAudioDiscarded?: (reason: AudioDiscardReason) => void;
   confirmFallbackDecoder?: (info: FallbackDecoderInfo) => Promise<boolean>;
+  onVideoFrameDecoderSelected?: (selection: VideoFrameDecoderSelection) => void;
 }
 
 export interface MediaBunnyTranscodeResult {
@@ -91,7 +102,11 @@ interface EncodeLoopParams {
   audioBridge: AudioTrackBridge;
   timeMap: RenderTimeMap;
   outputDuration: number;
+  totalFrames: number;
   painter: FramePainter;
+  width: number;
+  height: number;
+  signal: AbortSignal | undefined;
   onProgress: ((progress: RenderProgress) => void) | undefined;
 }
 
@@ -173,6 +188,7 @@ export class MediaBunnyTranscodeCoordinator {
       track: videoTrack,
       source: request.source,
       ...(request.confirmFallbackDecoder ? { confirmFallback: request.confirmFallbackDecoder } : {}),
+      ...(request.onVideoFrameDecoderSelected ? { onDecoderSelected: request.onVideoFrameDecoderSelected } : {}),
     });
 
     const sourceDuration = await this.computeDuration(videoTrack);
@@ -189,7 +205,11 @@ export class MediaBunnyTranscodeCoordinator {
         audioBridge,
         timeMap,
         outputDuration,
+        totalFrames: Math.round(outputDuration * fps),
         painter: request.painter,
+        width,
+        height,
+        signal: request.signal,
         onProgress: request.onProgress,
       });
       await audioBridge.finish();
@@ -205,29 +225,45 @@ export class MediaBunnyTranscodeCoordinator {
     return this.buildResult(target, request.outputFormat, width, height);
   }
 
-  // One decoded video frame is alive at any time: holding more would
-  // back-pressure the WebCodecs frame pool into a stall.
+  /**
+   * Drives decode → paint → encode, handing the painter runs of frames
+   * as long as it asked for.
+   *
+   * Only one frame the decoder lent us is ever alive: holding several
+   * would back-pressure the WebCodecs frame pool into a stall. A run
+   * longer than one frame is therefore held as copies of our own, paid
+   * for in a full-frame draw and the pixels of every frame in the run.
+   */
   private async runEncodeLoop(params: EncodeLoopParams): Promise<void> {
+    const lookAhead = Math.max(1, params.painter.lookAhead());
+    const group: FramePaintRequest[] = [];
     let decodedCount = 0;
     let frameCount = 0;
 
-    for await (const frame of params.decoder.samples()) {
-      decodedCount++;
-      try {
-        if (frame.timestamp < 0) continue;
-        if (params.timeMap.isSkipped(frame.timestamp)) continue;
-
-        const outputTimestamp = params.timeMap.toOutputTime(frame.timestamp);
-        const paintFrame = await params.painter.paint(frame, outputTimestamp);
-        await params.encoder.encode(outputTimestamp, frame.duration, paintFrame);
-        await params.audioBridge.pumpUntil(frame.timestamp);
-        frameCount++;
-        if (params.onProgress) {
-          params.onProgress(this.toProgress(outputTimestamp, params.outputDuration, frameCount));
+    try {
+      for await (const frame of params.decoder.samples()) {
+        // Checked before the frame joins the group, so it is closed here
+        // rather than left to the `finally`.
+        if (params.signal?.aborted) {
+          frame.close();
+          throw new DOMException('The transcode was aborted.', 'AbortError');
         }
-      } finally {
-        frame.close();
+        decodedCount++;
+        if (frame.timestamp < 0 || params.timeMap.isSkipped(frame.timestamp)) {
+          frame.close();
+          continue;
+        }
+        group.push(this.toPaintRequest(frame, params, lookAhead));
+        if (group.length < lookAhead) continue;
+        frameCount = await this.encodeGroup(group, params, frameCount);
       }
+      // Whatever the last run was short of: the decoder ended before the
+      // painter's reach filled up, which is the normal way a render ends.
+      await this.encodeGroup(group, params, frameCount);
+    } finally {
+      // A run abandoned half-gathered still holds frames nobody will
+      // encode: the decoder threw partway, or retaining one did.
+      this.closeGroup(group);
     }
 
     // Some decoders drop undecodable samples silently instead of erroring.
@@ -236,6 +272,68 @@ export class MediaBunnyTranscodeCoordinator {
     if (decodedCount === 0) {
       throw new Error('The video decoder produced no frames for this input.');
     }
+  }
+
+  /**
+   * The frame as the painter will receive it. A run of one is handed the
+   * decoder's own frame, which the run closes when it is done with it. A
+   * longer run outlives what the decoder will lend, so the pixels are
+   * copied and its frame handed straight back — whether or not the copy
+   * succeeds, since a frame the decoder never gets back stalls its pool.
+   */
+  private toPaintRequest(
+    frame: DecodedVideoFrame,
+    params: EncodeLoopParams,
+    lookAhead: number,
+  ): FramePaintRequest {
+    const outputTimestamp = params.timeMap.toOutputTime(frame.timestamp);
+    if (lookAhead === 1) return { frame, outputTimestamp };
+    try {
+      return {
+        frame: RetainedVideoFrame.copyOf(frame, params.width, params.height),
+        outputTimestamp,
+      };
+    } finally {
+      frame.close();
+    }
+  }
+
+  /**
+   * Paints a whole run, then encodes and pumps audio for each of its
+   * frames in order. Empties `group` on the way out, closing every
+   * frame it held. Returns the running output-frame count.
+   */
+  private async encodeGroup(
+    group: FramePaintRequest[],
+    params: EncodeLoopParams,
+    frameCount: number,
+  ): Promise<number> {
+    if (group.length === 0) return frameCount;
+    let counted = frameCount;
+    try {
+      const paints = await params.painter.paint(group);
+      if (paints.length !== group.length) {
+        throw new Error(
+          `The painter returned ${paints.length} paint steps for a run of ${group.length} frames.`,
+        );
+      }
+      for (const [i, request] of group.entries()) {
+        await params.encoder.encode(request.outputTimestamp, request.frame.duration, paints[i]!);
+        await params.audioBridge.pumpUntil(request.frame.timestamp);
+        counted++;
+        if (params.onProgress) {
+          params.onProgress(this.toProgress(params, request.outputTimestamp, counted));
+        }
+      }
+    } finally {
+      this.closeGroup(group);
+    }
+    return counted;
+  }
+
+  private closeGroup(group: FramePaintRequest[]): void {
+    for (const request of group) request.frame.close();
+    group.length = 0;
   }
 
   private toEncoderConfig(resolution: VideoCodecResolution): VideoEncodingConfig {
@@ -289,9 +387,10 @@ export class MediaBunnyTranscodeCoordinator {
     return 30;
   }
 
-  private toProgress(timestamp: number, duration: number, frameCount: number): RenderProgress {
+  private toProgress(params: EncodeLoopParams, timestamp: number, frameCount: number): RenderProgress {
+    const duration = params.outputDuration;
     const percent = duration > 0 ? Math.min(100, Math.round((timestamp / duration) * 100)) : 0;
-    return { percent, currentFrame: frameCount, totalFrames: 0 };
+    return { percent, currentFrame: frameCount, totalFrames: params.totalFrames };
   }
 
   private async safeCancel(output: Output): Promise<void> {

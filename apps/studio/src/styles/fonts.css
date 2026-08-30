@@ -20,9 +20,14 @@
 @import '@fontsource-variable/raleway';
 @import '@fontsource-variable/dm-sans';
 @import '@fontsource-variable/comfortaa';
+@import '@fontsource-variable/gabarito';
 @import '@fontsource-variable/bricolage-grotesque';
 @import '@fontsource-variable/oswald';
 @import '@fontsource-variable/eb-garamond';
+/* Same reasoning as Fraunces below: the package's default entry ships the
+   roman only, and a synthesized oblique over an old-style serif slants the
+   roman letterforms instead of drawing the cursive ones the design has. */
+@import '@fontsource-variable/eb-garamond/wght-italic.css';
 @import '@fontsource-variable/fraunces';
 /* Fraunces' true italic is a distinct calligraphic design; without this
    face, `font-style: italic` synthesizes an oblique that reads cheap on
@@ -48,6 +53,7 @@
 @import '@fontsource/righteous/400.css';
 @import '@fontsource/bangers/400.css';
 @import '@fontsource/dm-serif-display/400.css';
+@import '@fontsource/im-fell-english/400.css';
 @import '@fontsource/pacifico/400.css';
 @import '@fontsource/lobster/400.css';
 @import '@fontsource/permanent-marker/400.css';

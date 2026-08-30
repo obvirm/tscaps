@@ -1,10 +1,12 @@
 import type { EditorStore } from '@core/editor/store/EditorStore';
 import { MaskCache } from '@core/person-segmentation/domain/MaskCache';
-import type { PersonSegmentationCacheRepository } from '@core/person-segmentation/domain/PersonSegmentationCacheRepository';
-import type { PersonSegmentationResult } from '@core/person-segmentation/domain/PersonSegmentationResult';
+import { PersonSegmentationResult } from '@core/person-segmentation/domain/PersonSegmentationResult';
+import type { PersonSegmentationCachePersister } from '@core/person-segmentation/services/PersonSegmentationCachePersister';
+import type { PersonSegmentationResultAssembler } from '@core/person-segmentation/services/PersonSegmentationResultAssembler';
 import type { PersonSegmentationWindow } from '@core/person-segmentation/domain/PersonSegmentationWindow';
 import { DEFAULT_PERSON_SEGMENTATION_OPTIONS } from '@core/person-segmentation/domain/PersonSegmentationOptions';
 import type { HiddenVideoLoader } from '@core/person-segmentation/services/HiddenVideoLoader';
+import type { PersonSegmentationResultReader } from '@core/person-segmentation/services/PersonSegmentationResultReader';
 import type { ScanVideoSource, ScanVideoSourceResolver } from '@core/person-segmentation/services/ScanVideoSourceResolver';
 import type { PersonMaskCapturer } from '@core/person-segmentation/infrastructure/PersonMaskCapturer';
 import type { PersonSegmenterWorkerClient } from '@core/person-segmentation/infrastructure/PersonSegmenterWorkerClient';
@@ -29,9 +31,13 @@ export interface EnsureSegmentMasksCachedInput {
  * loaded or when the capture fails; the busy flag is cleared either
  * way.
  *
- * Executions are serialized: each run reads the cached result after
- * every earlier run has merged and stored, so two concurrent backfills
- * cannot overwrite each other's masks.
+ * Executions are serialized, so two concurrent backfills cannot
+ * overwrite each other's masks. They are not the only writer, though:
+ * the background analysis publishes a chunk every few seconds, and a
+ * capture takes longer than that. What the captured masks are folded
+ * into is therefore read once the capture is done, never carried over
+ * from before it — the earlier record would undo whatever was measured
+ * in the meantime.
  */
 export class EnsureSegmentMasksCachedAction {
   private lastRun: Promise<void> = Promise.resolve();
@@ -42,7 +48,9 @@ export class EnsureSegmentMasksCachedAction {
     private readonly videoLoader: HiddenVideoLoader,
     private readonly workerClient: PersonSegmenterWorkerClient,
     private readonly maskCapturer: PersonMaskCapturer,
-    private readonly cacheRepository: PersonSegmentationCacheRepository,
+    private readonly persister: PersonSegmentationCachePersister,
+    private readonly resultReader: PersonSegmentationResultReader,
+    private readonly assembler: PersonSegmentationResultAssembler,
     private readonly loadedStore: LoadedPersonSegmentationCacheStore,
     private readonly backfillStore: SegmentMaskBackfillStore,
   ) {}
@@ -55,29 +63,32 @@ export class EnsureSegmentMasksCachedAction {
 
   private async ensureCached(input: EnsureSegmentMasksCachedInput): Promise<void> {
     const projectId = this.editorStore.snapshot().projectId;
-    const current = await this.loadCurrentResult(projectId);
-    const missingTimestamps = this.findMissingTimestamps(current.maskCache, input.range);
+    const beforeCapture = await this.loadCurrentResult(projectId);
+    const missingTimestamps = this.findMissingTimestamps(beforeCapture.maskCache, input.range);
     if (missingTimestamps.length === 0) return;
     this.backfillStore.begin(input.segmentId);
     try {
       const captured = await this.captureMasks(missingTimestamps);
-      const merged: PersonSegmentationResult = {
-        windows: current.windows,
-        maskCache: current.maskCache.mergedWith(captured),
-      };
-      if (projectId !== null) await this.cacheRepository.store(projectId, merged);
+      // Re-read rather than build on the result the missing timestamps
+      // were worked out from: capturing takes seconds, and the
+      // background analysis publishes a chunk every few of them. What
+      // rides through untouched is whatever coverage is current by now
+      // — masks captured for one forced segment say nothing about
+      // whether the scenes around them were examined, so the backfill
+      // must neither claim coverage nor take any away.
+      const known = await this.loadCurrentResult(projectId);
+      const merged = this.assembler.withMasks(known, known.maskCache.mergedWith(captured));
       this.loadedStore.publish(projectId, merged);
+      this.persister.markDirty(projectId);
+      await this.persister.flush();
     } finally {
       this.backfillStore.finish(input.segmentId);
     }
   }
 
   private async loadCurrentResult(projectId: string | null): Promise<PersonSegmentationResult> {
-    const loaded = this.loadedStore.current;
-    if (loaded !== null && loaded.projectId === projectId) return loaded.result;
-    if (projectId === null) return { windows: [], maskCache: new MaskCache() };
-    const stored = await this.cacheRepository.load(projectId);
-    return stored ?? { windows: [], maskCache: new MaskCache() };
+    const current = await this.resultReader.read(projectId);
+    return current ?? PersonSegmentationResult.nothingKnown(new MaskCache());
   }
 
   private findMissingTimestamps(cache: MaskCache, range: PersonSegmentationWindow): number[] {

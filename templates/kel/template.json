@@ -1,7 +1,42 @@
 {
   "name": "Kel",
-  "categories": [
-    "clean"
+  "category": "classic",
+  "variants": [
+    {
+      "label": "Blue",
+      "overrides": {
+        "highlight-color": "#569cd6",
+        "peak-bg-color": "#00008b"
+      }
+    },
+    {
+      "label": "Purple",
+      "overrides": {
+        "highlight-color": "#c586c0",
+        "peak-bg-color": "#3a1f3a"
+      }
+    },
+    {
+      "label": "Teal",
+      "overrides": {
+        "highlight-color": "#4ec9b0",
+        "peak-bg-color": "#103a34"
+      }
+    },
+    {
+      "label": "Orange",
+      "overrides": {
+        "highlight-color": "#ce9178",
+        "peak-bg-color": "#3a2418"
+      }
+    },
+    {
+      "label": "Green",
+      "overrides": {
+        "highlight-color": "#b5cea8",
+        "peak-bg-color": "#24331f"
+      }
+    }
   ],
   "typography": {
     "fontFamily": "JetBrains Mono Variable",
@@ -52,8 +87,8 @@
       "subgroup": "colors"
     },
     {
-      "id": "tag-bg-color",
-      "label": "Tag background",
+      "id": "peak-bg-color",
+      "label": "Peak background",
       "type": "color",
       "default": "#00008b",
       "group": "style",
@@ -111,7 +146,7 @@
     "type": "balanced-pixel-width",
     "minLines": 1,
     "maxLines": 2,
-    "maxWidthRatio": 0.85
+    "maxWidthRatio": 0.78
   },
   "alignment": {
     "verticalAlign": "bottom",

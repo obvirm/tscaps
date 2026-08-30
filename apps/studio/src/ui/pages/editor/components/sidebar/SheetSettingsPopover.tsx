@@ -1,4 +1,4 @@
-import { Copy, Link, Pencil, Unlink } from 'lucide-react';
+import { Copy, Link, Pencil, RotateCcw, Unlink } from 'lucide-react';
 import type { Sheet } from '@core/sheets/domain/Sheet';
 import { MAIN_SHEET_ID } from '@core/sheets/domain/Sheet';
 import { Popover } from '@ui/_shared/components/Popover/Popover';
@@ -18,6 +18,7 @@ interface SheetSettingsPopoverProps {
   onCopyStylesFromSheet: (sourceSheetId: string) => void;
   onLinkTo: (sourceSheetId: string) => void;
   onUnlink: () => void;
+  onResetToTemplateDefaults: () => void;
 }
 
 const MENU_SHAPE = 'p-1 flex flex-col gap-0.5 min-w-[220px]';
@@ -51,7 +52,7 @@ export function SheetSettingsPopover(props: SheetSettingsPopoverProps) {
   );
 }
 
-function SheetMenuScreen({ sheet, sheets, onRequestRename, onUnlink }: SheetSettingsPopoverProps) {
+function SheetMenuScreen({ sheet, sheets, onRequestRename, onUnlink, onResetToTemplateDefaults }: SheetSettingsPopoverProps) {
   const { navigate, close } = usePopoverNav();
   const hasOtherSheets = sheets.length > 1;
   const isLinked = sheet.linkGroupId !== null;
@@ -92,6 +93,14 @@ function SheetMenuScreen({ sheet, sheets, onRequestRename, onUnlink }: SheetSett
           <Link size={13} /> Link to…
         </button>
       )}
+      <button
+        type="button"
+        className={ITEM}
+        onClick={() => { close(); onResetToTemplateDefaults(); }}
+        title="Clear every edit on this sheet, including per-scene and per-word styles, back to the template's defaults."
+      >
+        <RotateCcw size={13} /> Reset to template default
+      </button>
     </div>
   );
 }

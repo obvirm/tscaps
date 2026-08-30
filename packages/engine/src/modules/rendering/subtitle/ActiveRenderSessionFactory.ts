@@ -13,9 +13,17 @@ import { SegmentSubtreeDecomposer } from '@modules/rendering/subtitle/SegmentSub
 import { SegmentPaintRegionResolver } from '@modules/rendering/subtitle/SegmentPaintRegionResolver';
 import { SegmentPaintRegionCache } from '@modules/rendering/subtitle/SegmentPaintRegionCache';
 import { VideoFrameVarsBuilder } from '@modules/rendering/subtitle/VideoFrameVarsBuilder';
+import { SegmentAnchorVarsBuilder } from '@modules/rendering/subtitle/SegmentAnchorVarsBuilder';
+import { ElementWidthMeasurer } from '@modules/rendering/subtitle/ElementWidthMeasurer';
 import { SvgFilterMaterializer } from '@modules/rendering/subtitle/SvgFilterMaterializer';
+import { SvgFilterStateFingerprint } from '@modules/rendering/subtitle/SvgFilterStateFingerprint';
 import { SegmentWrapperRenderer } from '@modules/rendering/subtitle/SegmentWrapperRenderer';
-import { AnimationProbe } from '@modules/rendering/subtitle/AnimationProbe';
+import { CssKeyframesScanner } from '@modules/css/CssKeyframesScanner';
+import type { AnimationStateFingerprint, AnimationStateFingerprintStrategy } from '@modules/rendering/subtitle/AnimationStateFingerprint';
+import { KeyframeScanAnimationStateFingerprint } from '@modules/rendering/subtitle/KeyframeScanAnimationStateFingerprint';
+import { SubtreeMountAnimationStateFingerprint } from '@modules/rendering/subtitle/SubtreeMountAnimationStateFingerprint';
+import { UnknownAnimationStateFingerprint } from '@modules/rendering/subtitle/UnknownAnimationStateFingerprint';
+import { SubtreeAnimationSupport } from '@modules/rendering/subtitle/SubtreeAnimationSupport';
 import { BatchPlanner } from '@modules/rendering/subtitle/BatchPlanner';
 import { SpriteSheetCompositor } from '@modules/rendering/subtitle/SpriteSheetCompositor';
 import { ActiveRenderSession } from '@modules/rendering/subtitle/ActiveRenderSession';
@@ -23,7 +31,7 @@ import type { PreparedStyle } from '@modules/rendering/subtitle/PreparedStyle';
 
 /**
  * Assembles an `ActiveRenderSession` and its per-session collaborator
- * graph: animation probe, segment paint-region cache, video-frame
+ * graph: animation state fingerprint, segment paint-region cache, video-frame
  * vars builder, segment wrapper renderer, batch planner, and sprite
  * sheet compositor.
  */
@@ -33,6 +41,7 @@ export class ActiveRenderSessionFactory {
     private readonly wordSplitter: WordSplitter,
     private readonly wordFragmenter: WordFragmenter,
     private readonly baselineCssComposer: BaselineCssComposer,
+    private readonly animationStrategy: AnimationStateFingerprintStrategy,
   ) {}
 
   create(
@@ -46,10 +55,9 @@ export class ActiveRenderSessionFactory {
     const subtreeDecomposer = new SegmentSubtreeDecomposer();
     const paintRegionResolver = new SegmentPaintRegionResolver();
     const paintRegionCache = new SegmentPaintRegionCache();
-    const filterMaterializer = new SvgFilterMaterializer(
-      new SvgFilterDefsRenderer(new SvgFilterScoper(), new SvgFilterLengthResolver()),
-      height,
-    );
+    const elementWidthMeasurer = new ElementWidthMeasurer(subtreeBuilder, width, height);
+    const filterDefsRenderer = new SvgFilterDefsRenderer(new SvgFilterScoper(), new SvgFilterLengthResolver());
+    const filterMaterializer = new SvgFilterMaterializer(filterDefsRenderer, height);
     const videoFrameVarsBuilder = new VideoFrameVarsBuilder(
       subtreeBuilder,
       paintRegionResolver,
@@ -63,12 +71,18 @@ export class ActiveRenderSessionFactory {
       subtreeDecomposer,
       filterMaterializer,
       videoFrameVarsBuilder,
+      new SegmentAnchorVarsBuilder(),
+      elementWidthMeasurer,
       new HorizontalPlacementResolver(new HorizontalSideResolver()),
       width,
       height,
     );
-    const animationProbe = new AnimationProbe();
-    const batchPlanner = new BatchPlanner(doc, styles, animationProbe);
+    const batchPlanner = new BatchPlanner(
+      doc,
+      styles,
+      this.buildAnimationFingerprint(wrapperRenderer, width, height),
+      new SvgFilterStateFingerprint(filterDefsRenderer, height),
+    );
     const spriteSheetCompositor = new SpriteSheetCompositor(
       styles,
       wrapperRenderer,
@@ -79,8 +93,20 @@ export class ActiveRenderSessionFactory {
     return new ActiveRenderSession(
       batchPlanner,
       spriteSheetCompositor,
-      animationProbe,
       paintRegionCache,
+      elementWidthMeasurer,
     );
+  }
+
+  private buildAnimationFingerprint(
+    wrapperRenderer: SegmentWrapperRenderer,
+    width: number,
+    height: number,
+  ): AnimationStateFingerprint {
+    if (this.animationStrategy === 'none') return new UnknownAnimationStateFingerprint();
+    if (this.animationStrategy === 'subtree-mount') {
+      return new SubtreeMountAnimationStateFingerprint(wrapperRenderer, new SubtreeAnimationSupport(), width, height);
+    }
+    return new KeyframeScanAnimationStateFingerprint(new CssKeyframesScanner());
   }
 }

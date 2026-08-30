@@ -54,6 +54,19 @@ export class AlignmentCssBuilder {
     };
   }
 
+  /**
+   * CSS variables naming where the caption's vertical anchor landed and
+   * which part of the box was placed on it, so a stylesheet can express
+   * a position against the frame instead of against the anchor.
+   * Mirrors the engine's export-side pair exactly.
+   */
+  buildAnchorVars(alignment: AlignmentConfig): Record<string, string> {
+    return {
+      [CssVariable.SEGMENT_ANCHOR_Y]: String(alignment.verticalOffset),
+      [CssVariable.SEGMENT_ANCHOR_ORIGIN_Y]: `${this.verticalAnchorPercent(alignment)}%`,
+    };
+  }
+
   private horizontalOffsetFromLeft(alignment: AlignmentConfig, textDirection: TextDirection): number {
     return this.resolveHorizontal(alignment, textDirection).offsetFromLeft;
   }

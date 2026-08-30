@@ -52,6 +52,7 @@ export const FieldView = memo(function FieldView({
       <ColorPicker
         label={field.label}
         value={String(value)}
+        hint={field.legend}
         disabled={disabled}
         onChange={(v) => onChange(field, v)}
       />
@@ -120,10 +121,15 @@ export const FieldView = memo(function FieldView({
   }
 
   if (control === null) return null;
+  // A colour sits in a dense grid of swatches, so its help cannot be a block
+  // under the control: a grid row takes the height of its tallest cell, and one
+  // legend would stretch the whole row and leave the swatches beside it adrift
+  // in the space it opened. It rides the label instead.
+  const blockLegend = field.type === 'color' ? undefined : field.legend;
   return withLegend(
     <CustomizedFieldOverlay customized={customized === true} label={field.label} controlIds={[field.id]}>
       {control}
     </CustomizedFieldOverlay>,
-    field.legend,
+    blockLegend,
   );
 });

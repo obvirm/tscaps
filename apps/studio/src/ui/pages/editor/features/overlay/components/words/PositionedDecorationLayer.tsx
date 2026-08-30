@@ -67,14 +67,17 @@ export const PositionedDecorationLayer = memo(function PositionedDecorationLayer
   );
 
   const videoFrameRequired = sheet.template.rendering.videoFrame.required;
-  const subtitleRegionVars = useMemo<Readonly<Record<string, string>>>(
-    () => videoFrameRequired ? alignmentCssBuilder.buildSubtitleRegionVars(effectiveAlignment, sheet.textDirection) : EMPTY_VARS,
+  const alignmentVars = useMemo<Readonly<Record<string, string>>>(
+    () => ({
+      ...alignmentCssBuilder.buildAnchorVars(effectiveAlignment),
+      ...(videoFrameRequired ? alignmentCssBuilder.buildSubtitleRegionVars(effectiveAlignment, sheet.textDirection) : EMPTY_VARS),
+    }),
     [alignmentCssBuilder, videoFrameRequired, effectiveAlignment, sheet.textDirection],
   );
 
   const wrapperStyle = useMemo<CSSProperties>(
-    () => ({ ...wrapperBaseStyles, ...subtitleRegionVars }),
-    [wrapperBaseStyles, subtitleRegionVars],
+    () => ({ ...wrapperBaseStyles, ...alignmentVars }),
+    [wrapperBaseStyles, alignmentVars],
   );
 
   const liveVideoFrame = videoFrameRequired && sheet.template.rendering.videoFrame.previewMode === 'live';

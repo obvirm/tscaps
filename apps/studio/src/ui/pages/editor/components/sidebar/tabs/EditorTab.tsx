@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { RotateCcw } from 'lucide-react';
 import type { Sheet } from '@core/sheets/domain/Sheet';
+import type { SheetCreationOption } from '@core/sheets/domain/SheetCreationOption';
 import { SheetSelector } from '@ui/pages/editor/components/sidebar/SheetSelector';
 import { Tooltip } from '@ui/_shared/components/Tooltip/Tooltip';
 
@@ -9,11 +10,14 @@ export interface SheetScope {
   activeSheet: Sheet;
   onSetActiveSheet: (sheetId: string) => void;
   onCreateSheet: (name: string) => unknown;
+  sheetCreationOptions: ReadonlyArray<SheetCreationOption>;
+  onCreateSheetFromOption: (option: SheetCreationOption) => void;
   onRenameSheet: (sheetId: string, name: string) => void;
   onDeleteSheet: (sheetId: string) => void;
   onCopyStylesFromSheet: (targetSheetId: string, sourceSheetId: string) => void;
   onLinkSheet: (targetSheetId: string, sourceSheetId: string) => void;
   onUnlinkSheet: (sheetId: string) => void;
+  onResetSheetToTemplateDefaults: (sheetId: string) => void;
 }
 
 interface EditorTabProps {
@@ -50,11 +54,14 @@ export function EditorTab({ title, hideTitleRow, sheetScope, onResetToTemplate, 
             activeSheetId={sheetScope.activeSheet.id}
             onSetActive={sheetScope.onSetActiveSheet}
             onCreate={sheetScope.onCreateSheet}
+            creationOptions={sheetScope.sheetCreationOptions}
+            onCreateFromOption={sheetScope.onCreateSheetFromOption}
             onRename={sheetScope.onRenameSheet}
             onDelete={sheetScope.onDeleteSheet}
             onCopyStylesFromSheet={sheetScope.onCopyStylesFromSheet}
             onLinkSheet={sheetScope.onLinkSheet}
             onUnlinkSheet={sheetScope.onUnlinkSheet}
+            onResetSheetToTemplateDefaults={sheetScope.onResetSheetToTemplateDefaults}
           />
         </div>
       )}

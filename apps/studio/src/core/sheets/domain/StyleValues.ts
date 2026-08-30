@@ -37,6 +37,24 @@ export class StyleValues {
     }
   }
 
+  /**
+   * Builds a snapshot for `fields`, taking each value from `stored` and
+   * falling back to the field's own default wherever `stored` holds
+   * none.
+   *
+   * Filling the gaps is what keeps a control added after a snapshot was
+   * taken from being inert in it. An unset value publishes no custom
+   * property, so a stylesheet reading that property gets whatever its
+   * own `var()` fallback says — and everything else deciding what to
+   * render from the published set never learns the control exists.
+   */
+  static restoredFrom(
+    fields: readonly ControlField[],
+    stored: Readonly<Record<string, ControlValue>>,
+  ): StyleValues {
+    return new StyleValues(fields, { ...StyleValues.fromTemplate(fields).values, ...stored });
+  }
+
   /** Builds StyleValues for a template, seeded with each field's default. */
   static fromTemplate(fields: readonly ControlField[]): StyleValues {
     const values: Record<string, ControlValue> = {};
@@ -46,16 +64,18 @@ export class StyleValues {
 
   /**
    * Builds StyleValues for a template seeded with each field's default
-   * and then overridden by `template.variants[variantIndex]`. Out-of-range
-   * indices and templates with no variants fall back to the plain default
-   * seeding. Override keys that don't match any of the template's
-   * controls are ignored — variants tolerate extra keys so authors can
-   * refactor controls without breaking saved sheets.
+   * and then overridden by the variant `variantIndex` resolves to on this
+   * template. The index is the sheet's preference, so it may sit outside
+   * the template's range — `Template.resolveVariantIndex` settles that;
+   * templates with no variants fall back to the plain default seeding.
+   * Override keys that don't match any of the template's controls are
+   * ignored — variants tolerate extra keys so authors can refactor
+   * controls without breaking saved sheets.
    */
   static fromTemplateVariant(template: Template, variantIndex: number): StyleValues {
     const base = StyleValues.fromTemplate(template.styleControls);
     if (template.variants.length === 0) return base;
-    const variant = template.variants[variantIndex % template.variants.length];
+    const variant = template.variants[template.resolveVariantIndex(variantIndex)];
     if (!variant) return base;
     let seeded: StyleValues = base;
     for (const [fieldId, value] of Object.entries(variant.overrides)) {

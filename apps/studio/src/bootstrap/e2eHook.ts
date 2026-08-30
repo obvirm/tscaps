@@ -212,7 +212,9 @@ export function attachE2EHook(deps: E2EHookDeps): void {
       // preview exists yet — pass `publishPreview: false` to keep the store
       // faithful to production.
       if (opts?.publishPreview !== false) {
-        deps.editorStore.patchVideoState({ previewFile: file });
+        deps.editorStore.patchVideoState({
+          preview: { kind: 'original', file, reason: 'pipeline-disabled' },
+        });
       }
     },
 

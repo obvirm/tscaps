@@ -11,8 +11,8 @@ import { bootEditor, bootEditorStore } from '@bootstrap/wiring/editor';
 import { bootCaptions } from '@bootstrap/wiring/captions';
 import { bootElements } from '@bootstrap/wiring/elements';
 import { bootCuts } from '@bootstrap/wiring/cuts';
-import { bootPreview, buildVideoProxiesIndexedDbStoreDefinition } from '@bootstrap/wiring/preview';
-import type { PreviewSurfaceVariant } from '@core/preview/domain/VideoPreviewSurface';
+import { bootPreview, bootPreviewSurface, buildVideoProxiesIndexedDbStoreDefinition } from '@bootstrap/wiring/preview';
+import type { PreviewSurfaceVariantPreference } from '@core/preview/domain/PreviewSurfaceVariantPreference';
 import type { ConfigurableTranscriber } from '@core/transcription/domain/ConfigurableTranscriber';
 import type { ReactNode } from 'react';
 import type { PostExportPromptRenderer } from '@bootstrap/PostExportPromptSlotContext';
@@ -64,7 +64,7 @@ export interface CreateEditorAppOptions {
    */
   readonly initialVideo?: File;
   readonly previewProxyEnabled: boolean;
-  readonly previewSurfaceVariant: PreviewSurfaceVariant;
+  readonly previewSurfacePreference: PreviewSurfaceVariantPreference;
   /** External transcriber; when omitted, picks the surface default. */
   readonly transcriber?: ConfigurableTranscriber;
   /** When false, the pipeline runs without touching the project repository. */
@@ -127,7 +127,7 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
     pathPrefix: '',
   });
   const videos = bootVideos({ indexedDb: utils.indexedDb });
-  const engine = bootEngine();
+  const engine = bootEngine({ telemetry, errors });
 
   const editorStore = bootEditorStore({
     localStorageClient: utils.localStorageClient,
@@ -152,21 +152,30 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
     templates,
     templateSupportChecker: browserSupport.templateSupportChecker,
   });
+  // The proxy pipeline is meaningless with the surface pinned to
+  // native — the `<video>` element plays the source blob verbatim
+  // and no proxy is ever consumed. Under `auto` the pipeline stays
+  // on and the per-source generation policy decides instead.
+  const effectivePreviewProxyEnabled = opts.previewProxyEnabled && opts.previewSurfacePreference !== 'native';
+  const previewSurface = bootPreviewSurface({
+    store: editorStore.store,
+    workerErrorMonitor: errors.workerErrorMonitor,
+    previewSurfacePreference: opts.previewSurfacePreference,
+  });
   const behindActorPreviewSupportChecker = new BehindActorPreviewSupportChecker(
-    opts.previewProxyEnabled,
-    opts.previewSurfaceVariant,
+    effectivePreviewProxyEnabled,
+    editorStore.store,
   );
   const pickerTemplateRepository = new BehindActorPreviewCompatibleTemplateRepository(
     browserSupport.filteredTemplateRepository,
     behindActorPreviewSupportChecker,
   );
-  const templateRepository = new BehindActorPreviewCompatibleTemplateRepository(
-    new AggregateTemplateRepository([
-      templates.repository,
-      userTemplates.templateRepository,
-    ]),
-    behindActorPreviewSupportChecker,
-  );
+  // Unfiltered: a saved project's behind-actor template is judged
+  // once its preview is published, not while it deserialises.
+  const templateRepository = new AggregateTemplateRepository([
+    templates.repository,
+    userTemplates.templateRepository,
+  ]);
   const assetLibrary = bootAssetLibrary({ templates, userBlobs });
   const rendering = bootRendering({ assetLibrary });
   const editor = bootEditor({
@@ -191,16 +200,12 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
     elementDescendantResolver: captions.services.elementDescendantResolver,
   });
   const cuts = bootCuts({ store: editor.store, localStorageClient: utils.localStorageClient });
-  // The proxy pipeline is meaningless on the native surface — the
-  // `<video>` element plays the source blob verbatim and no proxy
-  // is ever consumed. Both the preview resolver and the preprocessing
-  // phase collapse into passthrough when the two conditions align.
-  const effectivePreviewProxyEnabled = opts.previewProxyEnabled && opts.previewSurfaceVariant === 'canvas';
   const preview = bootPreview({
     store: editor.store,
     indexedDb: utils.indexedDb,
     previewProxyEnabled: effectivePreviewProxyEnabled,
-    previewSurfaceVariant: opts.previewSurfaceVariant,
+    isMobileDevice: utils.userAgentInspector.isMobile(),
+    previewSurface,
     transcodeCoordinator: engine.transcodeCoordinator,
     workerErrorMonitor: errors.workerErrorMonitor,
     telemetry,
@@ -219,11 +224,21 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
   const personSegmentation = bootPersonSegmentation({
     indexedDb: utils.indexedDb,
     editorStore: editor.store,
+    refresh: editor.refresh,
     previewSupportChecker: behindActorPreviewSupportChecker,
+    pickerTemplateRepository,
     workerErrorMonitor: errors.workerErrorMonitor,
+    telemetry,
+    appNoticeChannel: errors.appNoticeChannel,
+    errorClassifier: errors.errorClassifier,
+    errorTelemetryDescriber: errors.errorTelemetryDescriber,
+    storageFootprintProbe: utils.storageFootprintProbe,
+    profilingEnabled,
   });
   const projects = bootProjects({
     templateRepository,
+    behindActorFallbackTemplates: pickerTemplateRepository,
+    behindActorSupportChecker: behindActorPreviewSupportChecker,
     store: editor.store,
     exportStore: exportRunStore,
     refresh: editor.refresh,
@@ -305,6 +320,7 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
     errorClassifier: errors.errorClassifier,
     errorTelemetryDescriber: errors.errorTelemetryDescriber,
     storagePersistence: utils.storagePersistence,
+    localStorageClient: utils.localStorageClient,
     previewProxyEnabled: effectivePreviewProxyEnabled,
     projectPersistenceEnabled: opts.projectPersistenceEnabled,
   });
@@ -313,6 +329,7 @@ async function bootAndBuildEditorTree(opts: CreateEditorAppOptions): Promise<Rea
   new ActiveSheetAutoSwitcher(editor.store, sheets.actions.sheets.setActive).start();
   personSegmentation.triggerAutomation.start();
   personSegmentation.cacheHydrationAutomation.start();
+  personSegmentation.templateAvailabilityAutomation.start();
 
   if (profilingEnabled) instrumentExportLifecycle(exports.runStore);
 

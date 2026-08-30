@@ -1,9 +1,6 @@
 {
   "name": "Vera",
-  "categories": [
-    "clean",
-    "multi-speakers"
-  ],
+  "category": "classic",
   "variants": [
     { "label": "Blue pill", "overrides": { "highlight-bg-color": "#2563eb" } },
     { "label": "Pink pill", "overrides": { "highlight-bg-color": "#eb2563" } },
@@ -149,7 +146,7 @@
     "type": "balanced-pixel-width",
     "minLines": 1,
     "maxLines": 1,
-    "maxWidthRatio": 0.85
+    "maxWidthRatio": 0.79
   },
   "alignment": {
     "verticalAlign": "bottom",

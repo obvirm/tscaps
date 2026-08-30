@@ -1,5 +1,16 @@
 export type { SubtitleFrameRenderer, SubtitleFrame, SubtitleStyle } from '@modules/rendering/SubtitleFrameRenderer';
 export { BrowserSubtitleFrameRenderer } from '@modules/rendering/BrowserSubtitleFrameRenderer';
+export { SpriteSheetSizeProbe } from '@modules/rendering/subtitle/SpriteSheetSizeProbe';
+export { ImageDecodeSpriteSheetRasterProbe } from '@modules/rendering/subtitle/ImageDecodeSpriteSheetRasterProbe';
+export type {
+  SpriteSheetProbeObserver,
+  SingleTileFallback,
+} from '@modules/rendering/subtitle/SpriteSheetProbeObserver';
+export type {
+  SpriteSheetRasterProbe,
+  SpriteSheetRasterOutcome,
+  SpriteSheetRasterRefusal,
+} from '@modules/rendering/subtitle/SpriteSheetRasterProbe';
 export { LayeredSubtitleFrame } from '@modules/rendering/LayeredSubtitleFrame';
 export type { OverlayFrameRenderer, OverlayFrame } from '@modules/rendering/OverlayFrameRenderer';
 export { BrowserOverlayFrameRenderer } from '@modules/rendering/BrowserOverlayFrameRenderer';

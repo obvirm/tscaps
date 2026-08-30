@@ -1,6 +1,6 @@
 import type { InputVideoTrack } from 'mediabunny';
 import type { VideoFrameDecoder } from '@modules/video/mediabunny/frame/VideoFrameDecoder';
-import type { FallbackDecoderInfo } from '@modules/video/RenderJob';
+import type { FallbackDecoderInfo, VideoFrameDecoderSelection } from '@modules/video/RenderJob';
 
 export interface VideoFrameDecoderRequest {
   /** The primary video track from the input file. */
@@ -13,6 +13,11 @@ export interface VideoFrameDecoderRequest {
    * the factory uses the fallback without asking.
    */
   confirmFallback?: (info: FallbackDecoderInfo) => Promise<boolean>;
+  /**
+   * Called with the decoder the factory settled on, before it is
+   * returned. Not invoked when the factory aborts instead.
+   */
+  onDecoderSelected?: (selection: VideoFrameDecoderSelection) => void;
 }
 
 /**

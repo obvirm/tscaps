@@ -66,10 +66,10 @@
   color: var(--tscaps-primary-color, #d4d4d4);
 }
 
-/* Tag color only kicks in once the word has been reached by the
-   playhead — an upcoming `.highlight` reads as a regular upcoming
-   word so the tag doesn't spoil the reveal. */
-.word-being-narrated.highlight,
-.word-already-narrated.highlight {
-  background-color: var(--tscaps-tag-bg-color, #00008b);
+/* The peak color only kicks in once the word has been reached by the
+   playhead — an upcoming `.peak` reads as a regular upcoming word so
+   the tag doesn't spoil the reveal. */
+.word-being-narrated.peak,
+.word-already-narrated.peak {
+  background-color: var(--tscaps-peak-bg-color, #00008b);
 }

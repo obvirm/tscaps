@@ -16,16 +16,18 @@ export class DefaultVideoFrameDecoderFactory implements VideoFrameDecoderFactory
 
   async create(request: VideoFrameDecoderRequest): Promise<VideoFrameDecoder> {
     const webCodecsCapable = await request.track.canDecode();
+    const inputCodec = (await request.track.getCodec()) ?? 'unknown';
     if (webCodecsCapable) {
+      request.onDecoderSelected?.({ kind: 'web-codecs', inputCodec });
       return new WebCodecsVideoFrameDecoder(request.track);
     }
-    const inputCodec = (await request.track.getCodec()) ?? 'unknown';
     if (request.confirmFallback) {
       const accepted = await request.confirmFallback({ inputCodec });
       if (!accepted) {
         throw new DOMException('Fallback decoder declined by the caller.', 'AbortError');
       }
     }
+    request.onDecoderSelected?.({ kind: 'html-video-element', inputCodec });
     return new HtmlVideoElementVideoFrameDecoder(request.source, inputCodec);
   }
 }

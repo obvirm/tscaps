@@ -32,9 +32,13 @@ export class MediaBunnyCanvasVideoTrackEncoder implements VideoTrackEncoder {
     this.width = config.width;
     this.height = config.height;
     this.canvas = new OffscreenCanvas(config.width, config.height);
-    // alpha:false — the compositor paints an opaque source frame first;
-    // imageSmoothingEnabled:false — compositor always draws at native
-    // size, so smoothing is a pure no-op cost.
+    // alpha:false — the compositor paints an opaque source frame first.
+    // imageSmoothingEnabled:false — free whenever the output keeps the
+    // source's dimensions, which is the common path. It is not free when
+    // an export asks for smaller ones: the source frame is then scaled
+    // down unsmoothed, straight into the encoder. Whether that shows
+    // enough to be worth the smoothing is unmeasured, so the flag stays
+    // as it was rather than moving on an argument alone.
     const ctx = this.canvas.getContext('2d', {
       alpha: false,
       desynchronized: false,

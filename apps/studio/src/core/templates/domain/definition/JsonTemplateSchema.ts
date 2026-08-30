@@ -47,7 +47,7 @@ export interface JsonRenderingConfig {
 
 /**
  * JSON-side opt-in for the text-behind-actor effect. `tagCondition`
- * is a boolean tag expression (e.g. `"highlight or hook"`); absent
+ * is a boolean tag expression (e.g. `"peak or hook"`); absent
  * means every segment qualifies for automatic activation.
  */
 export interface JsonBehindActorTemplateConfig {
@@ -82,8 +82,12 @@ export interface JsonFeaturesConfig {
 // the deriver runs the entries left-to-right.
 export interface JsonTemplateSchema {
   name: string;
-  /** Free-form tags. The picker derives category tabs from the union. */
-  categories?: string[];
+  /**
+   * The family the gallery lists this template under, as a
+   * `TemplateCategory` slug. Absent means `lab` — a template that has
+   * not said where it belongs has not left the workbench.
+   */
+  category?: string;
   /**
    * Case-insensitive substrings matched against `navigator.userAgent`. If any
    * matches, the template is treated as unrenderable in the current browser.

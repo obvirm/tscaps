@@ -10,6 +10,8 @@ interface TranscriptAutoScrollParams {
   activeSegmentId: string | null;
   isPlaying: boolean;
   scrollRequest: ScrollRequest | null;
+  /** While picking scenes, playback must not move the list under the user. */
+  pickActive: boolean;
 }
 
 /**
@@ -18,7 +20,9 @@ interface TranscriptAutoScrollParams {
  *    (works while paused — relies on `activeSegmentId` being derived from
  *    the current video time).
  *  - Follow-along during playback, scrolling the just-changed scene to
- *    center. Manual edits while paused never yank the view.
+ *    center. Manual edits while paused never yank the view, and neither
+ *    does playback while the user is picking scenes — the list they are
+ *    choosing from has to hold still.
  *  - On-demand scroll to a caller-specified segment whenever the
  *    `scrollRequest` reference changes (used by the Locate button and
  *    search match navigation).
@@ -28,7 +32,7 @@ interface TranscriptAutoScrollParams {
  * element is wired up and silently no-op.
  */
 export function useTranscriptAutoScroll(params: TranscriptAutoScrollParams) {
-  const { virtualizer, scrollReady, sorted, activeSegmentId, isPlaying, scrollRequest } = params;
+  const { virtualizer, scrollReady, sorted, activeSegmentId, isPlaying, scrollRequest, pickActive } = params;
 
   // Auto-driven scrolls use `behavior: 'auto'` (instant) on purpose.
   // Smooth animations target an offset computed against the current
@@ -42,11 +46,14 @@ export function useTranscriptAutoScroll(params: TranscriptAutoScrollParams) {
     if (!scrollReady) return;
     if (!activeSegmentId) return;
     if (didEntryScrollRef.current && !isPlaying) return;
+    // The entry moment counts as spent either way, so leaving pick mode
+    // does not jump the list the user just finished reading.
     didEntryScrollRef.current = true;
+    if (pickActive) return;
     const idx = sorted.findIndex((e) => e.segment.id === activeSegmentId);
     if (idx < 0) return;
     virtualizer.scrollToIndex(Math.max(0, idx - 1), { align: 'start', behavior: 'auto' });
-  }, [scrollReady, activeSegmentId, sorted, isPlaying, virtualizer]);
+  }, [scrollReady, activeSegmentId, sorted, isPlaying, pickActive, virtualizer]);
 
   const prevPositionsRef = useRef<Map<string, number>>(new Map());
   useEffect(() => {
@@ -56,7 +63,7 @@ export function useTranscriptAutoScroll(params: TranscriptAutoScrollParams) {
     for (let i = 0; i < sorted.length; i++) next.set(sorted[i]!.segment.id, i);
     // Always refresh the snapshot — skipping it would make the next eligible
     // tick compare against pre-edit positions and scroll to a stale "change".
-    if (prev.size > 0 && isPlaying) {
+    if (prev.size > 0 && isPlaying && !pickActive) {
       for (const [id, newIdx] of next) {
         const oldIdx = prev.get(id);
         if (oldIdx === undefined || oldIdx !== newIdx) {
@@ -66,7 +73,7 @@ export function useTranscriptAutoScroll(params: TranscriptAutoScrollParams) {
       }
     }
     prevPositionsRef.current = next;
-  }, [scrollReady, sorted, isPlaying, virtualizer]);
+  }, [scrollReady, sorted, isPlaying, pickActive, virtualizer]);
 
   // Caller-driven scrolls. The parent bumps `scrollRequest` to a new
   // object reference whenever it wants the list to scroll to a specific

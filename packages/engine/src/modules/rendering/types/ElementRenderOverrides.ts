@@ -28,6 +28,11 @@ export class ElementRenderOverrides {
     return this.entries.get(elementId);
   }
 
+  /** Every override held, for a consumer that has to look at all of them rather than one. */
+  values(): Iterable<ScopedRenderOverride> {
+    return this.entries.values();
+  }
+
   /**
    * A new instance layering `other` over this one: elements present in
    * only one side keep their entry; for elements present in both,

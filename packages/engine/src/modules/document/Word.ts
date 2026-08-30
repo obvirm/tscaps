@@ -66,7 +66,18 @@ export class Word<M = unknown> {
   }
 
   getCssClasses(currentTime: number): string[] {
-    const classes: string[] = [Word.CSS_CLASS, this.getState(currentTime)];
+    return [Word.CSS_CLASS, this.getState(currentTime), ...this.getTagCssClasses()];
+  }
+
+  /**
+   * The classes the word's tags contribute, structure first then semantic.
+   *
+   * Free of the playhead, so anything reasoning about how the word will be
+   * styled — rather than about how it looks at one instant — can ask for
+   * these without inventing a time.
+   */
+  getTagCssClasses(): string[] {
+    const classes: string[] = [];
     for (const tag of this.structureTags) classes.push(tag.toCssClass());
     for (const tag of this.semanticTags) classes.push(tag.toCssClass());
     return classes;

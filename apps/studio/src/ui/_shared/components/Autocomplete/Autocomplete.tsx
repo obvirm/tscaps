@@ -343,6 +343,10 @@ export const Autocomplete = memo(function Autocomplete<T extends AutocompleteOpt
         value={open ? query : display}
         placeholder={display === '' ? (placeholder ?? '') : display}
         disabled={disabled}
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
         onClick={() => {
           // Focus on its own does NOT open the panel — a modal that
           // auto-focuses this input (e.g. Radix Dialog focus scope) would

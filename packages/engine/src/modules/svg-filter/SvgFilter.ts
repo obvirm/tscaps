@@ -17,11 +17,25 @@ const VAR_REF_RE = /var\(\s*(--[a-zA-Z_][a-zA-Z0-9_-]*)\s*(?:,\s*([^)]*?))?\s*\)
  * dropped ends in a straight cut instead of fading out.
  */
 export class SvgFilter {
+  private readonly referencedVariables: ReadonlySet<string>;
+
   constructor(
     readonly id: string,
     readonly attributes: ReadonlyMap<string, string>,
     private readonly source: string,
-  ) {}
+  ) {
+    this.referencedVariables = SvgFilter.scanVariableNames(source);
+  }
+
+  /**
+   * Custom property names the body reads, so a caller can describe the
+   * scope this filter is sensitive to without materializing it. Read
+   * with the same pattern `materialize` substitutes on, which is what
+   * keeps the two answers about the same set of names.
+   */
+  get variableNames(): ReadonlySet<string> {
+    return this.referencedVariables;
+  }
 
   materialize(scope: SvgFilterScope): string {
     return this.source.replace(VAR_REF_RE, (match, name, fallback) => {
@@ -30,5 +44,11 @@ export class SvgFilter {
       if (fallback !== undefined) return fallback;
       return match;
     });
+  }
+
+  private static scanVariableNames(source: string): ReadonlySet<string> {
+    const names = new Set<string>();
+    for (const reference of source.matchAll(VAR_REF_RE)) names.add(reference[1]!);
+    return names;
   }
 }

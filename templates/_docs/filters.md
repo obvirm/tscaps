@@ -89,11 +89,15 @@ The `id` is what the stylesheet references. Multiple filters may share the file;
 unique inside it. Attributes on the `<filter>` element itself — the region, `filterUnits`,
 `color-interpolation-filters` — reach the browser intact.
 
+**Comments are yours, and they stop at the build.** `filters.build.svg` carries none: like the
+block comments in `style.build.css`, they explain the source to whoever maintains it and say
+nothing to the runtime, which drops them before parsing anyway. Write as many as the filter
+needs.
+
 **`--` is illegal inside an XML comment.** Naming a custom property in prose is the usual way
-in. The runtime strips comments before parsing, so an invalid one still renders and the cost
-lands on whoever opens the file next, in an editor that now calls the document malformed.
-`CommentSyntaxFiltersSvgContractRule` checks it. Refer to a control **by id**
-(`outline-color`) instead.
+in. Nothing would render differently, so the cost lands on whoever opens the file next, in an
+editor that now calls the document malformed — which is why `templates:build` refuses one
+rather than stripping it silently. Refer to a control **by id** (`outline-color`) instead.
 
 ## Giving a filter room
 
@@ -165,6 +169,14 @@ bare too.
 The ticks exist because `feTurbulence`'s `seed` is truncated to an integer by browsers, so a
 float would freeze the noise. A fresh integer per frame is the only path to living noise inside
 an SVG filter.
+
+**A tick costs export time, so read one only where the effect moves.** The export draws a
+caption once per distinct look and reuses that drawing for every frame resolving to it. A
+filter reading a tick resolves to a different look every tick, so those frames are each drawn
+from scratch — the price of living noise, and pure waste on a filter whose output was going to
+be identical anyway. The same holds for a reference the scope leaves unresolved: what the
+document's CSS makes of it cannot be known ahead of the draw, so those frames are drawn one by
+one too.
 
 **Engine runtime variables**, when `videoFrame.required` is declared — `--video-frame` and
 `--subtitle-region-*` join the scope at the same point the wrapper exposes them to CSS. See

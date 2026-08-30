@@ -39,6 +39,19 @@ export interface FallbackDecoderInfo {
   inputCodec: string;
 }
 
+/**
+ * Which decoder the renderer drives the input through.
+ * `'html-video-element'` is the slow path, reached only when WebCodecs
+ * cannot decode the input's codec.
+ */
+export type VideoFrameDecoderKind = 'web-codecs' | 'html-video-element';
+
+/** The decoder chosen for a run, and the input codec it was chosen for. */
+export interface VideoFrameDecoderSelection {
+  kind: VideoFrameDecoderKind;
+  inputCodec: string;
+}
+
 export interface RenderJob {
   video: File;
   document: Document;
@@ -101,6 +114,12 @@ export interface RenderJob {
    * `'AbortError'` when the caller resolves with `false`.
    */
   confirmFallbackDecoder?: (info: FallbackDecoderInfo) => Promise<boolean>;
+  /**
+   * Called once per render, before the first frame is decoded, with the
+   * decoder the renderer selected for the input. Not invoked when the
+   * render fails before a decoder is chosen.
+   */
+  onVideoFrameDecoderSelected?: (selection: VideoFrameDecoderSelection) => void;
 }
 
 export interface RenderResult {
@@ -109,8 +128,14 @@ export interface RenderResult {
   mimeType: string;
 }
 
+/** Progress of a render, reported once per encoded frame. */
 export interface RenderProgress {
+  /** `[0, 100]`. */
   percent: number;
   currentFrame: number;
+  /**
+   * Estimated from the output duration and the source's average frame
+   * rate, so a variable-frame-rate source can end slightly off it.
+   */
   totalFrames: number;
 }

@@ -8,17 +8,21 @@ export interface DocumentProps<M = unknown> {
   readonly sections: ReadonlyArray<Section>;
   readonly metadata?: M | undefined;
   readonly narrationPace?: NarrationPace | undefined;
+  readonly language?: string | null | undefined;
 }
 
 export class Document<M = unknown> {
   readonly sections: ReadonlyArray<Section>;
   readonly metadata: M | undefined;
   readonly narrationPace: NarrationPace;
+  /** ISO 639-1 two-letter code, `null` when unknown. */
+  readonly language: string | null;
 
   constructor(props: DocumentProps<M>) {
     this.sections = props.sections;
     this.metadata = props.metadata;
     this.narrationPace = props.narrationPace ?? NarrationPace.empty();
+    this.language = props.language ?? null;
   }
 
   getSegments(): Segment[] {
@@ -42,6 +46,7 @@ export class Document<M = unknown> {
       sections: this.sections,
       metadata: this.metadata,
       narrationPace: this.narrationPace,
+      language: this.language,
       ...changes,
     });
   }
@@ -55,11 +60,18 @@ export class Document<M = unknown> {
     return new Document<M>({
       sections: [new Section({ segments, kind: '' })],
       metadata: this.metadata,
+      narrationPace: this.narrationPace,
+      language: this.language,
     });
   }
 
   withMetadata<N>(metadata: N): Document<N> {
-    return new Document<N>({ sections: this.sections, metadata });
+    return new Document<N>({
+      sections: this.sections,
+      metadata,
+      narrationPace: this.narrationPace,
+      language: this.language,
+    });
   }
 
   /**

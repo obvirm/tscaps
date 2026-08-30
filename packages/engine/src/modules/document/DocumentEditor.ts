@@ -145,9 +145,8 @@ export class DocumentEditor {
    * new segment clones the anchor's time — callers that want the first
    * keystrokes to claim real duration should pass an explicit window.
    *
-   * A document with no segments accepts the insertion too, into its
-   * first Section (or a fresh one when no Section exists); there is no
-   * anchor to clone from, so this case requires an explicit `time`.
+   * A Document with no segments has no anchor and is refused here —
+   * {@link insertFirstSegment} is the entry point for that case.
    */
   insertSegmentAt(
     doc: Document,
@@ -156,11 +155,6 @@ export class DocumentEditor {
     time?: TimeFragment,
   ): { doc: Document; wordId: string; segmentId: string } {
     const slots = this._flatten(doc);
-    if (slots.length === 0) {
-      return time
-        ? this._insertIntoEmptyDocument(doc, time)
-        : { doc, wordId: '', segmentId: '' };
-    }
     const anchor = slots[segIdx];
     if (!anchor) return { doc, wordId: '', segmentId: '' };
 
@@ -180,20 +174,31 @@ export class DocumentEditor {
     };
   }
 
-  private _insertIntoEmptyDocument(
+  /**
+   * Inserts the only Segment of a Document that has none, into the
+   * Section of `sectionKind` — the one the Document already carries
+   * when it still has it, a fresh one otherwise. Both the window and
+   * the kind are given because there is no anchor to take either from,
+   * and `kind` is opaque to the engine: only the consumer knows which
+   * one its content belongs to. The caller is expected to focus the
+   * returned `wordId` so the user can type immediately.
+   */
+  insertFirstSegment(
     doc: Document,
     time: TimeFragment,
+    sectionKind: string,
   ): { doc: Document; wordId: string; segmentId: string } {
     const newWord = new Word({ text: '', time });
     const newSegment = new Segment({ lines: [new Line({ words: [newWord] })] });
-    const section = doc.sections[0] ?? new Section({ kind: '', segments: [] });
+    const section = doc.sections.find((candidate) => candidate.kind === sectionKind)
+      ?? new Section({ kind: sectionKind, segments: [] });
     return {
       doc: this._rebuild([{ segment: newSegment, section }], doc),
       wordId: newWord.id,
       segmentId: newSegment.id,
     };
   }
-  
+
   /**
    * Moves one word's start and end. The segment keeps holding the same
    * words, so an explicit window it was given still says what its

@@ -2,11 +2,14 @@ import { memo, useState } from 'react';
 import { Copy, ClipboardPaste, Check } from 'lucide-react';
 import { HexAlphaColorPicker } from 'react-colorful';
 import { Popover } from '@ui/_shared/components/Popover/Popover';
+import { Tooltip } from '@ui/_shared/components/Tooltip/Tooltip';
 
 interface ColorPickerProps {
   label: string;
   /** Accepts `#rrggbb` or `#rrggbbaa`. */
   value: string;
+  /** Help text, reached from the label rather than printed under the swatch. */
+  hint?: string | undefined;
   disabled?: boolean | undefined;
   /** Emits `#rrggbb` when fully opaque, `#rrggbbaa` when alpha < 1. */
   onChange: (value: string) => void;
@@ -64,6 +67,7 @@ function compactHex(hex8: string): string {
 export const ColorPicker = memo(function ColorPicker({
   label,
   value,
+  hint,
   disabled,
   onChange,
 }: ColorPickerProps) {
@@ -128,9 +132,17 @@ export const ColorPicker = memo(function ColorPicker({
         trigger={trigger}
         screens={{ panel }}
       />
-      <span className="text-xs text-fg-muted whitespace-nowrap overflow-hidden text-ellipsis min-w-0">
-        {label}
-      </span>
+      {hint === undefined ? (
+        <span className="text-xs text-fg-muted whitespace-nowrap overflow-hidden text-ellipsis min-w-0">
+          {label}
+        </span>
+      ) : (
+        <Tooltip text={hint} tapToOpen>
+          <span className="text-xs text-fg-muted whitespace-nowrap overflow-hidden text-ellipsis min-w-0 cursor-help underline decoration-dotted decoration-fg-faint underline-offset-2">
+            {label}
+          </span>
+        </Tooltip>
+      )}
       <div className="flex gap-0.5 opacity-0 group-hover/color:opacity-100 group-focus-within/color:opacity-100 transition-opacity duration-quick ease-standard">
         <button
           type="button"

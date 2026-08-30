@@ -1,6 +1,6 @@
 import type {
-  DecodedVideoFrame,
   FramePainter,
+  FramePaintRequest,
   PaintFrame,
 } from '@tscaps/engine';
 
@@ -20,12 +20,17 @@ export class SourceOnlyFramePainter implements FramePainter {
     this.height = height;
   }
 
-  async paint(frame: DecodedVideoFrame, _outputTimestamp: number): Promise<PaintFrame> {
-    return (ctx) => {
+  /** One: every frame stands alone, so there is nothing to amortize. */
+  lookAhead(): number {
+    return 1;
+  }
+
+  async paint(requests: ReadonlyArray<FramePaintRequest>): Promise<PaintFrame[]> {
+    return requests.map(({ frame }) => (ctx) => {
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
       frame.draw(ctx, 0, 0, this.width, this.height);
-    };
+    });
   }
 
   end(): void {}

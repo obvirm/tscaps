@@ -10,6 +10,13 @@ import { ProjectSaveFailedError } from '@core/projects/domain/errors/ProjectSave
  * Skips silently if no project is open (state.projectId is null), so the
  * caller does not need to gate the call.
  *
+ * Also skips when the payload would be byte-for-byte what the last
+ * successful save already wrote, so a caller that saves on every pass
+ * costs nothing when there is nothing to write. The comparison is on
+ * content rather than on the `dirty` flag because state reaches the
+ * store through paths that never raise it, and a save that skipped one
+ * of those would drop work.
+ *
  * If the user edits the project while a save is in flight, the running
  * save still persists the *original* snapshot — the edits remain
  * unsaved (`dirty` stays true) so the next save catches them up.
@@ -22,6 +29,8 @@ import { ProjectSaveFailedError } from '@core/projects/domain/errors/ProjectSave
  * inspecting whatever the storage layer threw.
  */
 export class SaveProjectAction {
+  private lastWrittenSignature: string | null = null;
+
   constructor(
     private readonly store: EditorStore,
     private readonly repository: ProjectRepository,
@@ -33,11 +42,18 @@ export class SaveProjectAction {
     const projectAtStart = this.projectBuilder.build(this.store.snapshot());
     if (!projectAtStart) return;
     const signatureAtStart = this.signatureOf(projectAtStart);
+    if (signatureAtStart === this.lastWrittenSignature) {
+      // Storage already holds this exact content, so the state is as
+      // saved as a write would leave it.
+      this.store.markClean();
+      return;
+    }
     try {
       await this.repository.save(projectAtStart);
     } catch (cause) {
       throw new ProjectSaveFailedError({ cause });
     }
+    this.lastWrittenSignature = signatureAtStart;
     if (this.currentStateMatches(signatureAtStart)) {
       this.store.markClean();
     }

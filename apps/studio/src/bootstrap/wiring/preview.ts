@@ -2,7 +2,16 @@ import type { MediaBunnyTranscodeCoordinator } from '@tscaps/engine';
 import type { EditorStore } from '@core/editor/store/EditorStore';
 import type { IndexedDbClient } from '@core/_shared/infrastructure/IndexedDbClient';
 import type { IndexedDbStoreDefinition } from '@core/_shared/infrastructure/IndexedDbStoreDefinition';
-import type { PreviewSurfaceVariant, VideoPreviewSurface } from '@core/preview/domain/VideoPreviewSurface';
+import type {
+  PreviewSurfaceVariant,
+  SwitchableVideoPreviewSurface,
+  VideoPreviewSurface,
+} from '@core/preview/domain/VideoPreviewSurface';
+import type { PreviewSurfaceVariantPreference } from '@core/preview/domain/PreviewSurfaceVariantPreference';
+import { LazySwitchableVideoPreviewSurface } from '@core/preview/infrastructure/LazySwitchableVideoPreviewSurface';
+import { PreviewProxyGenerationPolicy } from '@core/preview/services/PreviewProxyGenerationPolicy';
+import { PreviewProxyGenerationBudget } from '@core/preview/services/PreviewProxyGenerationBudget';
+import { MediaBunnyVideoMetadataProbe } from '@core/videos/infrastructure/MediaBunnyVideoMetadataProbe';
 import { CanvasVideoPreviewSurface } from '@core/preview/infrastructure/CanvasVideoPreviewSurface';
 import { NativeVideoPreviewSurface } from '@core/preview/infrastructure/NativeVideoPreviewSurface';
 import { DocumentHiddenPlaybackPauser } from '@core/preview/infrastructure/DocumentHiddenPlaybackPauser';
@@ -11,8 +20,11 @@ import { MediaBunnyPreviewProxyGenerator } from '@core/preview/infrastructure/me
 import { FixedPreviewProxyCodecPolicy } from '@core/preview/infrastructure/mediabunny/FixedPreviewProxyCodecPolicy';
 import { DefaultPreviewProxyOutputStrategyFactory } from '@core/preview/infrastructure/DefaultPreviewProxyOutputStrategyFactory';
 import { IndexedDbPreviewProxyRepository } from '@core/preview/infrastructure/repositories/IndexedDbPreviewProxyRepository';
+import { MAX_CACHED_PROJECT_VIDEOS } from '@bootstrap/wiring/videos';
 import type { PreviewProxyRepository } from '@core/preview/domain/PreviewProxyRepository';
 import { PreviewProxyResolver } from '@core/preview/services/PreviewProxyResolver';
+import { PreviewProxyGenerationStore } from '@core/preview/store/PreviewProxyGenerationStore';
+import { GeneratePreviewProxyAction } from '@core/preview/actions/GeneratePreviewProxyAction';
 import { PreviewResolutionCap } from '@core/preview/services/PreviewResolutionCap';
 import { EditorStorePreviewCutsSource } from '@bootstrap/wiring/EditorStorePreviewCutsSource';
 import type { WorkerErrorMonitor } from '@core/_shared/workers/WorkerErrorMonitor';
@@ -25,11 +37,18 @@ import type { TelemetryModule } from '@bootstrap/wiring/telemetry';
 
 const PREVIEW_MAX_LONGEST_SIDE_PX = 1280;
 
+export interface PreviewSurfaceDependencies {
+  readonly store: EditorStore;
+  readonly workerErrorMonitor: WorkerErrorMonitor;
+  readonly previewSurfacePreference: PreviewSurfaceVariantPreference;
+}
+
 export interface PreviewDependencies {
   readonly store: EditorStore;
   readonly indexedDb: IndexedDbClient;
   readonly previewProxyEnabled: boolean;
-  readonly previewSurfaceVariant: PreviewSurfaceVariant;
+  readonly isMobileDevice: boolean;
+  readonly previewSurface: SwitchableVideoPreviewSurface;
   readonly transcodeCoordinator: MediaBunnyTranscodeCoordinator;
   readonly workerErrorMonitor: WorkerErrorMonitor;
   readonly telemetry: TelemetryModule;
@@ -40,9 +59,11 @@ export interface PreviewDependencies {
 }
 
 export interface PreviewModule {
-  readonly surface: VideoPreviewSurface;
+  readonly surface: SwitchableVideoPreviewSurface;
   readonly proxyRepository: PreviewProxyRepository;
   readonly proxyResolver: PreviewProxyResolver;
+  readonly proxyGenerationStore: PreviewProxyGenerationStore;
+  readonly actions: { readonly generateProxy: GeneratePreviewProxyAction };
   /**
    * Whether the proxy pipeline is live for this session. When
    * `false`, the surface plays the source blob verbatim and no
@@ -50,37 +71,20 @@ export interface PreviewModule {
    * "low-res preview" affordances gate on this flag.
    */
   readonly proxyPipelineEnabled: boolean;
-  /**
-   * The concrete surface variant driving playback. Consumers that
-   * need to know whether a canvas-shaped overlay path is available
-   * (e.g. an effect that samples the source frame) read this flag —
-   * canvas variants expose a canvas element, the native variant does
-   * not.
-   */
-  readonly surfaceVariant: PreviewSurfaceVariant;
 }
 
 /**
- * Boots the preview feature: the video preview surface that drives
- * editor playback, plus the proxy pipeline that produces the
- * normalized 480p H.264 file the canvas surface loads. The returned
- * surface is created with no host container bound — `start(container)`
- * runs when the editor host mounts.
- *
- * The concrete surface is picked from `previewSurfaceVariant`. On the
- * `native` variant the proxy repository and resolver are still wired
- * (so the module shape stays uniform for consumers) but the resolver
- * is constructed in its disabled mode, so no proxy is ever generated
- * or persisted while the native surface owns playback.
+ * Boots the proxy pipeline around an already-built preview surface:
+ * the repository stack, the generation policy and resolver, and the
+ * on-demand generation action with its progress store. The surface
+ * itself comes from {@link bootPreviewSurface}, which runs earlier
+ * in the composition because other modules consume it before the
+ * pipeline exists.
  */
 export function bootPreview(deps: PreviewDependencies): PreviewModule {
-  const localProxyRepository = new IndexedDbPreviewProxyRepository(deps.indexedDb);
+  const localProxyRepository = new IndexedDbPreviewProxyRepository(deps.indexedDb, MAX_CACHED_PROJECT_VIDEOS);
   const proxyRepository: PreviewProxyRepository = localProxyRepository;
 
-  const cutsSource = new EditorStorePreviewCutsSource(deps.store);
-  const surface = buildVideoPreviewSurface(deps.previewSurfaceVariant, cutsSource, deps.workerErrorMonitor);
-  const hiddenTabPauser = new DocumentHiddenPlaybackPauser(surface);
-  hiddenTabPauser.install();
   const proxyGenerator = new MediaBunnyPreviewProxyGenerator(
     new DefaultPreviewProxyOutputStrategyFactory(deps.workerErrorMonitor),
     deps.transcodeCoordinator,
@@ -97,26 +101,57 @@ export function bootPreview(deps: PreviewDependencies): PreviewModule {
   const proxyResolver = new PreviewProxyResolver(
     proxyRepository,
     proxyGenerator,
+    new MediaBunnyVideoMetadataProbe(),
+    new PreviewProxyGenerationPolicy(deps.isMobileDevice),
+    new PreviewProxyGenerationBudget(),
     proxyFallbackReporter,
     deps.previewProxyEnabled,
   );
+  const proxyGenerationStore = new PreviewProxyGenerationStore();
+  const generateProxy = new GeneratePreviewProxyAction(
+    deps.store,
+    proxyResolver,
+    proxyRepository,
+    proxyGenerationStore,
+    deps.telemetry.telemetry,
+    deps.errorClassifier,
+    deps.errorTelemetryDescriber,
+  );
   return {
-    surface,
+    surface: deps.previewSurface,
     proxyRepository,
     proxyResolver,
+    proxyGenerationStore,
+    actions: { generateProxy },
     proxyPipelineEnabled: deps.previewProxyEnabled,
-    surfaceVariant: deps.previewSurfaceVariant,
   };
 }
 
-function buildVideoPreviewSurface(
-  variant: PreviewSurfaceVariant,
+/**
+ * Builds the switchable preview surface the editor plays on. Kept
+ * apart from {@link bootPreview} because the surface has consumers
+ * that wire up before the proxy pipeline does (support checkers that
+ * read the live variant). Each variant is built on first use; a
+ * forced preference pins the surface to that variant for the whole
+ * session. Also installs the hidden-tab playback pauser.
+ */
+export function bootPreviewSurface(deps: PreviewSurfaceDependencies): SwitchableVideoPreviewSurface {
+  const cutsSource = new EditorStorePreviewCutsSource(deps.store);
+  const factories: Record<PreviewSurfaceVariant, () => VideoPreviewSurface> = {
+    canvas: () => buildCanvasSurface(cutsSource, deps.workerErrorMonitor),
+    native: () => new NativeVideoPreviewSurface(cutsSource),
+  };
+  const locked = deps.previewSurfacePreference !== 'auto';
+  const initialVariant = deps.previewSurfacePreference === 'auto' ? 'canvas' : deps.previewSurfacePreference;
+  const surface = new LazySwitchableVideoPreviewSurface(factories, initialVariant, locked);
+  new DocumentHiddenPlaybackPauser(surface).install();
+  return surface;
+}
+
+function buildCanvasSurface(
   cutsSource: EditorStorePreviewCutsSource,
   workerErrorMonitor: WorkerErrorMonitor,
 ): VideoPreviewSurface {
-  if (variant === 'native') {
-    return new NativeVideoPreviewSurface(cutsSource);
-  }
   const resolutionCap = new PreviewResolutionCap(PREVIEW_MAX_LONGEST_SIDE_PX);
   const loader = new MediaBunnyPreviewSourceLoader(resolutionCap, workerErrorMonitor);
   return new CanvasVideoPreviewSurface(loader, cutsSource, resolutionCap);

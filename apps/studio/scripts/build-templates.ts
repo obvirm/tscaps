@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { extname, join, resolve } from 'node:path';
+import { extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compile } from 'sass';
 import { SimilarNameFinder } from '@core/_shared/services/SimilarNameFinder';
@@ -27,16 +27,16 @@ function listSvgFiles(dir: string): string[] {
 }
 
 /**
- * Library sources get the same comment check the contract applies to
- * templates. Their comments are stripped before anything is copied
- * into a template, so an invalid one would never reach the built
- * documents the contract inspects.
+ * Reads an authored SVG source after checking the comments it is about
+ * to lose. Comments never reach a built document, so an invalid one
+ * would reach no parser and no contract check either, and the cost
+ * would land entirely on whoever opens the source next.
  */
-function readLibrarySvg(dir: string, entry: string): string {
-  const source = readFileSync(join(dir, entry), 'utf8');
+function readSvgSource(path: string): string {
+  const source = readFileSync(path, 'utf8');
   const violations = commentSyntaxRule.check(source);
   if (violations.length > 0) {
-    throw new Error(`${entry}: ${violations.map((violation) => violation.message).join(' ')}`);
+    throw new Error(`${relative(templatesDir, path)}: ${violations.map((violation) => violation.message).join(' ')}`);
   }
   return source;
 }
@@ -44,7 +44,7 @@ function readLibrarySvg(dir: string, entry: string): string {
 function loadFilterRecipes(): Map<string, SvgFilterRecipe> {
   const recipes = new Map<string, SvgFilterRecipe>();
   for (const entry of listSvgFiles(recipesDir)) {
-    const recipe = SvgFilterRecipe.parse(readLibrarySvg(recipesDir, entry));
+    const recipe = SvgFilterRecipe.parse(readSvgSource(join(recipesDir, entry)));
     recipes.set(recipe.name, recipe);
   }
   return recipes;
@@ -78,7 +78,7 @@ function buildTemplate(templateName: string, expander: SvgRecipeExpander): void 
         },
       }).css
     : readFileSync(sourcePath, 'utf8');
-  const css = normalizeForRuntime(raw);
+  const css = normalizeCssForRuntime(raw);
   writeFileSync(join(dir, 'style.build.css'), css);
   buildControls(dir, registry);
   buildAnimations(dir, animations);
@@ -131,7 +131,7 @@ function buildFilters(dir: string, expander: SvgRecipeExpander): void {
     rmSync(buildPath, { force: true });
     return;
   }
-  writeFileSync(buildPath, expander.expand(readFileSync(sourcePath, 'utf8')));
+  writeFileSync(buildPath, expander.expand(normalizeSvgForRuntime(readSvgSource(sourcePath))));
 }
 
 /**
@@ -140,8 +140,26 @@ function buildFilters(dir: string, expander: SvgRecipeExpander): void {
  * whitespace so both the Sass and pass-through paths produce output
  * of the same shape.
  */
-function normalizeForRuntime(css: string): string {
+function normalizeCssForRuntime(css: string): string {
   return dedupeKeyframes(css.replace(/\/\*[\s\S]*?\*\//g, ''))
+    .replace(/\n{3,}/g, '\n\n')
+    .trim() + '\n';
+}
+
+/**
+ * The same strip for a filter document: XML comments explain the
+ * authored source to whoever maintains it and say nothing to the
+ * runtime, which drops them before parsing anyway. A comment holding
+ * its own lines takes them with it, so removing one leaves no gap
+ * where an author wrote none.
+ *
+ * Runs before recipe expansion, so a commented-out call stays out of
+ * the built document rather than expanding inside the comment.
+ */
+function normalizeSvgForRuntime(svg: string): string {
+  return svg
+    .replace(/^[ \t]*<!--[\s\S]*?-->[ \t]*\n/gm, '')
+    .replace(/[ \t]*<!--[\s\S]*?-->/g, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim() + '\n';
 }

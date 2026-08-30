@@ -1,9 +1,6 @@
 {
   "name": "Mira",
-  "categories": [
-    "clean",
-    "multi-speakers"
-  ],
+  "category": "modern",
   "variants": [
     {
       "label": "White",
@@ -88,7 +85,7 @@
     },
     {
       "id": "tag-weight",
-      "label": "Tag weight",
+      "label": "Accent weight",
       "type": "integer",
       "default": 900,
       "min": 100,
@@ -124,7 +121,7 @@
     "type": "balanced-pixel-width",
     "minLines": 1,
     "maxLines": 1,
-    "maxWidthRatio": 0.8
+    "maxWidthRatio": 0.72
   },
   "alignment": {
     "verticalAlign": "bottom",

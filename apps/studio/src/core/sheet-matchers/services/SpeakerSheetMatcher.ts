@@ -1,8 +1,8 @@
-import type { Document, Segment } from '@tscaps/engine';
+import type { Document, Word } from '@tscaps/engine';
 import type {
-  SegmentSheetMatcher,
   SheetMatcherAvailability,
   SheetMatcherContext,
+  WordSheetMatcher,
 } from '@core/sheet-matchers/domain/SheetMatcher';
 
 export interface SpeakerSheetMatcherParams {
@@ -17,34 +17,25 @@ export interface SpeakerSheetMatcherParams {
  *
  * `insufficient-speakers` — fewer than two distinct speakers detected;
  * the matcher has nothing meaningful to discriminate by.
- *
- * `mixed-speaker-segments` — at least one segment spans multiple
- * speakers, so it could never match any single-speaker target. Symptom
- * of an upstream pipeline that didn't split by speaker change; the
- * dialog points the user at the relevant control.
  */
-export type SpeakerSheetMatcherUnavailableCode =
-  | 'insufficient-speakers'
-  | 'mixed-speaker-segments';
+export type SpeakerSheetMatcherUnavailableCode = 'insufficient-speakers';
 
 /**
- * Matches segments whose every word carries the same `speakerId`. After
- * the engine's `SpeakerChangeSegmentSplitter` runs, segments are already
- * mono-speaker so the check is exact rather than majority-based.
+ * Matches the words one speaker says. Word granularity, like the tag
+ * matcher: a scene two voices share is carved between them rather than
+ * refused, and each side is re-split under its own sheet's rules
+ * afterwards. Nothing has to be tidy before this runs.
  */
-export class SpeakerSheetMatcher implements SegmentSheetMatcher<SpeakerSheetMatcherParams> {
+export class SpeakerSheetMatcher implements WordSheetMatcher<SpeakerSheetMatcherParams> {
   readonly type = 'speaker';
   readonly label = 'By speaker';
   readonly cloudOnly = true;
-  readonly granularity = 'segment' as const;
+  readonly granularity = 'word' as const;
 
   availability(ctx: SheetMatcherContext): SheetMatcherAvailability {
     const speakerIds = this.collectSpeakerIds(ctx.document);
     if (speakerIds.length < 2) {
       return { available: false, code: 'insufficient-speakers' satisfies SpeakerSheetMatcherUnavailableCode };
-    }
-    if (this._hasMixedSpeakerSegments(ctx.document)) {
-      return { available: false, code: 'mixed-speaker-segments' satisfies SpeakerSheetMatcherUnavailableCode };
     }
     return { available: true };
   }
@@ -54,10 +45,8 @@ export class SpeakerSheetMatcher implements SegmentSheetMatcher<SpeakerSheetMatc
     return { speakerId: ids[0] ?? null };
   }
 
-  matchesSegment(segment: Segment, params: SpeakerSheetMatcherParams): boolean {
-    const words = segment.getWords();
-    if (words.length === 0) return false;
-    return words.every((w) => w.speakerId === params.speakerId);
+  matchesWord(word: Word, params: SpeakerSheetMatcherParams): boolean {
+    return word.speakerId === params.speakerId;
   }
 
   /**
@@ -78,17 +67,5 @@ export class SpeakerSheetMatcher implements SegmentSheetMatcher<SpeakerSheetMatc
       }
     }
     return ordered;
-  }
-
-  private _hasMixedSpeakerSegments(document: Document): boolean {
-    for (const segment of document.getSegments()) {
-      const words = segment.getWords();
-      if (words.length === 0) continue;
-      const first = words[0]!.speakerId;
-      for (let i = 1; i < words.length; i++) {
-        if (words[i]!.speakerId !== first) return true;
-      }
-    }
-    return false;
   }
 }
