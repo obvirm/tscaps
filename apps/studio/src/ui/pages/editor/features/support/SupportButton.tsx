@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Heart } from 'lucide-react';
 import { Tooltip } from '@ui/_shared/components/Tooltip/Tooltip';
 import { SupportDialog } from '@ui/pages/editor/features/support/SupportDialog';
+import { useTelemetry } from '@ui/_shared/contexts/modules/TelemetryContext';
 
 const BUTTON =
   'inline-flex items-center justify-center w-8 h-8 bg-transparent border border-transparent rounded-xs ' +
@@ -15,13 +16,20 @@ const BUTTON =
  */
 export function SupportButton() {
   const [open, setOpen] = useState(false);
+  const telemetry = useTelemetry();
+
+  const handleOpen = () => {
+    telemetry.capture('support_opened');
+    setOpen(true);
+  };
+
   return (
     <>
       <Tooltip text="Support tscaps" position="bottom">
         <button
           type="button"
           className={BUTTON}
-          onClick={() => setOpen(true)}
+          onClick={handleOpen}
           aria-label="Support tscaps"
         >
           <Heart size={16} strokeWidth={1.75} />

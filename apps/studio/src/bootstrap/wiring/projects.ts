@@ -22,6 +22,7 @@ import { ProjectSerializer } from '@core/projects/services/ProjectSerializer';
 import { ProjectMigrator } from '@core/projects/services/migrations/ProjectMigrator';
 import { ThumbnailGenerator } from '@core/projects/services/ThumbnailGenerator';
 import { ProjectFromEditorStateBuilder } from '@core/projects/services/ProjectFromEditorStateBuilder';
+import { ProjectOpenTelemetryReporter } from '@core/projects/services/ProjectOpenTelemetryReporter';
 import { EditorStateUnsavedWorkPolicy } from '@core/projects/services/EditorStateUnsavedWorkPolicy';
 import { CreateProjectAction } from '@core/projects/actions/CreateProjectAction';
 import { SaveProjectAction } from '@core/projects/actions/SaveProjectAction';
@@ -129,6 +130,12 @@ export function bootProjects(deps: ProjectsDependencies) {
     deps.storageFootprintProbe,
     'project_video_store_failed',
   );
+  const projectOpenTelemetryReporter = new ProjectOpenTelemetryReporter(
+    deps.store,
+    deps.telemetry.telemetry,
+    deps.errorClassifier,
+    deps.errorTelemetryDescriber,
+  );
   const originalVideoDownloadStore = new OriginalVideoDownloadStore();
   const startOriginalVideoDownload = new StartOriginalVideoDownloadAction(
     deps.store,
@@ -160,6 +167,7 @@ export function bootProjects(deps: ProjectsDependencies) {
         deps.videos.services.compatibilityChecker,
         behindActorTemplateSubstituter,
         projectName,
+        projectOpenTelemetryReporter,
       ),
       delete: new DeleteProjectAction(repository),
       list: new ListProjectsAction(repository),

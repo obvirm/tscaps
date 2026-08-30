@@ -448,6 +448,7 @@ function ProjectOpenFailedBody({
   readonly isMobile: boolean;
 }): ReactElement {
   const fallbackBullets = useEngineFallbackBullets(isMobile);
+  const comesFromServer = useOriginalVideoComesFromServer();
   if (reason === 'storage-full') {
     return (
       <ErrorBody
@@ -467,13 +468,17 @@ function ProjectOpenFailedBody({
       />
     );
   }
+  const bullets = [
+    'Reload the page.',
+    ...(comesFromServer ? ['If it keeps failing, check your internet connection.'] : []),
+    ...fallbackBullets,
+  ];
   return (
     <ErrorBody
-      lead="We weren't able to load this project. A couple of things you can try:"
-      bullets={[
-        'Reload the page.',
-        'If it keeps failing, check your internet connection.',
-      ]}
+      lead={bullets.length === 1
+        ? "We weren't able to open this project. One thing you can try:"
+        : "We weren't able to open this project. A few things you can try:"}
+      bullets={bullets}
     />
   );
 }

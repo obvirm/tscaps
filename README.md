@@ -196,7 +196,7 @@ Tscaps sits in a gap between closed caption editors and general-purpose video ed
 | SRT / VTT import | Via [tscaps.io/tools](https://tscaps.io/tools) | Via tools + editor | Yes | Yes |
 | Subtitle file export | SRT, VTT, ASS, SBV, TXT | Same | Some | Yes |
 | Embeddable engine on npm | Yes | N/A | No | No |
-| Mobile app | No | No | Some | Yes (CapCut) |
+| Mobile app | No (but web works on mobile) | Same | Some | Yes (CapCut) |
 
 **The positioning is framework, not a preset picker.** Closed tools give you a fixed list of looks. Tscaps gives you a gallery of templates you can read, edit, and extend, with editor controls on top and CSS as the escape hatch.
 
@@ -221,7 +221,7 @@ No. The editor has controls for font, size, weight, colour, spacing, animation, 
 Yes. A template is a folder with `template.json` (metadata + editor controls) and `style.scss` (the visual rules). See [templates/AUTHORING.md](templates/AUTHORING.md) for a step-by-step guide and [templates/_docs/](templates/_docs) for the reference.
 
 **Is this the same code as tscaps.io/local?**
-Yes. The local surface at tscaps.io runs the same editor against the same engine, with no server calls. This repository is that surface, self-hostable.
+Almost. Both run the same editor against the same engine. Two differences. First, tscaps.io/local shows some features as locked, with a link to the cloud version; this repository omits those features, so nothing in the UI mentions the hosted product. Second, tscaps.io/local sends anonymous usage events; this repository has no telemetry.
 
 **Does it work on mobile?**
 The editor loads on mobile. In-browser Whisper transcription is slow on phones: a 60-second clip can take a few minutes on a mid-range device. Export is also slower. For mobile, [tscaps.io](https://tscaps.io) runs transcription server-side.

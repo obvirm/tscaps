@@ -33,7 +33,7 @@ const RAIL_LIST_CLASS =
   + 'shrink-0 bg-surface-0';
 
 const CONTENT_CLASS =
-  'sidebar-scroll flex-1 overflow-y-auto min-h-0 -mr-2 pr-2 outline-none '
+  'thin-scroll flex-1 overflow-y-auto min-h-0 -mr-2 pr-2 outline-none '
   + '[scrollbar-width:thin] [scrollbar-color:rgb(var(--color-fg-faint)/0.25)_transparent]';
 
 /**

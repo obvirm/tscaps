@@ -94,12 +94,12 @@ const RAIL_LIST_CLASS =
 const SIDEBAR_CARD_CLASS =
   'relative flex flex-col lg:flex-row h-full min-h-0 bg-surface-1 border border-edge-medium rounded-lg shadow-sm overflow-hidden';
 
-// `sidebar-scroll` paints the WebKit thumb (see `globals.css`); the inline
+// `thin-scroll` paints the WebKit thumb (see `globals.css`); the inline
 // `scrollbar-*` utilities cover Firefox. `-mr-2 pr-2` extends the scroll
 // container 8px past the panel padding and pushes content 8px back, so the
 // thumb has visual breathing room from the controls.
 const SIDEBAR_CONTENT_CLASS =
-  'sidebar-scroll flex-1 overflow-y-auto min-h-0 -mr-2 pr-2 outline-none ' +
+  'thin-scroll flex-1 overflow-y-auto min-h-0 -mr-2 pr-2 outline-none ' +
   '[scrollbar-width:thin] [scrollbar-color:rgb(var(--color-fg-faint)/0.25)_transparent]';
 
 const ICON_SIZE = 22;

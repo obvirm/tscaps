@@ -38,7 +38,8 @@ const OVERLAY_BASE =
   'data-[state=open]:animate-fade-in data-[state=closed]:animate-fade-out';
 
 const CONTENT_BASE =
-  'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-h-[90vh] overflow-y-auto ' +
+  'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-h-[85vh] overflow-y-auto ' +
+  'thin-scroll [scrollbar-width:thin] [scrollbar-color:rgb(var(--color-fg-faint)/0.25)_transparent] ' +
   'bg-surface-2 border border-edge-subtle rounded-md shadow-md ' +
   'p-6 flex flex-col gap-4 focus:outline-none ' +
   'data-[state=open]:animate-fade-in data-[state=closed]:animate-fade-out';

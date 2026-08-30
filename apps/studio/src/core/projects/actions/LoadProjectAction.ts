@@ -11,6 +11,7 @@ import type { StartOriginalVideoDownloadAction } from '@core/projects/actions/St
 import type { OriginalVideoDownloadStore } from '@core/projects/store/OriginalVideoDownloadStore';
 import type { VideoCompatibilityChecker } from '@core/videos/domain/VideoCompatibilityChecker';
 import type { BehindActorTemplateSubstituter } from '@core/person-segmentation/services/BehindActorTemplateSubstituter';
+import type { ProjectOpenTelemetryReporter } from '@core/projects/services/ProjectOpenTelemetryReporter';
 
 /**
  * Outcome of {@link LoadProjectAction.execute}.
@@ -79,6 +80,7 @@ export class LoadProjectAction {
     private readonly compatibilityChecker: VideoCompatibilityChecker,
     private readonly behindActorSubstituter: BehindActorTemplateSubstituter,
     private readonly projectName: ProjectName,
+    private readonly telemetryReporter: ProjectOpenTelemetryReporter,
   ) {}
 
   async execute(projectId: string, signal?: AbortSignal): Promise<LoadProjectResult> {
@@ -86,11 +88,32 @@ export class LoadProjectAction {
     this.downloadStore.reset();
     const substituted = new Set<string>();
     const unsubscribe = this.templateSubstitutionNotifier.subscribe((id) => { substituted.add(id); });
+    const startedAt = Date.now();
     try {
-      return await this.loadUnderSubscription(projectId, substituted, signal);
+      const result = await this.loadUnderSubscription(projectId, substituted, signal);
+      this.reportOutcome(result, Date.now() - startedAt);
+      return result;
+    } catch (cause) {
+      // An abort is the caller navigating away, not a failure. Counting
+      // one would report every project the reader opened and left as a
+      // project that refused to open.
+      if (!signal?.aborted) this.telemetryReporter.reportFailed(cause, Date.now() - startedAt);
+      throw cause;
     } finally {
       unsubscribe();
     }
+  }
+
+  private reportOutcome(result: LoadProjectResult, elapsedMs: number): void {
+    if (result.unsupportedTemplateIds.length > 0) {
+      this.telemetryReporter.reportBlockedByTemplates(result.unsupportedTemplateIds.length, elapsedMs);
+      return;
+    }
+    if (!result.videoRecovered) {
+      this.telemetryReporter.reportVideoRecoveryOffered(elapsedMs);
+      return;
+    }
+    this.telemetryReporter.reportOpened(result.substitutedTemplateIds.length, elapsedMs);
   }
 
   private async loadUnderSubscription(

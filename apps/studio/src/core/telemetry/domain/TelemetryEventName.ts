@@ -18,6 +18,10 @@ export type TelemetryEventName =
   | 'video_rejected_over_cap'
   | 'handoff_recovery_offered'
   | 'handoff_recovered'
+  | 'project_opened'
+  | 'project_open_failed'
+  | 'project_open_blocked'
+  | 'project_video_recovery_offered'
   | 'template_selected'
   | 'hook_scenes_set'
   | 'role_sheet_created'
@@ -43,4 +47,5 @@ export type TelemetryEventName =
   | 'pricing_viewed'
   | 'pricing_plan_clicked'
   | 'checkout_started'
-  | 'billing_portal_opened';
+  | 'billing_portal_opened'
+  | 'support_opened';
