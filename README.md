@@ -2,7 +2,7 @@
 
 **Add animated captions to any video, in your browser. Free, open source, no account, no upload.**
 
-Tscaps is a client-side subtitle editor for short-form video  (TikTok, Reels, Shorts). Drop a video, transcribe it with in-browser Whisper, pick a template, tune the controls, and export the result with captions burned into the pixels. The video never leaves the browser.
+Tscaps is a client-side subtitle editor for short-form video (TikTok, Reels, Shorts). Drop a video, transcribe it with in-browser Whisper, pick a template, tune the controls, and export the result with captions burned into the pixels. The video never leaves the browser.
 
 Every caption template is CSS. You can pick one from the gallery and tune it with the editor controls (font, size, colour, timing, animation). Or open the CSS tab and write whatever you want. The controls are the surface; CSS is the escape hatch that keeps the door open.
 
@@ -26,6 +26,11 @@ Each of these is a caption template that ships in the repository. All rendered b
 </table>
 
 <video src="https://github.com/user-attachments/assets/4b1e3e38-13fa-4e33-8756-4b30c67203d8" autoplay loop muted playsinline></video>
+
+> [!NOTE]
+> Every clip on this page was made with the hosted version at [tscaps.io](https://tscaps.io). There, an LLM reads the transcript and tags some words or phrases. For example, it can tag entities, words to emphasize, the hook of the video, and more. The templates style then the words using these tags, which are referenced as CSS classes.
+>
+> The local version has the same tagging system, but it doesn't use an LLM, so these semantic tags are not applied automatically. You can still achieve the same result though, since you can manually tag any word.
 
 ## Features
 
