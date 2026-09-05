@@ -28,6 +28,14 @@ try {
     await page.waitForFunction(() => typeof window.renderE2E === 'function', null, { timeout: 120000 });
     const takumiOk = await page.evaluate(() => window.takumiProbe());
     console.log(`renderE2E exposed, takumi smoke PNG bytes: ${takumiOk}`);
+    const pico = await page.evaluate(() => window.picoProbe());
+    console.log(`pico probe: ${pico.bytes} bytes, magic: ${pico.magic}`);
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync('compare/pico-probe.png', Buffer.from(pico.data));
+    const sweep = await page.evaluate(() => window.picoSweep());
+    console.log(`pico sweep failures: ${sweep.failures.length}`);
+    for (const f of sweep.failures) console.log(`  ${f}`);
+    writeFileSync('compare/pico-sweep.png', Buffer.from(sweep.data));
     if (errors.length > 0) throw new Error(`page errors:\n${errors.join('\n')}`);
     console.log('SMOKE OK');
   } finally {

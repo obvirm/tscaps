@@ -1,46 +1,74 @@
 import type { Document } from '@modules/document/Document';
+import type { Section } from '@modules/document/Section';
 import type { Segment } from '@modules/document/Segment';
+import type { Line } from '@modules/document/Line';
+import type { Word } from '@modules/document/Word';
 import type {
   SubtitleFrame,
   SubtitleFrameRenderer,
   SubtitleStyle,
 } from '@modules/rendering/SubtitleFrameRenderer';
 import type { VideoFrameSource } from '@modules/rendering/types/VideoFrameSource';
+import type { WordSplitter } from '@modules/splitting/WordSplitter';
+import { GraphemeWordSplitter } from '@modules/splitting/GraphemeWordSplitter';
 import type { TakumiBitmapDecoder, TakumiRenderFn } from '@modules/rendering/takumi/TakumiRenderFn';
+
+/** Caption ticks step at the source's frame rate up to this cap — same rationale as the MediaBunny painter. */
+const CAPTION_FPS_CAP = 30;
+
+export interface TakumiSubtitleFrameRendererOptions {
+  readonly decode?: TakumiBitmapDecoder;
+  readonly wordSplitter?: WordSplitter;
+  readonly fonts?: ReadonlyArray<unknown>;
+}
 
 /**
  * `SubtitleFrameRenderer` backed by Takumi instead of the browser engine.
  *
  * Image-sequence model: each distinct visual state renders once to a
- * transparent full-frame PNG; the PNG decodes to a bitmap that paints
- * through `SubtitleFrame.draw`, the same contract the MediaBunny painter
- * consumes. Nothing else in the pipeline changes — transcription,
- * splitting, tagging, effects, compositing, and muxing stay stock.
+ * transparent full-frame PNG at the animation-timeline position `timeMs`;
+ * the PNG decodes to a bitmap that paints through `SubtitleFrame.draw`,
+ * the same contract the MediaBunny painter consumes. Nothing else in the
+ * pipeline changes — transcription, splitting, tagging, effects,
+ * compositing, and muxing stay stock.
  *
- * Known gaps versus `BrowserSubtitleFrameRenderer` (fidelity work, not
- * architecture work):
- * - dedup key is active-segment ids + word states. Time-driven CSS
- *   (`--word-being-narrated-starts`, keyframes, mount animations) and
- *   SVG-filter state are not fingerprinted;
- * - alignment maps onto a row-direction flex root; absolute
- *   `verticalOffset`/`horizontalOffset` anchors are approximated;
+ * The emitted markup mirrors the browser path's `wrapper → segment →
+ * lines → words/letters` shape with the same state classes and the same
+ * engine-written timing variables (`CssVariable`), computed from the
+ * `Document` model directly, so time-driven template CSS (letter
+ * karaoke, `visibility` keyframes) resolves per timestamp.
+ *
+ * Known gaps versus `BrowserSubtitleFrameRenderer`:
+ * - word order is model order with spaces; bidi fragment reordering and
+ *   cursive joining detection are not applied (Latin scripts unaffected);
+ * - decorations are not emitted (Whisper-produced documents have none);
  * - `videoFrame.required` styles are rejected — no video-frame binding;
- * - fonts are whatever Takumi is given (built-in Latin fallback unless
- *   `fonts` are supplied); `CssResourceEmbedder` inlining is not wired;
- * - container-query units (`cqw`/`cqh`) and other Chrome-only CSS render
- *   as Takumi's ~160-property subset dictates.
+ * - container-query units (`cqw`/`cqh`), CSS counters, and `:has()` depend
+ *   on Takumi's subset; callers pre-resolve what they can into `css` vars.
+ *
+ * Memory model: every tile is one full-frame bitmap, so tiles are cached
+ * only inside a single `getFrames` call (the batch that owns them, exactly
+ * what the interface promises) and released afterwards. A cross-batch
+ * cache would pin one 720p+ RGBA bitmap per animation slot — gigabytes
+ * over a full video — and starves `createImageBitmap` to death.
  */
 export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
+  private readonly decode: TakumiBitmapDecoder;
+  private readonly wordSplitter: WordSplitter;
+  private readonly fonts: ReadonlyArray<unknown> | undefined;
   private doc: Document | null = null;
   private styles: Record<string, SubtitleStyle> = {};
   private width = 0;
   private height = 0;
-  private readonly cache = new Map<string, SubtitleFrame>();
 
   constructor(
     private readonly render: TakumiRenderFn,
-    private readonly decode: TakumiBitmapDecoder = defaultDecode,
-  ) {}
+    options: TakumiSubtitleFrameRendererOptions = {},
+  ) {
+    this.decode = options.decode ?? defaultDecode;
+    this.wordSplitter = options.wordSplitter ?? new GraphemeWordSplitter();
+    this.fonts = options.fonts;
+  }
 
   async open(
     doc: Document,
@@ -61,7 +89,6 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
     this.styles = { ...styles };
     this.width = width;
     this.height = height;
-    this.cache.clear();
   }
 
   async getMaxTilesPerBatch(): Promise<number> {
@@ -73,55 +100,64 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
     if (!this.doc || timestamps.length === 0) return timestamps.map(() => null);
     // Prefix semantics per the interface: cover timestamps until the
     // picture budget runs out; the caller advances by the returned length.
-    // Cached pictures cost no budget.
+    // Dedup lives inside this call only — see the class memory model.
     const maxTiles = await this.getMaxTilesPerBatch();
     const keys = timestamps.map((t) => this.cacheKey(t));
+    const tiles = new Map<string, SubtitleFrame>();
     let end = 0;
     const toRender = new Map<string, number>();
     for (; end < timestamps.length; end++) {
       const key = keys[end]!;
       if (key === null) continue;
-      if (this.cache.has(key) || toRender.has(key)) continue;
+      const cached = tiles.get(key);
+      if (cached !== undefined || toRender.has(key)) continue;
       if (toRender.size >= maxTiles) break;
       toRender.set(key, end);
     }
     await Promise.all(
       [...toRender.entries()].map(async ([key, i]) => {
         const frame = await this.renderAt(timestamps[i]!);
-        if (frame) this.cache.set(key, frame);
+        if (frame) tiles.set(key, frame);
       }),
     );
     const covered = end === 0 ? 1 : end;
     return timestamps.slice(0, covered).map((_, i) => {
       const key = keys[i]!;
       if (key === null) return null;
-      return this.cache.get(key) ?? null;
+      return tiles.get(key) ?? null;
     });
   }
 
   close(): void {
     this.doc = null;
     this.styles = {};
-    this.cache.clear();
   }
 
   private cacheKey(t: number): string | null {
-    const active = this.doc!.getActiveSegments(t);
+    const doc = this.doc!;
+    const active = doc.getActiveSegments(t);
     if (active.length === 0) return null;
-    // State-only key matches what buildNode emits (state classes, no
-    // time-relative vars). See class doc for what this leaves out.
-    return active
+    // Frame-slot quantum plus visual state: animation progress inside one
+    // 1/30s slot is imperceptible, matching the pipeline's caption fps cap.
+    const quantum = Math.round(t * CAPTION_FPS_CAP) / CAPTION_FPS_CAP;
+    const states = active
       .map((seg) => `${seg.id}:${seg.getWords().map((w) => w.getState(t)).join(',')}`)
       .sort()
       .join('|');
+    return `${quantum.toFixed(3)}@${states}`;
   }
 
   private async renderAt(t: number): Promise<SubtitleFrame | null> {
-    const active = this.doc!.getActiveSegments(t);
-    if (active.length === 0) return null;
-    const node = this.buildNode(active, t);
+    const node = this.buildNode(t);
+    if (node === null) return null;
     const css = this.buildCss();
-    const png = await this.render(node, { width: this.width, height: this.height, css });
+    const png = await this.render(node, {
+      width: this.width,
+      height: this.height,
+      css,
+      timeMs: Math.round(t * 1000),
+      ...(this.fonts !== undefined ? { fonts: this.fonts } : {}),
+    });
     const bitmap = await this.decode(png);
     return {
       draw: (ctx, dx, dy, dWidth, dHeight) => {
@@ -132,55 +168,99 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
 
   private buildCss(): string[] {
     // Row-direction flex root: justify-content runs horizontally,
-    // align-items runs vertically.
+    // align-items runs vertically. The anchor offset becomes root padding
+    // in PX on the anchor side — CSS percentage padding resolves against
+    // the width, never the height, so percentages would misplace the box.
+    // bottom o → box bottom edge at o*H → padding-bottom (1-o)*H.
+    // top o → box top edge at o*H → padding-top o*H.
+    const first = Object.values(this.styles)[0];
+    const vertical = first?.alignment.verticalAlign ?? 'bottom';
+    const horizontal = first?.alignment.horizontalAlign ?? 'center';
+    const verticalOffset = first?.alignment.verticalOffset ?? (vertical === 'bottom' ? 1 : 0);
+    const offsetPx = vertical === 'bottom'
+      ? `padding-bottom:${((1 - verticalOffset) * this.height).toFixed(1)}px;`
+      : vertical === 'top'
+        ? `padding-top:${(verticalOffset * this.height).toFixed(1)}px;`
+        : '';
     const positioning = [
-      '.tscaps-takumi-root{width:100%;height:100%;display:flex;',
-      `justify-content:${this.horizontalJustify()};align-items:${this.verticalAlignItems()};`,
+      '.tscaps-takumi-root{width:100%;height:100%;display:flex;box-sizing:border-box;',
+      `justify-content:${horizontal === 'left' || horizontal === 'start' ? 'flex-start' : horizontal === 'right' || horizontal === 'end' ? 'flex-end' : 'center'};`,
+      `align-items:${vertical === 'top' ? 'flex-start' : vertical === 'center' ? 'center' : 'flex-end'};`,
+      offsetPx,
       'background:transparent;}',
       '.tscaps-takumi-caption{max-width:92%;background:transparent;}',
     ].join('');
     return [positioning, ...Object.values(this.styles).map((s) => s.css)];
   }
 
-  private verticalAlignItems(): string {
-    const align = Object.values(this.styles)[0]?.alignment.verticalAlign ?? 'bottom';
-    return align === 'top' ? 'flex-start' : align === 'center' ? 'center' : 'flex-end';
+  private buildNode(t: number): string | null {
+    const doc = this.doc!;
+    const sections = doc.getActiveSections(t);
+    if (sections.length === 0) return null;
+    const roots = sections.map((section) => this.buildSection(section, t)).join('');
+    return `<div class="tscaps-takumi-root">${roots}</div>`;
   }
 
-  private horizontalJustify(): string {
-    const align = Object.values(this.styles)[0]?.alignment.horizontalAlign ?? 'center';
-    return align === 'left' || align === 'start' ? 'flex-start'
-      : align === 'right' || align === 'end' ? 'flex-end'
-      : 'center';
+  private buildSection(section: Section, t: number): string {
+    const style = this.styles[section.kind];
+    const segments = section.segments.filter((seg) => seg.time.contains(t));
+    const indexById = new Map(section.segments.map((seg, i) => [seg.id, i] as const));
+    const parts = segments.map((seg) =>
+      this.buildSegment(seg, t, indexById.get(seg.id) ?? 0, style),
+    );
+    return parts.join('');
   }
 
-  private buildNode(active: Segment[], t: number): string {
-    const captionVars = this.serializeVars(Object.values(this.styles)[0]?.inlineStyles ?? {});
-    const segments = active.map((seg) => this.buildSegment(seg, t)).join('');
-    return `<div class="tscaps-takumi-root"><div class="tscaps-takumi-caption" style="${captionVars}">${segments}</div></div>`;
-  }
-
-  private buildSegment(seg: Segment, t: number): string {
+  private buildSegment(seg: Segment, t: number, indexInSection: number, style: SubtitleStyle | undefined): string {
     const segClasses = escapeAttr(seg.getCssClasses(t).join(' '));
+    const segVars = this.serializeVars(seg.getCssVariables(t, { indexInSection }));
+    const captionVars = this.serializeVars(style?.inlineStyles ?? {});
     const lines = seg.lines
-      .map((line) => {
-        const lineClasses = escapeAttr(line.getCssClasses(t).join(' '));
-        const words = line.words
-          .map((word) => {
-            const wordClasses = escapeAttr(word.getCssClasses(t).join(' '));
-            return `<span class="${wordClasses}">${escapeHtml(word.displayText)}</span>`;
-          })
-          .join(' ');
-        return `<div class="${lineClasses}">${words}</div>`;
-      })
+      .map((line) => this.buildLine(line, t, seg, style))
       .join('');
-    return `<div class="${segClasses}">${lines}</div>`;
+    return `<div class="${segClasses}" style="${segVars}${captionVars}">${lines}</div>`;
+  }
+
+  private buildLine(
+    line: Line,
+    t: number,
+    seg: Segment,
+    style: SubtitleStyle | undefined,
+  ): string {
+    const lineClasses = escapeAttr(line.getCssClasses(t).join(' '));
+    const lineVars = this.serializeVars(line.getCssVariables(t, { segTime: seg.time }));
+    const words = line.words
+      .map((word, indexInLine) => this.buildWord(word, t, seg, indexInLine, style))
+      .join(' ');
+    return `<div class="${lineClasses}" style="direction:ltr;${lineVars}">${words}</div>`;
+  }
+
+  private buildWord(
+    word: Word,
+    t: number,
+    seg: Segment,
+    indexInLine: number,
+    style: SubtitleStyle | undefined,
+  ): string {
+    const wordClasses = escapeAttr(word.getCssClasses(t).join(' '));
+    const wordVars = this.serializeVars(
+      word.getCssVariables(t, { segTime: seg.time, indexInLine }),
+    );
+    if (!style?.rendering.splitWordsIntoLetters) {
+      return `<span class="${wordClasses}" style="${wordVars}">${escapeHtml(word.displayText)}</span>`;
+    }
+    const letters = this.wordSplitter.split(word.displayText);
+    const lettersHtml = letters
+      .map((letter, i) => `<span class="letter" style="--letter-index:${i};">${escapeHtml(letter)}</span>`)
+      .join('');
+    const countVar = `--letter-count:${letters.length};`;
+    return `<span class="${wordClasses}" style="${wordVars}${countVar}">${lettersHtml}</span>`;
   }
 
   private serializeVars(vars: Readonly<Record<string, string>>): string {
     return Object.entries(vars)
       .map(([k, v]) => `${escapeAttr(k)}:${escapeAttr(v)};`)
-      .join(' ');
+      .join('');
   }
 }
 

@@ -14,6 +14,14 @@ export interface TakumiRenderOptions {
   readonly width: number;
   readonly height: number;
   readonly css: ReadonlyArray<string>;
+  /** Animation-timeline position in ms; time-driven template CSS resolves against it. */
+  readonly timeMs: number;
+  /**
+   * Opaque font entries for the Takumi backend (e.g. `googleFonts(...)`
+   * results). `unknown` keeps the engine decoupled from `takumi-js`;
+   * the caller adapts its own font values.
+   */
+  readonly fonts?: ReadonlyArray<unknown>;
 }
 
 export type TakumiRenderFn = (
