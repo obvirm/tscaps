@@ -13,7 +13,7 @@ import {
   type TakumiBitmapDecoder,
 } from '@tscaps/engine';
 import { render } from 'takumi-js';
-import { buildGalleryStyle, gallerySegmentSplitter, galleryEffects, galleryMaxLines, galleryFontFamily, type GalleryTemplateName } from './gallery-style';
+import { buildGalleryStyle, gallerySegmentSplitter, galleryEffects, galleryMaxLines, galleryFontFamily, galleryFontPx, galleryTakumiFallbackCss, type GalleryTemplateName } from './gallery-style';
 
 export type RunnerStyle = 'default' | GalleryTemplateName;
 
@@ -25,6 +25,10 @@ declare global {
     takumiProbe(): Promise<number>;
     picoProbe(): Promise<{ bytes: number; magic: string; data: number[] }>;
     picoSweep(): Promise<{ failures: string[]; data: number[] }>;
+    fontOutlineProbe(fontBytes: number[]): Promise<Record<string, number[]>>;
+    fontFirstProbe(fontBytes: number[]): Promise<Record<string, number[]>>;
+    lokiTextProbe(fontBytes: number[], lines: string[]): Promise<Record<string, number[]>>;
+    cssIsolateProbe(fontBytes: number[]): Promise<Record<string, number[]>>;
   }
 }
 
@@ -111,16 +115,31 @@ function rebuildDocument(json: DocJson): Document {
   return new Document({ sections });
 }
 
-function buildPipeline(video: Blob, style: RunnerStyle, probe: { width: number; height: number }) {
+function buildPipeline(video: Blob, style: RunnerStyle, probe: { width: number; height: number }, takumi: boolean) {
   const builder = new RenderPipelineBuilder().withInputVideo(video);
   if (style !== 'default') {
+    const base = buildGalleryStyle(style, probe.width, probe.height);
+    // The fallback re-expresses SVG-filter outlines as vector strokes for
+    // Takumi only; the browser path keeps the pure template stylesheet.
+    const css = takumi
+      ? `${base.css}\n${galleryTakumiFallbackCss(style, galleryFontPx(style, probe.height))}`
+      : base.css;
     builder
-      .withSubtitleStyle(buildGalleryStyle(style, probe.width, probe.height))
+      .withSubtitleStyle({ ...base, css })
       .withSegmentSplitter(gallerySegmentSplitter(style))
       .withDefaultLineSplitterConfig({ maxLines: galleryMaxLines(style), minLines: 1, maxWidthRatio: 0.72 })
       .withEffects(galleryEffects(style));
   }
   return builder;
+}
+
+async function loadDocumentFont(fontUrl: string | null, style: RunnerStyle): Promise<void> {
+  // The browser renderer paints with page fonts: without this the baseline
+  // silently falls back and stops being a reference. Takumi ignores it.
+  if (fontUrl === null || style === 'default') return;
+  const face = new FontFace(galleryFontFamily(style), `url(${fontUrl})`);
+  await face.load();
+  document.fonts.add(face);
 }
 
 // Full stock pipeline on a real video. The ONLY seam under experiment is
@@ -132,9 +151,11 @@ function buildPipeline(video: Blob, style: RunnerStyle, probe: { width: number; 
 window.renderE2E = async (videoUrl: string, fontUrl: string | null, renderer: 'takumi' | 'browser', style: RunnerStyle) => {
   const inputBlob = await (await fetch(videoUrl)).blob();
   const probe = await probeDimensions(inputBlob);
-  const builder = buildPipeline(inputBlob, style, probe);
+  await loadDocumentFont(fontUrl, style);
+  const takumi = renderer === 'takumi';
+  const builder = buildPipeline(inputBlob, style, probe, takumi);
 
-  if (renderer === 'takumi') {
+  if (takumi) {
     builder.withSubtitleFrameRenderer(new TakumiSubtitleFrameRenderer(takumiAdapter(), await adapterFonts(fontUrl, style)));
   }
   const pipeline = builder.build();
@@ -148,7 +169,7 @@ window.renderE2E = async (videoUrl: string, fontUrl: string | null, renderer: 't
 window.transcribeOnly = async (videoUrl: string, style: RunnerStyle) => {
   const inputBlob = await (await fetch(videoUrl)).blob();
   const probe = await probeDimensions(inputBlob);
-  const builder = buildPipeline(inputBlob, style, probe);
+  const builder = buildPipeline(inputBlob, style, probe, false);
   const pipeline = builder.build();
   const onProgress = (event: PipelineProgressEvent) => console.log(describeProgressEvent(event));
   await pipeline.runTranscriptionStep(onProgress);
@@ -166,8 +187,10 @@ window.transcribeOnly = async (videoUrl: string, style: RunnerStyle) => {
 window.renderFromDocument = async (videoUrl: string, fontUrl: string | null, renderer: 'takumi' | 'browser', style: RunnerStyle, doc: DocJson) => {
   const inputBlob = await (await fetch(videoUrl)).blob();
   const probe = await probeDimensions(inputBlob);
-  const builder = buildPipeline(inputBlob, style, probe);
-  if (renderer === 'takumi') {
+  await loadDocumentFont(fontUrl, style);
+  const takumi = renderer === 'takumi';
+  const builder = buildPipeline(inputBlob, style, probe, takumi);
+  if (takumi) {
     builder.withSubtitleFrameRenderer(new TakumiSubtitleFrameRenderer(takumiAdapter(), await adapterFonts(fontUrl, style)));
   }
   const pipeline = builder.build();
@@ -297,6 +320,113 @@ window.picoSweep = async () => {
   }
   renderer.close();
   return { failures, data: [...lastBytes] };
+};
+
+// Isolates which markup/CSS breaks Komika matching. Each case with and
+// without fonts; the with/without pair must differ iff the font applies.
+window.cssIsolateProbe = async (fontBytes: number[]) => {
+  const root = '.tscaps-takumi-root{width:100%;height:100%;display:flex;justify-content:center;align-items:center;background:transparent;}';
+  const seg = (extra: string) => `.segment{font-family:"Komika Axis",sans-serif;font-size:58px;color:#fff;text-align:center;${extra}}`;
+  const fonts = [{ name: 'Komika Axis', data: new Uint8Array(fontBytes) }];
+  const cases: Record<string, { node: string; css: string }> = {
+    separate: {
+      node: `<div class="tscaps-takumi-root"><div class="segment"><span class="word">but</span> <span class="word">the</span> <span class="word">door</span></div></div>`,
+      css: seg(''),
+    },
+    singlespan: {
+      node: `<div class="tscaps-takumi-root"><div class="segment"><span class="word">but the door</span></div></div>`,
+      css: seg(''),
+    },
+    upper: {
+      node: `<div class="tscaps-takumi-root"><div class="segment"><span class="word">but</span> <span class="word">the</span> <span class="word">door</span></div></div>`,
+      css: seg('text-transform:uppercase;'),
+    },
+    upperSingle: {
+      node: `<div class="tscaps-takumi-root"><div class="segment"><span class="word">but the door</span></div></div>`,
+      css: seg('text-transform:uppercase;'),
+    },
+  };
+  const out: Record<string, number[]> = {};
+  for (const [key, c] of Object.entries(cases)) {
+    for (const withFonts of [false, true]) {
+      const png = await render(c.node, {
+        width: 720,
+        height: 400,
+        css: [root, c.css],
+        ...(withFonts ? { fonts } : {}),
+      });
+      const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+      out[`${key}-${withFonts ? 'withFont' : 'noFont'}`] = [...bytes];
+    }
+  }
+  return out;
+};
+window.lokiTextProbe = async (fontBytes: number[], lines: string[]) => {
+  const inner = lines.map((l) => `<div class="line"><span class="word">${l}</span></div>`).join('');
+  const node = `<div class="tscaps-takumi-root"><div class="segment">${inner}</div></div>`;
+  const root = '.tscaps-takumi-root{width:100%;height:100%;display:flex;justify-content:center;align-items:center;background:transparent;}';
+  const base = `.segment{font-family:"Komika Axis",sans-serif;font-size:57.6px;letter-spacing:0.02em;text-transform:uppercase;color:#fff;text-align:center;} .word{margin:0 0.16em;}`;
+  const fonts = [{ name: 'Komika Axis', data: new Uint8Array(fontBytes) }];
+  const out: Record<string, number[]> = {};
+  for (const key of ['noFont', 'withFont']) {
+    const png = await render(node, {
+      width: 720,
+      height: 400,
+      css: [root, base],
+      ...(key === 'noFont' ? {} : { fonts }),
+    });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out[key] = [...bytes];
+  }
+  return out;
+};
+
+// Order test: Komika render FIRST in a fresh page, fallback second.
+window.fontFirstProbe = async (fontBytes: number[]) => {
+  const root = '.tscaps-takumi-root{width:100%;height:100%;display:flex;justify-content:center;align-items:center;background:transparent;}';
+  const css = `.segment{font-family:"Komika Axis",sans-serif;font-size:58px;color:#fff;text-align:center;}`;
+  const node = `<div class="tscaps-takumi-root"><div class="segment"><span class="word">but</span> <span class="word">the</span> <span class="word">door</span></div></div>`;
+  const fonts = [{ name: 'Komika Axis', data: new Uint8Array(fontBytes) }];
+  const out: Record<string, number[]> = {};
+  for (const withFonts of [true, false]) {
+    const png = await render(node, {
+      width: 720,
+      height: 400,
+      css: [root, css],
+      ...(withFonts ? { fonts } : {}),
+    });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out[withFonts ? 'first-withFont' : 'second-noFont'] = [...bytes];
+  }
+  return out;
+};
+// custom font, (b) Komika bytes, (c) Komika + -webkit-text-stroke,
+// (d) Komika + stacked text-shadow. Returns PNG bytes per variant.
+window.fontOutlineProbe = async (fontBytes: number[]) => {
+  const node = `<div class="tscaps-takumi-root"><div class="segment"><div class="line"><span class="word">BUT</span> <span class="word being-narrated">THE</span> <span class="word">DOOR</span></div></div></div>`;
+  const root = '.tscaps-takumi-root{width:100%;height:100%;display:flex;justify-content:center;align-items:center;background:transparent;}';
+  const base = `.segment{font-family:"Komika Axis",sans-serif;font-size:58px;color:#fff;text-align:center;} .being-narrated{color:#ffea00;}`;
+  const fonts = fontBytes.length > 0
+    ? [{ name: 'Komika Axis', data: new Uint8Array(fontBytes) }]
+    : undefined;
+  const variants: Record<string, string> = {
+    noFont: base,
+    withFont: base,
+    stroke: `${base} .word{-webkit-text-stroke:2px #000;paint-order:stroke fill;}`,
+    shadow: `${base} .word{text-shadow:-2px 0 0 #000,2px 0 0 #000,0 -2px 0 #000,0 2px 0 #000,-2px -2px 0 #000,2px 2px 0 #000,-2px 2px 0 #000,2px -2px 0 #000;}`,
+  };
+  const out: Record<string, number[]> = {};
+  for (const [key, css] of Object.entries(variants)) {
+    const png = await render(node, {
+      width: 720,
+      height: 400,
+      css: [root, css],
+      ...(key === 'noFont' ? {} : { fonts: fonts as never[] }),
+    });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out[key] = [...bytes];
+  }
+  return out;
 };
 
 function probeDimensions(blob: Blob): Promise<{ width: number; height: number }> {

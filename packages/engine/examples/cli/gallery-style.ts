@@ -5,6 +5,9 @@ import {
   GapFreeEffect,
   SmartPunctuationEffect,
   RemovePunctuationEffect,
+  SvgFilterDefinitionsParser,
+  SvgFilterBundle,
+  SvgFilterScope,
   type Effect,
   type SegmentSplitter,
   type SubtitleStyle,
@@ -13,6 +16,7 @@ import picoTemplate from '../../../../templates/pico/template.json';
 import picoCss from '../../../../templates/pico/style.build.css?raw';
 import lokiTemplate from '../../../../templates/loki/template.json';
 import lokiCss from '../../../../templates/loki/style.build.css?raw';
+import lokiFilters from '../../../../templates/loki/filters.build.svg?raw';
 
 export type GalleryTemplateName = 'pico' | 'loki';
 
@@ -38,9 +42,9 @@ interface TemplateJson {
   effects: ReadonlyArray<{ type: string; enabled: boolean }>;
 }
 
-const TEMPLATES: Record<GalleryTemplateName, { json: TemplateJson; css: string }> = {
-  pico: { json: picoTemplate as unknown as TemplateJson, css: picoCss },
-  loki: { json: lokiTemplate as unknown as TemplateJson, css: lokiCss },
+const TEMPLATES: Record<GalleryTemplateName, { json: TemplateJson; css: string; filters: string | null }> = {
+  pico: { json: picoTemplate as unknown as TemplateJson, css: picoCss, filters: null },
+  loki: { json: lokiTemplate as unknown as TemplateJson, css: lokiCss, filters: lokiFilters },
 };
 
 // Boundary char tables copied from the studio descriptor that resolves them
@@ -67,6 +71,48 @@ export function galleryFontFamilyCss(name: GalleryTemplateName): string {
 /** Display family (matches the loaded font's registered name). */
 export function galleryFontFamily(name: GalleryTemplateName): string {
   return name === 'pico' ? 'JetBrains Mono' : 'Komika Axis';
+}
+
+/** Resolved display font size in px at the render height. */
+export function galleryFontPx(name: GalleryTemplateName, height: number): number {
+  return TEMPLATES[name].json.typography.fontSize * (height / 100);
+}
+
+/**
+ * Takumi-only fallback CSS, appended AFTER the template stylesheet.
+ * Templates draw outlines/glows through `filter: url(#id)` SVG filters,
+ * which exist only in the browser pipeline (SvgFilterBundle). Takumi
+ * ignores `filter: url()`, so without this the text ships naked. The
+ * fallback re-expresses the same controls as vector stroke + drop-shadow,
+ * which Takumi does rasterize; the browser path never sees it.
+ */
+export function galleryTakumiFallbackCss(name: GalleryTemplateName, fontPx: number): string {
+  const { json } = TEMPLATES[name];
+  if (!json || !/filter\s*:[^;]*url\(#/.test(TEMPLATES[name].css)) return '';
+  const controls = new Map<string, string>();
+  for (const control of json.styleControls) {
+    if (control.type === 'toggle') {
+      const on = String(control.default) === 'true';
+      controls.set(control.id, on ? (control.valueOn ?? '') : (control.valueOff ?? ''));
+    } else {
+      controls.set(control.id, String(control.default));
+    }
+  }
+  const outlineColor = controls.get('outline-color') || '#000000';
+  // Filter vars are em by construction: the SVG markup appends the unit
+  // itself (radius="var(--tscaps-outline-thickness, 0.125)em"), so the raw
+  // control numbers always multiply by the font size — NOT px as written.
+  const thicknessPx = Number(controls.get('outline-thickness') || '0') * fontPx;
+  const shadowColor = controls.get('shadow-color') || '#000000';
+  const shadowDistance = Number(controls.get('filter-shadow-distance') || '0') * fontPx;
+  const shadowBlur = Number(controls.get('filter-shadow-blur') || '0') * fontPx;
+  return [
+    '.segment{filter:none;}',
+    `.word{-webkit-text-stroke:${thicknessPx.toFixed(2)}px ${outlineColor};paint-order:stroke fill;}`,
+    shadowDistance > 0 || shadowBlur > 0
+      ? `.segment{filter:drop-shadow(${shadowDistance.toFixed(2)}px ${shadowDistance.toFixed(2)}px ${shadowBlur.toFixed(2)}px ${shadowColor});}`
+      : '',
+  ].join('');
 }
 
 export function galleryMaxLines(name: GalleryTemplateName): number {
@@ -110,7 +156,7 @@ export function gallerySegmentSplitter(name: GalleryTemplateName): SegmentSplitt
 // Takumi has no container context, so the same arithmetic happens up front:
 // cqh = height/100, cqw = width/100.
 export function buildGalleryStyle(name: GalleryTemplateName, width: number, height: number): SubtitleStyle {
-  const { json, css: rawCss } = TEMPLATES[name];
+  const { json, css: rawCss, filters } = TEMPLATES[name];
   const cqh = height / 100;
   const cqw = width / 100;
   const px = (value: string): string =>
@@ -157,5 +203,25 @@ export function buildGalleryStyle(name: GalleryTemplateName, width: number, heig
       padding: null,
       textDirection: 'ltr',
     },
+    // Real filter bodies for the browser path (Takumi ignores svgFilters
+    // and uses galleryTakumiFallbackCss instead). Raw control values: the
+    // engine's length resolver converts em/cqh at render time.
+    ...(filters === null ? {} : { svgFilters: buildFilterBundle(filters, controls, galleryFontPxFromTypo(typo, height), height) }),
   };
+}
+
+function galleryFontPxFromTypo(typo: TemplateJson['typography'], height: number): number {
+  return typo.fontSize * (height / 100);
+}
+
+function buildFilterBundle(filtersSvg: string, controls: Map<string, string>, fontPx: number, height: number): SvgFilterBundle {
+  const definitions = new SvgFilterDefinitionsParser().parse(filtersSvg);
+  const entries: Array<readonly [string, string]> = [...controls].map(
+    ([id, value]) => [`--tscaps-${id}`, value] as const,
+  );
+  const scope = SvgFilterScope.fromEntries(entries);
+  return new SvgFilterBundle(definitions, {
+    scopeAt: () => scope,
+    lengthFactorsAt: () => ({ pxPerEm: fontPx, pxPerCqh: height / 100 }),
+  });
 }
