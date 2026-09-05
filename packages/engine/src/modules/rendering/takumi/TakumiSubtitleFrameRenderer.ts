@@ -173,15 +173,22 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
     // the width, never the height, so percentages would misplace the box.
     // bottom o → box bottom edge at o*H → padding-bottom (1-o)*H.
     // top o → box top edge at o*H → padding-top o*H.
+    // bottom o → box bottom edge at o*H → padding-bottom (1-o)*H.
+    // top o → box top edge at o*H → padding-top o*H.
+    // center o → box center at o*H: with centered flex layout that is
+    // padding-top (2o-1)*H (o ≥ 1/2) or padding-bottom (1-2o)*H (o < 1/2).
     const first = Object.values(this.styles)[0];
     const vertical = first?.alignment.verticalAlign ?? 'bottom';
     const horizontal = first?.alignment.horizontalAlign ?? 'center';
     const verticalOffset = first?.alignment.verticalOffset ?? (vertical === 'bottom' ? 1 : 0);
+    const H = this.height;
     const offsetPx = vertical === 'bottom'
-      ? `padding-bottom:${((1 - verticalOffset) * this.height).toFixed(1)}px;`
+      ? `padding-bottom:${((1 - verticalOffset) * H).toFixed(1)}px;`
       : vertical === 'top'
-        ? `padding-top:${(verticalOffset * this.height).toFixed(1)}px;`
-        : '';
+        ? `padding-top:${(verticalOffset * H).toFixed(1)}px;`
+        : verticalOffset >= 0.5
+          ? `padding-top:${((2 * verticalOffset - 1) * H).toFixed(1)}px;`
+          : `padding-bottom:${((1 - 2 * verticalOffset) * H).toFixed(1)}px;`;
     const positioning = [
       '.tscaps-takumi-root{width:100%;height:100%;display:flex;box-sizing:border-box;',
       `justify-content:${horizontal === 'left' || horizontal === 'start' ? 'flex-start' : horizontal === 'right' || horizontal === 'end' ? 'flex-end' : 'center'};`,

@@ -1,28 +1,126 @@
 import {
   RenderPipelineBuilder,
   TakumiSubtitleFrameRenderer,
-  GapFreeEffect,
-  SmartPunctuationEffect,
   Document,
   Section,
   Segment,
   Line,
   Word,
+  Tag,
   TimeFragment,
   type PipelineProgressEvent,
   type TakumiRenderFn,
   type TakumiBitmapDecoder,
 } from '@tscaps/engine';
 import { render } from 'takumi-js';
-import { buildPicoStyle } from './pico-style';
+import { buildGalleryStyle, gallerySegmentSplitter, galleryEffects, galleryMaxLines, galleryFontFamily, type GalleryTemplateName } from './gallery-style';
+
+export type RunnerStyle = 'default' | GalleryTemplateName;
 
 declare global {
   interface Window {
-    renderE2E(videoUrl: string, fontUrl: string | null, renderer: 'takumi' | 'browser', style: 'default' | 'pico'): Promise<void>;
+    renderE2E(videoUrl: string, fontUrl: string | null, renderer: 'takumi' | 'browser', style: RunnerStyle): Promise<void>;
+    transcribeOnly(videoUrl: string, style: RunnerStyle): Promise<DocJson>;
+    renderFromDocument(videoUrl: string, fontUrl: string | null, renderer: 'takumi' | 'browser', style: RunnerStyle, doc: DocJson): Promise<void>;
     takumiProbe(): Promise<number>;
     picoProbe(): Promise<{ bytes: number; magic: string; data: number[] }>;
     picoSweep(): Promise<{ failures: string[]; data: number[] }>;
   }
+}
+
+// JSON form of the post-effects Document: the exact render input, so two
+// renders can share one transcription byte-for-byte. Without pinning,
+// independent Whisper runs differ in words/timings and pollute any
+// renderer comparison with transcription variance.
+interface DocJson {
+  sections: ReadonlyArray<{
+    kind: string;
+    segments: ReadonlyArray<{
+      customTime: { s: number; e: number } | null;
+      effectTime: { s: number; e: number } | null;
+      structureTags: ReadonlyArray<string>;
+      lines: ReadonlyArray<{
+        structureTags: ReadonlyArray<string>;
+        words: ReadonlyArray<{
+          text: string;
+          displayText: string;
+          s: number; e: number;
+          structureTags: ReadonlyArray<string>;
+          semanticTags: ReadonlyArray<string>;
+        }>;
+      }>;
+    }>;
+  }>;
+}
+
+function timeOrNull(t: { start: number; end: number } | null): { s: number; e: number } | null {
+  return t === null ? null : { s: t.start, e: t.end };
+}
+
+function serializeDocument(doc: Document): DocJson {
+  return {
+    sections: doc.sections.map((section) => ({
+      kind: section.kind,
+      segments: section.segments.map((seg) => ({
+        customTime: timeOrNull(seg.customTime),
+        effectTime: timeOrNull(seg.effectTime),
+        structureTags: [...seg.structureTags].map((t) => t.name),
+        lines: seg.lines.map((line) => ({
+          structureTags: [...line.structureTags].map((t) => t.name),
+          words: line.words.map((word) => ({
+            text: word.text,
+            displayText: word.displayText,
+            s: word.time.start,
+            e: word.time.end,
+            structureTags: [...word.structureTags].map((t) => t.name),
+            semanticTags: [...word.semanticTags].map((t) => t.name),
+          })),
+        })),
+      })),
+    })),
+  };
+}
+
+function rebuildDocument(json: DocJson): Document {
+  const frag = (t: { s: number; e: number } | null): TimeFragment | undefined =>
+    t === null ? undefined : new TimeFragment(t.s, t.e);
+  const sections = json.sections.map((section) => {
+    const segments = section.segments.map((seg) => {
+      const lines = seg.lines.map((line) => {
+        const words = line.words.map((word) => new Word({
+          text: word.text,
+          displayText: word.displayText,
+          time: new TimeFragment(word.s, word.e),
+          structureTags: new Set(word.structureTags.map((n) => new Tag(n))),
+          semanticTags: new Set(word.semanticTags.map((n) => new Tag(n))),
+        }));
+        return new Line({
+          structureTags: new Set(line.structureTags.map((n) => new Tag(n))),
+          words,
+        });
+      });
+      return new Segment({
+        lines,
+        structureTags: new Set(seg.structureTags.map((n) => new Tag(n))),
+        customTime: frag(seg.customTime) ?? null,
+        effectTime: frag(seg.effectTime) ?? null,
+      });
+    });
+    return new Section({ kind: section.kind, segments });
+  });
+  return new Document({ sections });
+}
+
+function buildPipeline(video: Blob, style: RunnerStyle, probe: { width: number; height: number }) {
+  const builder = new RenderPipelineBuilder().withInputVideo(video);
+  if (style !== 'default') {
+    builder
+      .withSubtitleStyle(buildGalleryStyle(style, probe.width, probe.height))
+      .withSegmentSplitter(gallerySegmentSplitter(style))
+      .withDefaultLineSplitterConfig({ maxLines: galleryMaxLines(style), minLines: 1, maxWidthRatio: 0.72 })
+      .withEffects(galleryEffects(style));
+  }
+  return builder;
 }
 
 // Full stock pipeline on a real video. The ONLY seam under experiment is
@@ -31,60 +129,13 @@ declare global {
 // and muxing are identical in both runs. Pico applies the real gallery
 // template (template.json controls + compiled CSS + JetBrains Mono),
 // resolved at the render size exactly as the browser would compute it.
-window.renderE2E = async (videoUrl: string, fontUrl: string | null, renderer: 'takumi' | 'browser', style: 'default' | 'pico') => {
+window.renderE2E = async (videoUrl: string, fontUrl: string | null, renderer: 'takumi' | 'browser', style: RunnerStyle) => {
   const inputBlob = await (await fetch(videoUrl)).blob();
   const probe = await probeDimensions(inputBlob);
-  const builder = new RenderPipelineBuilder().withInputVideo(inputBlob);
+  const builder = buildPipeline(inputBlob, style, probe);
 
-  if (style === 'pico') {
-    builder
-      .withSubtitleStyle(buildPicoStyle(probe.width, probe.height))
-      .withDefaultLineSplitterConfig({ maxLines: 3, minLines: 1, maxWidthRatio: 0.72 })
-      .addEffect(new GapFreeEffect())
-      .addEffect(new SmartPunctuationEffect());
-  }
   if (renderer === 'takumi') {
-    // Adapter: engine's injectable signature over takumi-js's union options.
-    // Validates PNG magic so a corrupt/empty backend output fails loud with
-    // its timestamp instead of dying later inside createImageBitmap.
-    const takumiRender: TakumiRenderFn = async (node, options) => {
-      const out = await render(node, {
-        width: options.width,
-        height: options.height,
-        css: [...options.css],
-        timeMs: options.timeMs,
-        ...(options.fonts !== undefined ? { fonts: options.fonts as never[] } : {}),
-      });
-      const bytes = out instanceof Uint8Array ? out : new Uint8Array(out);
-      const isPng = bytes.length > 8 &&
-        bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
-      if (!isPng) {
-        throw new Error(
-          `Takumi returned ${bytes.length} non-PNG bytes at timeMs=${options.timeMs} (node ${node.length} chars)`,
-        );
-      }
-      return bytes;
-    };
-    // Local font bytes (served by the driver): no per-render CDN fetches.
-    const fonts = fontUrl === null
-      ? undefined
-      : [{ name: 'JetBrains Mono', data: new Uint8Array(await (await fetch(fontUrl)).arrayBuffer()) }];
-    const decode: TakumiBitmapDecoder = async (png) => {
-      const blob = new Blob([png as unknown as BlobPart], { type: 'image/png' });
-      try {
-        return await createImageBitmap(blob);
-      } catch (err) {
-        const magic = [...png.slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join(' ');
-        const view = new DataView(png.buffer, png.byteOffset, Math.min(png.byteLength, 33));
-        const ihdr = png.length >= 33
-          ? `w=${view.getUint32(16)} h=${view.getUint32(20)} depth=${view.getUint8(24)} ctype=${view.getUint8(25)}`
-          : 'short';
-        throw new Error(`decode failed: ${png.length} bytes, magic ${magic}, ${ihdr}: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    };
-    builder.withSubtitleFrameRenderer(
-      new TakumiSubtitleFrameRenderer(takumiRender, { ...(fonts === undefined ? {} : { fonts }), decode }),
-    );
+    builder.withSubtitleFrameRenderer(new TakumiSubtitleFrameRenderer(takumiAdapter(), await adapterFonts(fontUrl, style)));
   }
   const pipeline = builder.build();
   const result = await pipeline.run((event) => console.log(describeProgressEvent(event)));
@@ -92,9 +143,84 @@ window.renderE2E = async (videoUrl: string, fontUrl: string | null, renderer: 't
   triggerBrowserDownload(result.blob, `output-${renderer}-${style}.mp4`);
 };
 
+// Transcribe + split + tag + effects only; returns the exact render input
+// so later renders can pin it.
+window.transcribeOnly = async (videoUrl: string, style: RunnerStyle) => {
+  const inputBlob = await (await fetch(videoUrl)).blob();
+  const probe = await probeDimensions(inputBlob);
+  const builder = buildPipeline(inputBlob, style, probe);
+  const pipeline = builder.build();
+  const onProgress = (event: PipelineProgressEvent) => console.log(describeProgressEvent(event));
+  await pipeline.runTranscriptionStep(onProgress);
+  await pipeline.runSplittingStep(onProgress);
+  pipeline.runStructuralTaggingStep(onProgress);
+  await pipeline.runSemanticTaggingStep(onProgress);
+  pipeline.runEffectsStep(onProgress);
+  const doc = pipeline.getDocument();
+  if (!doc) throw new Error('No document after pipeline steps');
+  return serializeDocument(doc);
+};
+
+// Render a pinned document: identical bytes in, identical captions out,
+// whichever renderer paints them.
+window.renderFromDocument = async (videoUrl: string, fontUrl: string | null, renderer: 'takumi' | 'browser', style: RunnerStyle, doc: DocJson) => {
+  const inputBlob = await (await fetch(videoUrl)).blob();
+  const probe = await probeDimensions(inputBlob);
+  const builder = buildPipeline(inputBlob, style, probe);
+  if (renderer === 'takumi') {
+    builder.withSubtitleFrameRenderer(new TakumiSubtitleFrameRenderer(takumiAdapter(), await adapterFonts(fontUrl, style)));
+  }
+  const pipeline = builder.build();
+  pipeline.setDocument(rebuildDocument(doc));
+  const result = await pipeline.runRenderingStep((event) => console.log(describeProgressEvent(event)));
+  if (result.blob === null) throw new Error('Pipeline returned no blob');
+  triggerBrowserDownload(result.blob, `output-${renderer}-${style}-pinned.mp4`);
+};
+
+function takumiAdapter(): TakumiRenderFn {
+  // Adapter: engine's injectable signature over takumi-js's union options.
+  // Validates PNG magic so a corrupt/empty backend output fails loud with
+  // its timestamp instead of dying later inside createImageBitmap.
+  return async (node, options) => {
+    const out = await render(node, {
+      width: options.width,
+      height: options.height,
+      css: [...options.css],
+      timeMs: options.timeMs,
+      ...(options.fonts !== undefined ? { fonts: options.fonts as never[] } : {}),
+    });
+    const bytes = out instanceof Uint8Array ? out : new Uint8Array(out);
+    const isPng = bytes.length > 8 &&
+      bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47;
+    if (!isPng) {
+      throw new Error(
+        `Takumi returned ${bytes.length} non-PNG bytes at timeMs=${options.timeMs} (node ${node.length} chars)`,
+      );
+    }
+    return bytes;
+  };
+}
+
+async function adapterFonts(fontUrl: string | null, style: RunnerStyle) {
+  // Local font bytes (served by the driver): no per-render CDN fetches.
+  const fonts = fontUrl === null || style === 'default'
+    ? undefined
+    : [{ name: galleryFontFamily(style), data: new Uint8Array(await (await fetch(fontUrl)).arrayBuffer()) }];
+  const decode: TakumiBitmapDecoder = async (png) => {
+    const blob = new Blob([png as unknown as BlobPart], { type: 'image/png' });
+    try {
+      return await createImageBitmap(blob);
+    } catch (err) {
+      const magic = [...png.slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join(' ');
+      throw new Error(`decode failed: ${png.length} bytes, magic ${magic}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+  return { ...(fonts === undefined ? {} : { fonts }), decode };
+}
+
 // One Pico frame through the style path (built-in font; network-free).
 window.picoProbe = async () => {
-  const style = buildPicoStyle(720, 1280);
+  const style = buildGalleryStyle('pico', 720, 1280);
   const node = `<div class="tscaps-takumi-root"><div class="tscaps-takumi-caption"><div class="segment"><div class="line"><span class="word">Uji</span> <span class="word">coba</span></div></div></div></div>`;
   const png = await render(node, {
     width: 720,
@@ -118,7 +244,7 @@ window.takumiProbe = async () => {
 // Edge-case sweep through the REAL renderer: letters, empty text,
 // zero-duration words, multi-line, multi-section. Reports failures.
 window.picoSweep = async () => {
-  const style = buildPicoStyle(720, 1280);
+  const style = buildGalleryStyle('pico', 720, 1280);
   let lastBytes: Uint8Array = new Uint8Array();
   const takumiRender: TakumiRenderFn = async (node, options) => {
     const out = await render(node, {
