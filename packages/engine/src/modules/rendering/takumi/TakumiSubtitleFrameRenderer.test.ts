@@ -122,4 +122,26 @@ describe('TakumiSubtitleFrameRenderer', () => {
     expect(await renderer.getMaxTilesPerBatch()).toBeLessThanOrEqual(8);
     renderer.close();
   });
+
+  it('emits one layer by default and two coinciding layers with layeredOutline', async () => {
+    for (const layeredOutline of [false, true]) {
+      const render = vi.fn(renderStub());
+      const renderer = new TakumiSubtitleFrameRenderer(render, {
+        decode: async () => stubBitmap,
+        layeredOutline,
+      });
+      await renderer.open(doc(), { default: style() }, 1280, 720);
+      await renderer.getFrames([0.1]);
+      const call = render.mock.calls[0];
+      expect(call).toBeDefined();
+      const [node] = call!;
+      const layers = node.split('tscaps-takumi-layer').length - 1;
+      expect(layers).toBe(layeredOutline ? 2 : 1);
+      if (layeredOutline) {
+        expect(node).toContain('tscaps-takumi-outline');
+        expect(node).toContain('tscaps-takumi-fill');
+      }
+      renderer.close();
+    }
+  });
 });

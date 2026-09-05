@@ -20,6 +20,15 @@ export interface TakumiSubtitleFrameRendererOptions {
   readonly decode?: TakumiBitmapDecoder;
   readonly wordSplitter?: WordSplitter;
   readonly fonts?: ReadonlyArray<unknown>;
+  /**
+   * Emit the caption subtree twice — a hollow outline layer under an
+   * intact fill layer — mirroring an SVG `dilate + merge` filter for
+   * backends that cannot run `filter: url()`. The caller pairs this with
+   * CSS that makes the outline layer transparent-filled and stroked;
+   * without that CSS the two layers coincide exactly and the output is
+   * unchanged apart from render cost.
+   */
+  readonly layeredOutline?: boolean;
 }
 
 /**
@@ -56,6 +65,7 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
   private readonly decode: TakumiBitmapDecoder;
   private readonly wordSplitter: WordSplitter;
   private readonly fonts: ReadonlyArray<unknown> | undefined;
+  private readonly layeredOutline: boolean;
   private doc: Document | null = null;
   private styles: Record<string, SubtitleStyle> = {};
   private width = 0;
@@ -68,6 +78,7 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
     this.decode = options.decode ?? defaultDecode;
     this.wordSplitter = options.wordSplitter ?? new GraphemeWordSplitter();
     this.fonts = options.fonts;
+    this.layeredOutline = options.layeredOutline ?? false;
   }
 
   async open(
@@ -167,16 +178,17 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
   }
 
   private buildCss(): string[] {
-    // Row-direction flex root: justify-content runs horizontally,
-    // align-items runs vertically. The anchor offset becomes root padding
-    // in PX on the anchor side — CSS percentage padding resolves against
-    // the width, never the height, so percentages would misplace the box.
+    // Row-direction flex roots: justify-content runs horizontally,
+    // align-items runs vertically. The anchor offset becomes padding in PX
+    // on the anchor side — CSS percentage padding resolves against the
+    // width, never the height, so percentages would misplace the box.
     // bottom o → box bottom edge at o*H → padding-bottom (1-o)*H.
     // top o → box top edge at o*H → padding-top o*H.
-    // bottom o → box bottom edge at o*H → padding-bottom (1-o)*H.
-    // top o → box top edge at o*H → padding-top o*H.
-    // center o → box center at o*H: with centered flex layout that is
-    // padding-top (2o-1)*H (o ≥ 1/2) or padding-bottom (1-2o)*H (o < 1/2).
+    // center o → box center at o*H → padding-top (2o-1)*H / padding-bottom
+    // (1-2o)*H whichever side the anchor leans to.
+    //
+    // Layers (see layeredOutline) each carry the full positioning so the
+    // outline and fill copies coincide exactly.
     const first = Object.values(this.styles)[0];
     const vertical = first?.alignment.verticalAlign ?? 'bottom';
     const horizontal = first?.alignment.horizontalAlign ?? 'center';
@@ -190,7 +202,8 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
           ? `padding-top:${((2 * verticalOffset - 1) * H).toFixed(1)}px;`
           : `padding-bottom:${((1 - 2 * verticalOffset) * H).toFixed(1)}px;`;
     const positioning = [
-      '.tscaps-takumi-root{width:100%;height:100%;display:flex;box-sizing:border-box;',
+      '.tscaps-takumi-root{position:relative;width:100%;height:100%;background:transparent;}',
+      '.tscaps-takumi-layer{position:absolute;left:0;top:0;width:100%;height:100%;display:flex;box-sizing:border-box;',
       `justify-content:${horizontal === 'left' || horizontal === 'start' ? 'flex-start' : horizontal === 'right' || horizontal === 'end' ? 'flex-end' : 'center'};`,
       `align-items:${vertical === 'top' ? 'flex-start' : vertical === 'center' ? 'center' : 'flex-end'};`,
       offsetPx,
@@ -204,8 +217,14 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
     const doc = this.doc!;
     const sections = doc.getActiveSections(t);
     if (sections.length === 0) return null;
-    const roots = sections.map((section) => this.buildSection(section, t)).join('');
-    return `<div class="tscaps-takumi-root">${roots}</div>`;
+    const inner = sections.map((section) => this.buildSection(section, t)).join('');
+    if (!this.layeredOutline) {
+      return `<div class="tscaps-takumi-root"><div class="tscaps-takumi-layer"><div class="tscaps-takumi-caption">${inner}</div></div></div>`;
+    }
+    return `<div class="tscaps-takumi-root">` +
+      `<div class="tscaps-takumi-layer tscaps-takumi-outline"><div class="tscaps-takumi-caption">${inner}</div></div>` +
+      `<div class="tscaps-takumi-layer tscaps-takumi-fill"><div class="tscaps-takumi-caption">${inner}</div></div>` +
+      `</div>`;
   }
 
   private buildSection(section: Section, t: number): string {

@@ -51,6 +51,14 @@ try {
       writeFileSync(`compare/iso2-${key}.png`, Buffer.from(data));
     }
     console.log('isolate done');
+    const outlines = await page.evaluate((bytes) => window.outlineVariantsProbe(bytes), fontBytes);
+    for (const [key, data] of Object.entries(outlines)) {
+      writeFileSync(`compare/outline-${key}.png`, Buffer.from(data));
+      console.log(`compare/outline-${key}.png: ${data.length} bytes`);
+    }
+    const layered = await page.evaluate((bytes) => window.layeredProbe(bytes), fontBytes);
+    writeFileSync('compare/layered.png', Buffer.from(layered));
+    console.log(`compare/layered.png: ${layered.length} bytes`);
     if (errors.length > 0) throw new Error(`page errors:\n${errors.join('\n')}`);
     console.log('FONT PROBE OK');
   } finally {

@@ -79,16 +79,27 @@ export function galleryFontPx(name: GalleryTemplateName, height: number): number
 }
 
 /**
- * Takumi-only fallback CSS, appended AFTER the template stylesheet.
- * Templates draw outlines/glows through `filter: url(#id)` SVG filters,
- * which exist only in the browser pipeline (SvgFilterBundle). Takumi
- * ignores `filter: url()`, so without this the text ships naked. The
- * fallback re-expresses the same controls as vector stroke + drop-shadow,
- * which Takumi does rasterize; the browser path never sees it.
+ * Whether the template draws through `filter: url(#id)` SVG filters.
+ * Takumi cannot run those; such templates need the layered outline
+ * (hollow stroked copy under the intact fill) plus the fallback below.
+ */
+export function galleryUsesSvgFilter(name: GalleryTemplateName): boolean {
+  return /filter\s*:[^;]*url\(#/.test(TEMPLATES[name].css);
+}
+
+/**
+ * Takumi-only fallback CSS, appended AFTER the template stylesheet for the
+ * layered outline model (engine `layeredOutline: true`): the outline copy
+ * paints hollow stroked text, the fill copy paints intact text on top —
+ * exactly the SVG `dilate + merge` structure. The browser path never sees it.
+ *
+ * feMorphology dilate grows the alpha OUTWARD by radius r; a CSS stroke
+ * straddles the edge, so the outline copy uses width 2r — its inner half
+ * hides under the fill copy, leaving r outside. Derived, not tuned.
  */
 export function galleryTakumiFallbackCss(name: GalleryTemplateName, fontPx: number): string {
   const { json } = TEMPLATES[name];
-  if (!json || !/filter\s*:[^;]*url\(#/.test(TEMPLATES[name].css)) return '';
+  if (!galleryUsesSvgFilter(name)) return '';
   const controls = new Map<string, string>();
   for (const control of json.styleControls) {
     if (control.type === 'toggle') {
@@ -101,16 +112,21 @@ export function galleryTakumiFallbackCss(name: GalleryTemplateName, fontPx: numb
   const outlineColor = controls.get('outline-color') || '#000000';
   // Filter vars are em by construction: the SVG markup appends the unit
   // itself (radius="var(--tscaps-outline-thickness, 0.125)em"), so the raw
-  // control numbers always multiply by the font size — NOT px as written.
-  const thicknessPx = Number(controls.get('outline-thickness') || '0') * fontPx;
+  // control numbers always multiply by the font size.
+  // feMorphology dilate grows the alpha OUTWARD by radius r. A CSS stroke
+  // straddles the edge (half in, half out), so the exact equivalent width
+  // is 2r with the fill repainted on top via paint-order. No tuning knob:
+  // this is derived from the template, not chosen.
+  const dilatePx = Number(controls.get('outline-thickness') || '0') * fontPx;
+  const thicknessPx = 2 * dilatePx;
   const shadowColor = controls.get('shadow-color') || '#000000';
   const shadowDistance = Number(controls.get('filter-shadow-distance') || '0') * fontPx;
   const shadowBlur = Number(controls.get('filter-shadow-blur') || '0') * fontPx;
   return [
     '.segment{filter:none;}',
-    `.word{-webkit-text-stroke:${thicknessPx.toFixed(2)}px ${outlineColor};paint-order:stroke fill;}`,
+    `.tscaps-takumi-outline span{color:transparent !important;-webkit-text-stroke:${thicknessPx.toFixed(2)}px ${outlineColor};}`,
     shadowDistance > 0 || shadowBlur > 0
-      ? `.segment{filter:drop-shadow(${shadowDistance.toFixed(2)}px ${shadowDistance.toFixed(2)}px ${shadowBlur.toFixed(2)}px ${shadowColor});}`
+      ? `.tscaps-takumi-outline{filter:drop-shadow(${shadowDistance.toFixed(2)}px ${shadowDistance.toFixed(2)}px ${shadowBlur.toFixed(2)}px ${shadowColor});}`
       : '',
   ].join('');
 }

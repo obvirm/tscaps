@@ -13,7 +13,7 @@ import {
   type TakumiBitmapDecoder,
 } from '@tscaps/engine';
 import { render } from 'takumi-js';
-import { buildGalleryStyle, gallerySegmentSplitter, galleryEffects, galleryMaxLines, galleryFontFamily, galleryFontPx, galleryTakumiFallbackCss, type GalleryTemplateName } from './gallery-style';
+import { buildGalleryStyle, gallerySegmentSplitter, galleryEffects, galleryMaxLines, galleryFontFamily, galleryFontPx, galleryTakumiFallbackCss, galleryUsesSvgFilter, type GalleryTemplateName } from './gallery-style';
 
 export type RunnerStyle = 'default' | GalleryTemplateName;
 
@@ -25,9 +25,11 @@ declare global {
     takumiProbe(): Promise<number>;
     picoProbe(): Promise<{ bytes: number; magic: string; data: number[] }>;
     picoSweep(): Promise<{ failures: string[]; data: number[] }>;
+    layeredProbe(fontBytes: number[]): Promise<number[]>;
     fontOutlineProbe(fontBytes: number[]): Promise<Record<string, number[]>>;
     fontFirstProbe(fontBytes: number[]): Promise<Record<string, number[]>>;
     lokiTextProbe(fontBytes: number[], lines: string[]): Promise<Record<string, number[]>>;
+    outlineVariantsProbe(fontBytes: number[]): Promise<Record<string, number[]>>;
     cssIsolateProbe(fontBytes: number[]): Promise<Record<string, number[]>>;
   }
 }
@@ -156,7 +158,12 @@ window.renderE2E = async (videoUrl: string, fontUrl: string | null, renderer: 't
   const builder = buildPipeline(inputBlob, style, probe, takumi);
 
   if (takumi) {
-    builder.withSubtitleFrameRenderer(new TakumiSubtitleFrameRenderer(takumiAdapter(), await adapterFonts(fontUrl, style)));
+    const { fonts, decode } = await adapterFonts(fontUrl, style);
+    builder.withSubtitleFrameRenderer(new TakumiSubtitleFrameRenderer(takumiAdapter(), {
+      ...(fonts === undefined ? {} : { fonts }),
+      decode,
+      layeredOutline: style !== 'default' && galleryUsesSvgFilter(style),
+    }));
   }
   const pipeline = builder.build();
   const result = await pipeline.run((event) => console.log(describeProgressEvent(event)));
@@ -191,7 +198,12 @@ window.renderFromDocument = async (videoUrl: string, fontUrl: string | null, ren
   const takumi = renderer === 'takumi';
   const builder = buildPipeline(inputBlob, style, probe, takumi);
   if (takumi) {
-    builder.withSubtitleFrameRenderer(new TakumiSubtitleFrameRenderer(takumiAdapter(), await adapterFonts(fontUrl, style)));
+    const { fonts, decode } = await adapterFonts(fontUrl, style);
+    builder.withSubtitleFrameRenderer(new TakumiSubtitleFrameRenderer(takumiAdapter(), {
+      ...(fonts === undefined ? {} : { fonts }),
+      decode,
+      layeredOutline: style !== 'default' && galleryUsesSvgFilter(style),
+    }));
   }
   const pipeline = builder.build();
   pipeline.setDocument(rebuildDocument(doc));
@@ -322,6 +334,41 @@ window.picoSweep = async () => {
   return { failures, data: [...lastBytes] };
 };
 
+// Layered outline through the REAL renderer: hollow stroked copy under
+// intact fill, Loki CSS + fallback. Returns one frame's PNG bytes.
+window.layeredProbe = async (fontBytes: number[]) => {
+  const style = buildGalleryStyle('loki', 720, 1280);
+  const fallback = galleryTakumiFallbackCss('loki', galleryFontPx('loki', 1280));
+  const fonts = [{ name: 'Komika Axis', data: new Uint8Array(fontBytes) }];
+  let captured: Uint8Array = new Uint8Array();
+  const takumiRender: TakumiRenderFn = async (node, options) => {
+    const out = await render(node, {
+      width: options.width,
+      height: options.height,
+      css: [...options.css],
+      timeMs: options.timeMs,
+      ...(options.fonts !== undefined ? { fonts: options.fonts as never[] } : {}),
+    });
+    captured = out instanceof Uint8Array ? out : new Uint8Array(out);
+    return captured;
+  };
+  const w = (text: string, s: number, e: number) => new Word({ text, time: new TimeFragment(s, e) });
+  const doc = new Document({
+    sections: [new Section({
+      kind: 'loki',
+      segments: [new Segment({
+        lines: [new Line({ words: [w('BUT', 0, 2), w('THE', 0, 2), w('DOOR', 0, 2)] })],
+        customTime: new TimeFragment(0, 2),
+      })],
+    })],
+  });
+  const renderer = new TakumiSubtitleFrameRenderer(takumiRender, { fonts, layeredOutline: true });
+  await renderer.open(doc, { loki: { ...style, css: `${style.css}\n${fallback}` } }, 720, 1280);
+  await renderer.getFrames([0.5]);
+  renderer.close();
+  return [...captured];
+};
+
 // Isolates which markup/CSS breaks Komika matching. Each case with and
 // without fonts; the with/without pair must differ iff the font applies.
 window.cssIsolateProbe = async (fontBytes: number[]) => {
@@ -358,6 +405,29 @@ window.cssIsolateProbe = async (fontBytes: number[]) => {
       const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
       out[`${key}-${withFonts ? 'withFont' : 'noFont'}`] = [...bytes];
     }
+  }
+  return out;
+};
+// Outline width/kind matrix on the real Loki line, Komika loaded.
+// The user judges which matches the template's beast-outline best.
+window.outlineVariantsProbe = async (fontBytes: number[]) => {
+  const node = `<div class="tscaps-takumi-root"><div class="segment"><div class="line"><span class="word">BUT</span> <span class="word being-narrated">THE</span> <span class="word">DOOR</span></div></div></div>`;
+  const root = '.tscaps-takumi-root{width:100%;height:100%;display:flex;justify-content:center;align-items:center;background:#222;}';
+  const base = `.segment{font-family:"Komika Axis",sans-serif;font-size:57.6px;letter-spacing:0.02em;text-transform:uppercase;color:#fff;text-align:center;} .word{margin:0 0.16em;} .being-narrated{color:#ffea00;}`;
+  const fonts = [{ name: 'Komika Axis', data: new Uint8Array(fontBytes) }];
+  const variants: Record<string, string> = {
+    none: base,
+    stroke7: `${base} .word{-webkit-text-stroke:7.2px #000;paint-order:stroke fill;}`,
+    stroke14: `${base} .word{-webkit-text-stroke:14.4px #000;paint-order:stroke fill;}`,
+    stroke7fill: `${base} .word{-webkit-text-stroke:7.2px #000;paint-order:stroke fill markers;}`,
+    hollow7: `${base} .word{color:transparent;-webkit-text-stroke:7.2px #000;}`,
+    hollowFill: `${base} .word{-webkit-text-fill-color:transparent;-webkit-text-stroke:7.2px #000;}`,
+  };
+  const out: Record<string, number[]> = {};
+  for (const [key, css] of Object.entries(variants)) {
+    const png = await render(node, { width: 720, height: 400, css: [root, css], fonts });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out[key] = [...bytes];
   }
   return out;
 };
