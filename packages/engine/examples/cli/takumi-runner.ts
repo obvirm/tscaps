@@ -13,7 +13,7 @@ import {
   type TakumiBitmapDecoder,
 } from '@tscaps/engine';
 import { render } from 'takumi-js';
-import { buildGalleryStyle, gallerySegmentSplitter, galleryEffects, galleryMaxLines, galleryFontFamily, galleryFontPx, galleryTakumiFallbackCss, galleryUsesSvgFilter, type GalleryTemplateName } from './gallery-style';
+import { buildGalleryStyle, gallerySegmentSplitter, galleryEffects, galleryMaxLines, galleryFontFamily, galleryFontPx, galleryTakumiFallbackCss, galleryUsesSvgFilter, galleryTemplateNames, galleryTemplateJson, type GalleryTemplateName } from './gallery-style';
 
 export type RunnerStyle = 'default' | GalleryTemplateName;
 
@@ -25,6 +25,9 @@ declare global {
     takumiProbe(): Promise<number>;
     picoProbe(): Promise<{ bytes: number; magic: string; data: number[] }>;
     picoSweep(): Promise<{ failures: string[]; data: number[] }>;
+    matrixNames(): string[];
+    matrixCase(name: string, t: number): Promise<MatrixCaseResult>;
+    matrixCase(name: string, t: number): Promise<MatrixCaseResult>;
     layeredProbe(fontBytes: number[]): Promise<number[]>;
     fontOutlineProbe(fontBytes: number[]): Promise<Record<string, number[]>>;
     fontFirstProbe(fontBytes: number[]): Promise<Record<string, number[]>>;
@@ -497,6 +500,217 @@ window.fontOutlineProbe = async (fontBytes: number[]) => {
     out[key] = [...bytes];
   }
   return out;
+};
+
+// ---- Template compatibility matrix -------------------------------------
+// One fixed synthetic document rendered per template through BOTH engines
+// at the same instant: Takumi (PNG bytes) and the browser (measured rects
+// with CSS animations frozen at timeMs via the Web Animations API).
+// Viewport must be 720x1280 so browser cqh/cqw resolve to the same numbers
+// the Takumi path pre-resolves to px.
+
+export interface MatrixBrowserWord {
+  rect: { x: number; y: number; w: number; h: number };
+  visibility: string;
+}
+
+export interface MatrixCaseResult {
+  name: string;
+  t: number;
+  takumi: { png: number[] } | { error: string };
+  browser: {
+    segments: ReadonlyArray<{ x: number; y: number; w: number; h: number }>;
+    words: ReadonlyArray<MatrixBrowserWord>;
+    animationCount: number;
+  } | { error: string };
+  font: { family: string; loaded: boolean; browserLoaded: boolean };
+}
+
+let matrixDoc: Document | null = null;
+const matrixFontCache = new Map<string, unknown[]>();
+
+window.matrixNames = () => galleryTemplateNames();
+
+function getMatrixDoc(): Document {
+  if (matrixDoc) return matrixDoc;
+  const w = (text: string, s: number, e: number) => new Word({ text, time: new TimeFragment(s, e) });
+  matrixDoc = new Document({
+    sections: [new Section({
+      kind: 'matrix',
+      segments: [
+        new Segment({
+          lines: [
+            new Line({ words: [w('Pack', 0, 0.5), w('my', 0.5, 1), w('box', 1, 1.5), w('with', 1.5, 2)] }),
+            new Line({ words: [w('five', 0.2, 0.9), w('dozen', 0.9, 1.6), w('liquor', 1.6, 2.2), w('jugs!', 2.2, 2.5)] }),
+          ],
+          customTime: new TimeFragment(0, 2.5),
+        }),
+        new Segment({
+          lines: [new Line({ words: [w('Sphinx', 3, 3.6), w('of', 3.6, 4), w('black', 4, 4.6), w('quartz,', 4.6, 5.2), w('judge', 5.2, 5.5)] })],
+          customTime: new TimeFragment(3, 5.5),
+        }),
+      ],
+    })],
+  });
+  return matrixDoc;
+}
+
+async function matrixFonts(name: string): Promise<{ fonts: unknown[] | undefined; family: string; loaded: boolean; browserLoaded: boolean }> {
+  const family = galleryFontFamily(name);
+  const cached = matrixFontCache.get(family);
+  if (cached !== undefined) return { fonts: cached, family, loaded: true, browserLoaded: true };
+  try {
+    const { googleFonts } = await import('takumi-js/helpers');
+    const fonts = (await googleFonts([{ name: family }])) as unknown[];
+    matrixFontCache.set(family, fonts);
+    // Mirror the same bytes into document.fonts so the browser probe
+    // measures the real typeface too — otherwise every template drifts on
+    // font metrics alone and nothing can go green.
+    let browserLoaded = false;
+    try {
+      const subsets = fonts as unknown as Array<{
+        subsetOf: string;
+        ranges: ReadonlyArray<readonly [number, number]>;
+        data: () => Promise<ArrayBuffer>;
+      }>;
+      const latin = subsets.find((s) => s.ranges.some(([a, b]) => a <= 65 && 65 <= b)) ?? subsets[0];
+      if (latin) {
+        const face = new FontFace(latin.subsetOf, await latin.data());
+        await face.load();
+        document.fonts.add(face);
+        browserLoaded = true;
+      }
+    } catch {
+      // Browser side stays fallback; Takumi side still exact.
+    }
+    return { fonts, family, loaded: true, browserLoaded };
+  } catch {
+    return { fonts: undefined, family, loaded: false, browserLoaded: false };
+  }
+}
+
+/** Zero-size grid anchor mirroring SegmentWrapperRenderer.composeAnchorStyle. */
+function buildGalleryAnchor(name: string): string {
+  const json = (galleryTemplateJson(name) as {
+    alignment: { verticalAlign: string; verticalOffset: number };
+  }).alignment;
+  const yPx = Math.round(json.verticalOffset * 1280);
+  const xPx = Math.round(0.5 * 720);
+  const vGridAlign = json.verticalAlign === 'top' ? 'start' : json.verticalAlign === 'center' ? 'center' : 'end';
+  return `position:absolute;top:${yPx}px;left:${xPx}px;width:0;height:0;display:grid;grid-template:0 / 0;align-items:${vGridAlign};justify-items:center;`;
+}
+
+function ensureMatrixProbe(): HTMLElement {
+  let probe = document.getElementById('matrix-probe');
+  if (!probe) {
+    probe = document.createElement('div');
+    probe.id = 'matrix-probe';
+    probe.setAttribute('style', 'position:fixed;left:0;top:0;width:720px;height:1280px;visibility:hidden;');
+    document.body.appendChild(probe);
+  }
+  return probe;
+}
+
+window.matrixCase = async (name: string, t: number, keepMounted = false): Promise<MatrixCaseResult> => {
+  const doc = getMatrixDoc();
+  // NOTE: styles keyed 'matrix' while sections carry kind 'matrix'.
+  const style = buildGalleryStyle(name, 720, 1280);
+  const styles = { matrix: style };
+  const font = await matrixFonts(name);
+  const layered = galleryUsesSvgFilter(name);
+  // --- Takumi side (production code path) ---
+  let takumi: MatrixCaseResult['takumi'];
+  let captured = { node: '', css: [] as string[] };
+  try {
+    const takumiRender: TakumiRenderFn = async (node, options) => {
+      captured = { node, css: [...options.css] };
+      const out = await render(node, {
+        width: options.width,
+        height: options.height,
+        css: [...options.css],
+        timeMs: options.timeMs,
+        ...(options.fonts !== undefined ? { fonts: options.fonts as never[] } : {}),
+      });
+      return out instanceof Uint8Array ? out : new Uint8Array(out);
+    };
+    const renderer = new TakumiSubtitleFrameRenderer(takumiRender, {
+      ...(font.fonts === undefined ? {} : { fonts: font.fonts }),
+      layeredOutline: layered,
+    });
+    await renderer.open(doc, styles, 720, 1280);
+    const [frame] = await renderer.getFrames([t]);
+    renderer.close();
+    if (!frame) throw new Error('no frame (nothing active)');
+    // Re-render once capturing PNG bytes for the driver to analyze. The
+    // fallback CSS rides only here (browser truth must not see it).
+    const png = await render(captured.node, {
+      width: 720,
+      height: 1280,
+      css: [...captured.css, ...(layered ? [galleryTakumiFallbackCss(name, galleryFontPx(name, 1280))] : [])],
+      timeMs: Math.round(t * 1000),
+      ...(font.fonts === undefined ? {} : { fonts: font.fonts as never[] }),
+    });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    takumi = { png: [...bytes] };
+  } catch (err) {
+    takumi = { error: err instanceof Error ? err.message : String(err) };
+  }
+  // --- Browser side (same node+css, animations frozen at timeMs) ---
+  // Anchored exactly like SegmentWrapperRenderer: a zero-size grid at the
+  // anchor point places the caption without transforms. Without this,
+  // bottom/center templates would sit in static flow (top) while Takumi
+  // honors the anchor — a pure harness artifact, not renderer drift.
+  let browser: MatrixCaseResult['browser'];
+  try {
+    if (captured.node === '') throw new Error('no node captured');
+    const probe = ensureMatrixProbe();
+    probe.innerHTML = '';
+    const anchor = buildGalleryAnchor(name);
+    const styleEl = document.createElement('style');
+    // Neutralize the Takumi root/layer boxes inside the probe: the anchor
+    // owns positioning here, and background on layers would double-paint.
+    // The caption subtree keeps every template class, var, and animation.
+    styleEl.textContent = `${captured.css.join('\n')}\n` +
+      '.tscaps-takumi-root{position:static !important;width:max-content !important;height:auto !important;background:transparent !important;}' +
+      '.tscaps-takumi-layer{position:static !important;width:auto !important;height:auto !important;display:block !important;padding:0 !important;background:transparent !important;}';
+    probe.appendChild(styleEl);
+    const anchorEl = document.createElement('div');
+    anchorEl.setAttribute('style', anchor);
+    anchorEl.innerHTML = captured.node;
+    probe.appendChild(anchorEl);
+    const timeMs = Math.round(t * 1000);
+    let animationCount = 0;
+    for (const anim of probe.getAnimations({ subtree: true })) {
+      animationCount++;
+      try {
+        anim.currentTime = timeMs;
+        anim.pause();
+      } catch {
+        // Non-seekable effect; count only.
+      }
+    }
+    // Force style/layout flush before measuring.
+    void probe.offsetHeight;
+    const segments = [...probe.querySelectorAll('.segment')].map((el) => {
+      const r = (el as HTMLElement).getBoundingClientRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height };
+    });
+    const words = [...probe.querySelectorAll('.word')].slice(0, 24).map((el) => {
+      const r = (el as HTMLElement).getBoundingClientRect();
+      return {
+        rect: { x: r.x, y: r.y, w: r.width, h: r.height },
+        visibility: getComputedStyle(el).visibility,
+      };
+    });
+    browser = { segments, words, animationCount };
+  } catch (err) {
+    browser = { error: err instanceof Error ? err.message : String(err) };
+  }
+  if (!keepMounted) {
+    const probe = document.getElementById('matrix-probe');
+    if (probe) probe.innerHTML = '';
+  }
+  return { name, t, takumi, browser, font: { family: font.family, loaded: font.loaded, browserLoaded: font.browserLoaded } };
 };
 
 function probeDimensions(blob: Blob): Promise<{ width: number; height: number }> {

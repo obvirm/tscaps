@@ -12,13 +12,26 @@ import {
   type SegmentSplitter,
   type SubtitleStyle,
 } from '@tscaps/engine';
-import picoTemplate from '../../../../templates/pico/template.json';
-import picoCss from '../../../../templates/pico/style.build.css?raw';
-import lokiTemplate from '../../../../templates/loki/template.json';
-import lokiCss from '../../../../templates/loki/style.build.css?raw';
-import lokiFilters from '../../../../templates/loki/filters.build.svg?raw';
 
-export type GalleryTemplateName = 'pico' | 'loki';
+// Whole gallery, loaded statically: JSON + compiled CSS per template, plus
+// the built SVG filters where the template ships them. Page-only module
+// (glob + ?raw need Vite); the Node driver never imports this file.
+const templateJsons = import.meta.glob('../../../../templates/*/template.json', {
+  eager: true,
+  import: 'default',
+}) as Record<string, unknown>;
+const buildCssFiles = import.meta.glob('../../../../templates/*/style.build.css', {
+  eager: true,
+  query: '?raw',
+  import: 'default',
+}) as Record<string, string>;
+const filtersSvgs = import.meta.glob('../../../../templates/*/filters.build.svg', {
+  eager: true,
+  query: '?raw',
+  import: 'default',
+}) as Record<string, string>;
+
+export type GalleryTemplateName = string;
 
 interface TemplateJson {
   typography: {
@@ -30,7 +43,10 @@ interface TemplateJson {
     textAlign?: string;
     textCase?: string;
   };
-  rendering?: { splitWordsIntoLetters?: boolean };
+  rendering?: {
+    splitWordsIntoLetters?: boolean;
+    videoFrame?: { required: boolean; jpegQuality?: number };
+  };
   styleControls: ReadonlyArray<{
     id: string; type?: string; default: unknown; valueOn?: string; valueOff?: string;
   }>;
@@ -38,14 +54,42 @@ interface TemplateJson {
     type: string; mode?: string; maxChars?: number; minChars?: number;
   }>;
   lineSplitter: { type: string; maxLines: number };
-  alignment: { verticalAlign: 'top' | 'center' | 'bottom'; verticalOffset: number };
+  alignment: {
+    verticalAlign: 'top' | 'center' | 'bottom';
+    verticalOffset: number;
+    horizontalAlign?: 'left' | 'center' | 'right' | 'start' | 'end';
+    horizontalOffset?: number;
+  };
   effects: ReadonlyArray<{ type: string; enabled: boolean }>;
 }
 
-const TEMPLATES: Record<GalleryTemplateName, { json: TemplateJson; css: string; filters: string | null }> = {
-  pico: { json: picoTemplate as unknown as TemplateJson, css: picoCss, filters: null },
-  loki: { json: lokiTemplate as unknown as TemplateJson, css: lokiCss, filters: lokiFilters },
-};
+function templateNameOf(path: string): string {
+  const parts = path.split('/');
+  return parts[parts.length - 2]!;
+}
+
+function templateEntry(name: GalleryTemplateName): { json: TemplateJson; css: string; filters: string | null } {
+  const jsonPath = Object.keys(templateJsons).find((p) => templateNameOf(p) === name);
+  if (jsonPath === undefined) throw new Error(`gallery-style: unknown template ${name}`);
+  const cssPath = Object.keys(buildCssFiles).find((p) => templateNameOf(p) === name);
+  if (cssPath === undefined) throw new Error(`gallery-style: no built CSS for ${name}`);
+  const filtersPath = Object.keys(filtersSvgs).find((p) => templateNameOf(p) === name);
+  return {
+    json: templateJsons[jsonPath] as TemplateJson,
+    css: buildCssFiles[cssPath]!,
+    filters: filtersPath === undefined ? null : filtersSvgs[filtersPath]!,
+  };
+}
+
+/** Raw template.json for harness logic that needs fields beyond styles. */
+export function galleryTemplateJson(name: GalleryTemplateName): unknown {
+  return templateEntry(name).json;
+}
+
+/** Every template folder that ships a template.json. */
+export function galleryTemplateNames(): GalleryTemplateName[] {
+  return Object.keys(templateJsons).map(templateNameOf).sort();
+}
 
 // Boundary char tables copied from the studio descriptor that resolves them
 // (apps/studio/.../BoundarySegmentSplitterDescriptor.ts): clause mode splits
@@ -63,19 +107,57 @@ const PRESET_SEPARATORS: Record<string, string[]> = {
 // Score-splitter studio default for an omitted minChars (descriptor defaultConfig).
 const SCORE_MIN_CHARS_DEFAULT = 0;
 
-/** Font family the CSS must name for Takumi to hit the loaded font. */
-export function galleryFontFamilyCss(name: GalleryTemplateName): string {
-  return name === 'pico' ? '"JetBrains Mono", monospace' : '"Komika Axis", sans-serif';
-}
-
 /** Display family (matches the loaded font's registered name). */
 export function galleryFontFamily(name: GalleryTemplateName): string {
-  return name === 'pico' ? 'JetBrains Mono' : 'Komika Axis';
+  const family = templateEntry(name).json.typography.fontFamily;
+  return family.endsWith(' Variable') ? family.slice(0, -' Variable'.length) : family;
+}
+
+/** Font stack the CSS must name for Takumi to hit the loaded font. */
+export function galleryFontFamilyCss(name: GalleryTemplateName): string {
+  const family = galleryFontFamily(name);
+  if (family === 'JetBrains Mono') return '"JetBrains Mono", monospace';
+  return `"${family}", sans-serif`;
 }
 
 /** Resolved display font size in px at the render height. */
 export function galleryFontPx(name: GalleryTemplateName, height: number): number {
-  return TEMPLATES[name].json.typography.fontSize * (height / 100);
+  return templateEntry(name).json.typography.fontSize * (height / 100);
+}
+
+export function galleryMaxLines(name: GalleryTemplateName): number {
+  return templateEntry(name).json.lineSplitter.maxLines;
+}
+
+export function galleryEffects(name: GalleryTemplateName): Effect[] {
+  const out: Effect[] = [];
+  for (const effect of templateEntry(name).json.effects) {
+    if (!effect.enabled) continue;
+    if (effect.type === 'gap_free') out.push(new GapFreeEffect());
+    else if (effect.type === 'smart_punctuation') out.push(new SmartPunctuationEffect());
+    else if (effect.type === 'remove_punctuation') out.push(new RemovePunctuationEffect());
+    else throw new Error(`gallery-style: unknown effect ${effect.type}`);
+  }
+  return out;
+}
+
+export function gallerySegmentSplitter(name: GalleryTemplateName): SegmentSplitter {
+  const parts: SegmentSplitter[] = [];
+  for (const splitter of templateEntry(name).json.segmentSplitters) {
+    if (splitter.type === 'boundary') {
+      parts.push(new BoundarySegmentSplitter({
+        separators: [...(PRESET_SEPARATORS[splitter.mode ?? 'sentence'] ?? PRESET_SEPARATORS['sentence']!)],
+      }));
+    } else if (splitter.type === 'boundary_score_limit_by_chars') {
+      parts.push(new BoundaryScoreLimitByCharsSegmentSplitter({
+        maxChars: splitter.maxChars ?? 40,
+        minChars: splitter.minChars ?? SCORE_MIN_CHARS_DEFAULT,
+      }));
+    } else {
+      throw new Error(`gallery-style: unknown splitter ${splitter.type}`);
+    }
+  }
+  return new CompositeSegmentSplitter(parts);
 }
 
 /**
@@ -84,7 +166,7 @@ export function galleryFontPx(name: GalleryTemplateName, height: number): number
  * (hollow stroked copy under the intact fill) plus the fallback below.
  */
 export function galleryUsesSvgFilter(name: GalleryTemplateName): boolean {
-  return /filter\s*:[^;]*url\(#/.test(TEMPLATES[name].css);
+  return /filter\s*:[^;]*url\(#/.test(templateEntry(name).css);
 }
 
 /**
@@ -98,7 +180,7 @@ export function galleryUsesSvgFilter(name: GalleryTemplateName): boolean {
  * hides under the fill copy, leaving r outside. Derived, not tuned.
  */
 export function galleryTakumiFallbackCss(name: GalleryTemplateName, fontPx: number): string {
-  const { json } = TEMPLATES[name];
+  const { json } = templateEntry(name);
   if (!galleryUsesSvgFilter(name)) return '';
   const controls = new Map<string, string>();
   for (const control of json.styleControls) {
@@ -113,10 +195,6 @@ export function galleryTakumiFallbackCss(name: GalleryTemplateName, fontPx: numb
   // Filter vars are em by construction: the SVG markup appends the unit
   // itself (radius="var(--tscaps-outline-thickness, 0.125)em"), so the raw
   // control numbers always multiply by the font size.
-  // feMorphology dilate grows the alpha OUTWARD by radius r. A CSS stroke
-  // straddles the edge (half in, half out), so the exact equivalent width
-  // is 2r with the fill repainted on top via paint-order. No tuning knob:
-  // this is derived from the template, not chosen.
   const dilatePx = Number(controls.get('outline-thickness') || '0') * fontPx;
   const thicknessPx = 2 * dilatePx;
   const shadowColor = controls.get('shadow-color') || '#000000';
@@ -131,48 +209,13 @@ export function galleryTakumiFallbackCss(name: GalleryTemplateName, fontPx: numb
   ].join('');
 }
 
-export function galleryMaxLines(name: GalleryTemplateName): number {
-  return TEMPLATES[name].json.lineSplitter.maxLines;
-}
-
-export function galleryEffects(name: GalleryTemplateName): Effect[] {
-  const out: Effect[] = [];
-  for (const effect of TEMPLATES[name].json.effects) {
-    if (!effect.enabled) continue;
-    if (effect.type === 'gap_free') out.push(new GapFreeEffect());
-    else if (effect.type === 'smart_punctuation') out.push(new SmartPunctuationEffect());
-    else if (effect.type === 'remove_punctuation') out.push(new RemovePunctuationEffect());
-    else throw new Error(`gallery-style: unknown effect ${effect.type}`);
-  }
-  return out;
-}
-
-export function gallerySegmentSplitter(name: GalleryTemplateName): SegmentSplitter {
-  const parts: SegmentSplitter[] = [];
-  for (const splitter of TEMPLATES[name].json.segmentSplitters) {
-    if (splitter.type === 'boundary') {
-      parts.push(new BoundarySegmentSplitter({
-        separators: [...(PRESET_SEPARATORS[splitter.mode ?? 'sentence'] ?? PRESET_SEPARATORS['sentence']!)] ,
-      }));
-    } else if (splitter.type === 'boundary_score_limit_by_chars') {
-      parts.push(new BoundaryScoreLimitByCharsSegmentSplitter({
-        maxChars: splitter.maxChars ?? 40,
-        minChars: splitter.minChars ?? SCORE_MIN_CHARS_DEFAULT,
-      }));
-    } else {
-      throw new Error(`gallery-style: unknown splitter ${splitter.type}`);
-    }
-  }
-  return new CompositeSegmentSplitter(parts);
-}
-
 // Builds the template as shipped (first variant defaults), with
 // container-query units pre-resolved to px at the render size. The browser
 // resolves cqh/cqw against its subtitle container (the full frame here);
 // Takumi has no container context, so the same arithmetic happens up front:
 // cqh = height/100, cqw = width/100.
 export function buildGalleryStyle(name: GalleryTemplateName, width: number, height: number): SubtitleStyle {
-  const { json, css: rawCss, filters } = TEMPLATES[name];
+  const { json, css: rawCss, filters } = templateEntry(name);
   const cqh = height / 100;
   const cqw = width / 100;
   const px = (value: string): string =>
@@ -199,7 +242,7 @@ export function buildGalleryStyle(name: GalleryTemplateName, width: number, heig
   inlineStyles['--tscaps-letter-spacing'] = `${typo.letterSpacing}em`;
   inlineStyles['--tscaps-word-spacing'] = `${typo.wordSpacing}em`;
   // text-align:start paints left in ltr; spell it out for engines without
-  // logical values. Loki omits textAlign and keeps the CSS fallback.
+  // logical values. Templates that omit textAlign keep the CSS fallback.
   if (typo.textAlign !== undefined) {
     inlineStyles['--tscaps-text-align'] = typo.textAlign === 'start' ? 'left' : typo.textAlign;
   }
@@ -210,12 +253,14 @@ export function buildGalleryStyle(name: GalleryTemplateName, width: number, heig
     alignment: {
       verticalAlign: json.alignment.verticalAlign,
       verticalOffset: json.alignment.verticalOffset,
-      horizontalAlign: 'center',
-      horizontalOffset: 0.5,
+      horizontalAlign: json.alignment.horizontalAlign ?? 'center',
+      horizontalOffset: json.alignment.horizontalOffset ?? 0.5,
     },
     rendering: {
       splitWordsIntoLetters: json.rendering?.splitWordsIntoLetters ?? false,
-      videoFrame: { required: false, jpegQuality: 1 },
+      videoFrame: json.rendering?.videoFrame?.required === true
+        ? { required: true as const, jpegQuality: json.rendering.videoFrame.jpegQuality ?? 0.8 }
+        : { required: false as const, jpegQuality: 1 },
       padding: null,
       textDirection: 'ltr',
     },
