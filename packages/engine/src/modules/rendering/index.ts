@@ -1,5 +1,7 @@
 export type { SubtitleFrameRenderer, SubtitleFrame, SubtitleStyle } from '@modules/rendering/SubtitleFrameRenderer';
 export { BrowserSubtitleFrameRenderer } from '@modules/rendering/BrowserSubtitleFrameRenderer';
+export { TakumiSubtitleFrameRenderer } from '@modules/rendering/takumi/TakumiSubtitleFrameRenderer';
+export type { TakumiRenderFn, TakumiRenderOptions, TakumiBitmapDecoder } from '@modules/rendering/takumi/TakumiRenderFn';
 export { SpriteSheetSizeProbe } from '@modules/rendering/subtitle/SpriteSheetSizeProbe';
 export { ImageDecodeSpriteSheetRasterProbe } from '@modules/rendering/subtitle/ImageDecodeSpriteSheetRasterProbe';
 export type {

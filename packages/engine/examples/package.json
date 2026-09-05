@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@tscaps/engine": "file:.."
+    "@tscaps/engine": "file:..",
+    "takumi-js": "^2.13.5"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
