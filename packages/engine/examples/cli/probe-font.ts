@@ -26,6 +26,16 @@ try {
     await page.waitForFunction(() => typeof window.fontOutlineProbe === 'function', null, { timeout: 120000 });
     const fontBytes = [...readFileSync('E:/project/tscaps/apps/studio/src/styles/fonts/komika-axis.woff2')];
     console.log(`komika bytes: ${fontBytes.length}`);
+    // Loki lines FIRST in the fresh page: noFont here is a true fallback
+    // (later renders share the registered Komika globally).
+    const loki = await page.evaluate(
+      (arg: [number[], string[]]) => window.lokiTextProbe(arg[0], arg[1]),
+      [fontBytes, ['The jump', 'bucket was in']] as [number[], string[]],
+    );
+    for (const [key, data] of Object.entries(loki)) {
+      writeFileSync(`compare/loki2-${key}.png`, Buffer.from(data!));
+      console.log(`compare/loki2-${key}.png: ${data!.length} bytes`);
+    }
     const order = await page.evaluate((bytes) => window.fontFirstProbe(bytes), fontBytes);
     for (const [key, data] of Object.entries(order)) {
       writeFileSync(`compare/order-${key}.png`, Buffer.from(data));
@@ -35,14 +45,6 @@ try {
     for (const [key, data] of Object.entries(variants)) {
       writeFileSync(`compare/font-${key}.png`, Buffer.from(data));
       console.log(`compare/font-${key}.png: ${data.length} bytes`);
-    }
-    const loki = await page.evaluate(
-      ([bytes, lines]: [number[], string[]]) => window.lokiTextProbe(bytes, lines),
-      [fontBytes, ['The jump', 'bucket was in']] as [number[], string[]],
-    );
-    for (const [key, data] of Object.entries(loki)) {
-      writeFileSync(`compare/loki-${key}.png`, Buffer.from(data!));
-      console.log(`compare/loki-${key}.png: ${data.length} bytes`);
     }
     const iso = await page.evaluate((bytes) => window.cssIsolateProbe(bytes), fontBytes);
     for (const [key, data] of Object.entries(iso)) {
