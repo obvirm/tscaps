@@ -16,6 +16,22 @@ import type { TakumiBitmapDecoder, TakumiRenderFn } from '@modules/rendering/tak
 /** Caption ticks step at the source's frame rate up to this cap — same rationale as the MediaBunny painter. */
 const CAPTION_FPS_CAP = 30;
 
+/**
+ * Dynamic font-scale recipe some templates declare as
+ * `--tscaps-font-size-scale: max(1, 1 + (var(--tscaps-dynamic-font-size, D)
+ * - var(--segment-char-count, …)) * F)`. Takumi evaluates max() wrong
+ * (poisoning the value negative and collapsing the whole font-size to
+ * medium), so the renderer computes the scale per segment in JS from the
+ * same formula and emits it inline, where it wins over the stylesheet.
+ * Shapes that do not match this recipe are left alone.
+ */
+const SCALE_RECIPE_RE = /--tscaps-font-size-scale\s*:\s*max\(\s*1\s*,\s*1\s*\+\s*\(\s*var\(--tscaps-dynamic-font-size\s*,\s*([\d.]+)\)\s*-\s*var\(--segment-char-count[^)]*\)\s*\)\s*\*\s*([\d.]+)\s*\)/;
+
+interface ScaleRecipe {
+  readonly baseline: number;
+  readonly factor: number;
+}
+
 export interface TakumiSubtitleFrameRendererOptions {
   readonly decode?: TakumiBitmapDecoder;
   readonly wordSplitter?: WordSplitter;
@@ -70,6 +86,7 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
   private styles: Record<string, SubtitleStyle> = {};
   private width = 0;
   private height = 0;
+  private scaleRecipe: ScaleRecipe | null = null;
 
   constructor(
     private readonly render: TakumiRenderFn,
@@ -100,6 +117,7 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
     this.styles = { ...styles };
     this.width = width;
     this.height = height;
+    this.scaleRecipe = detectScaleRecipe(styles);
   }
 
   async getMaxTilesPerBatch(): Promise<number> {
@@ -179,13 +197,15 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
 
   private buildCss(): string[] {
     // Row-direction flex roots: justify-content runs horizontally,
-    // align-items runs vertically. The anchor offset becomes padding in PX
-    // on the anchor side — CSS percentage padding resolves against the
-    // width, never the height, so percentages would misplace the box.
+    // align-items runs vertically. Anchor offsets become padding in PX on
+    // the anchor side — CSS percentage padding resolves against the width,
+    // never the height, so percentages would misplace the box.
     // bottom o → box bottom edge at o*H → padding-bottom (1-o)*H.
     // top o → box top edge at o*H → padding-top o*H.
     // center o → box center at o*H → padding-top (2o-1)*H / padding-bottom
-    // (1-2o)*H whichever side the anchor leans to.
+    // (1-2o)*H whichever side the anchor leans to. Same mirrored on the
+    // horizontal axis with W. Reading sides (start/end) read as screen
+    // sides for ltr content, matching the engine resolver for ltr.
     //
     // Layers (see layeredOutline) each carry the full positioning so the
     // outline and fill copies coincide exactly.
@@ -193,20 +213,32 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
     const vertical = first?.alignment.verticalAlign ?? 'bottom';
     const horizontal = first?.alignment.horizontalAlign ?? 'center';
     const verticalOffset = first?.alignment.verticalOffset ?? (vertical === 'bottom' ? 1 : 0);
+    const horizontalOffset = first?.alignment.horizontalOffset ?? 0.5;
     const H = this.height;
-    const offsetPx = vertical === 'bottom'
+    const W = this.width;
+    const vPad = vertical === 'bottom'
       ? `padding-bottom:${((1 - verticalOffset) * H).toFixed(1)}px;`
       : vertical === 'top'
         ? `padding-top:${(verticalOffset * H).toFixed(1)}px;`
         : verticalOffset >= 0.5
           ? `padding-top:${((2 * verticalOffset - 1) * H).toFixed(1)}px;`
           : `padding-bottom:${((1 - 2 * verticalOffset) * H).toFixed(1)}px;`;
+    const hSide = horizontal === 'left' || horizontal === 'start' ? 'left'
+      : horizontal === 'right' || horizontal === 'end' ? 'right' : 'center';
+    const hPad = hSide === 'left'
+      ? `padding-left:${(horizontalOffset * W).toFixed(1)}px;`
+      : hSide === 'right'
+        ? `padding-right:${((1 - horizontalOffset) * W).toFixed(1)}px;`
+        : horizontalOffset >= 0.5
+          ? `padding-left:${((2 * horizontalOffset - 1) * W).toFixed(1)}px;`
+          : `padding-right:${((1 - 2 * horizontalOffset) * W).toFixed(1)}px;`;
     const positioning = [
       '.tscaps-takumi-root{position:relative;width:100%;height:100%;background:transparent;}',
       '.tscaps-takumi-layer{position:absolute;left:0;top:0;width:100%;height:100%;display:flex;box-sizing:border-box;',
-      `justify-content:${horizontal === 'left' || horizontal === 'start' ? 'flex-start' : horizontal === 'right' || horizontal === 'end' ? 'flex-end' : 'center'};`,
+      `justify-content:${hSide === 'left' ? 'flex-start' : hSide === 'right' ? 'flex-end' : 'center'};`,
       `align-items:${vertical === 'top' ? 'flex-start' : vertical === 'center' ? 'center' : 'flex-end'};`,
-      offsetPx,
+      vPad,
+      hPad,
       'background:transparent;}',
       '.tscaps-takumi-caption{max-width:92%;background:transparent;}',
     ].join('');
@@ -241,10 +273,18 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
     const segClasses = escapeAttr(seg.getCssClasses(t).join(' '));
     const segVars = this.serializeVars(seg.getCssVariables(t, { indexInSection }));
     const captionVars = this.serializeVars(style?.inlineStyles ?? {});
+    const scaleVar = this.scaleVarFor(seg);
     const lines = seg.lines
       .map((line) => this.buildLine(line, t, seg, style))
       .join('');
-    return `<div class="${segClasses}" style="${segVars}${captionVars}">${lines}</div>`;
+    return `<div class="${segClasses}" style="${segVars}${captionVars}${scaleVar}">${lines}</div>`;
+  }
+
+  private scaleVarFor(seg: Segment): string {
+    if (!this.scaleRecipe) return '';
+    const charCount = [...seg.getText()].length;
+    const scale = Math.max(1, 1 + (this.scaleRecipe.baseline - charCount) * this.scaleRecipe.factor);
+    return `--tscaps-font-size-scale:${scale.toFixed(4)};`;
   }
 
   private buildLine(
@@ -289,10 +329,19 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
       .join('');
   }
 }
-
 async function defaultDecode(png: Uint8Array): Promise<CanvasImageSource> {
   const blob = new Blob([png as unknown as BlobPart], { type: 'image/png' });
   return createImageBitmap(blob);
+}
+
+function detectScaleRecipe(styles: Readonly<Record<string, SubtitleStyle>>): ScaleRecipe | null {
+  for (const style of Object.values(styles)) {
+    const match = SCALE_RECIPE_RE.exec(style.css);
+    if (match?.[1] !== undefined && match?.[2] !== undefined) {
+      return { baseline: Number(match[1]), factor: Number(match[2]) };
+    }
+  }
+  return null;
 }
 
 function escapeHtml(text: string): string {

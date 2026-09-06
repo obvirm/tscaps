@@ -42,6 +42,7 @@ interface TemplateJson {
     wordSpacing: number;
     textAlign?: string;
     textCase?: string;
+    italic?: boolean;
   };
   rendering?: {
     splitWordsIntoLetters?: boolean;
@@ -160,13 +161,65 @@ export function gallerySegmentSplitter(name: GalleryTemplateName): SegmentSplitt
   return new CompositeSegmentSplitter(parts);
 }
 
-/**
- * Whether the template draws through `filter: url(#id)` SVG filters.
- * Takumi cannot run those; such templates need the layered outline
- * (hollow stroked copy under the intact fill) plus the fallback below.
- */
 export function galleryUsesSvgFilter(name: GalleryTemplateName): boolean {
   return /filter\s*:[^;]*url\(#/.test(templateEntry(name).css);
+}
+
+/**
+ * Whether the stylesheet paints text through `background-clip: text`
+ * (transparent ink showing a gradient). Takumi drops such text entirely
+ * whenever the gradient is non-trivial (calc() angles) or nested past a
+ * plain child run — proven by probe, not assumed. The fallback below
+ * flattens it; the browser path never sees it.
+ */
+export function galleryUsesClipText(name: GalleryTemplateName): boolean {
+  return /background-clip\s*:\s*text/.test(templateEntry(name).css);
+}
+
+/**
+ * Takumi-only flattening for gradient-clipped text: every rule that clips
+ * its background to the text keeps layout, keeps animations, but paints
+ * the gradient's first stop as a solid color. The sheen is lost;
+ * visibility, position, timing, and font survive. Browser path untouched.
+ */
+export function galleryClipTextFallback(name: GalleryTemplateName): string {
+  const { css } = templateEntry(name);
+  if (!galleryUsesClipText(name)) return '';
+  // Protect @keyframes blocks (nested braces) from the rule splitter.
+  const kept: string[] = [];
+  const withoutKeyframes = css.replace(/@keyframes[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, (m) => {
+    kept.push(m);
+    return `\0${kept.length - 1}\0`;
+  });
+  const out = withoutKeyframes.split('}').map((rule) => {
+    if (!/background-clip\s*:\s*text/.test(rule)) return `${rule}}`;
+    const first = firstGradientStop(rule);
+    let fixed = rule
+      .replace(/(-webkit-)?background-clip\s*:[^;]+;/g, '')
+      .replace(/background-image\s*:[^;]+;/g, 'background-image:none;');
+    if (first !== null) fixed = fixed.replace(/color\s*:\s*transparent\s*;/g, `color:${first};`);
+    return `${fixed}}`;
+  }).join('');
+  return out.replace(/\0(\d+)\0/g, (_, i: string) => kept[Number(i)] ?? '');
+}
+
+/** First color token of the first gradient function in the rule, if any. */
+function firstGradientStop(rule: string): string | null {
+  const m = /(linear|radial|conic)-gradient\s*\(/g.exec(rule);
+  if (!m || m.index === undefined) return null;
+  let depth = 0;
+  let inner = '';
+  for (let i = m.index + m[0].length; i < rule.length; i++) {
+    const ch = rule[i]!;
+    if (ch === '(') depth++;
+    else if (ch === ')') {
+      if (depth === 0) break;
+      depth--;
+    }
+    inner += ch;
+  }
+  const color = /#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|hsla?\([^)]*\)/.exec(inner);
+  return color ? color[0] : null;
 }
 
 /**
@@ -214,7 +267,21 @@ export function galleryTakumiFallbackCss(name: GalleryTemplateName, fontPx: numb
 // resolves cqh/cqw against its subtitle container (the full frame here);
 // Takumi has no container context, so the same arithmetic happens up front:
 // cqh = height/100, cqw = width/100.
-export function buildGalleryStyle(name: GalleryTemplateName, width: number, height: number): SubtitleStyle {
+//
+// With opts.takumi, the style is baked for Takumi instead of the browser:
+// SVG-filter outlines become layered vector strokes, gradient-clipped text
+// (which Takumi drops) flattens to its first stop, and a wanted italic in
+// a family without an italic face pins to normal (Takumi cannot
+// faux-italicize like browsers do). One function owns every Takumi/browser
+// divergence so the two can never drift apart unnoticed.
+export function buildGalleryStyle(
+  name: GalleryTemplateName,
+  width: number,
+  height: number,
+  opts?: { takumi?: boolean; hasItalic?: boolean },
+): SubtitleStyle {
+  const takumi = opts?.takumi ?? false;
+  const hasItalic = opts?.hasItalic ?? true;
   const { json, css: rawCss, filters } = templateEntry(name);
   const cqh = height / 100;
   const cqw = width / 100;
@@ -247,8 +314,17 @@ export function buildGalleryStyle(name: GalleryTemplateName, width: number, heig
     inlineStyles['--tscaps-text-align'] = typo.textAlign === 'start' ? 'left' : typo.textAlign;
   }
   if (typo.textCase !== undefined) inlineStyles['--tscaps-text-transform'] = typo.textCase;
+  // The template's italic flag, when present, is authoritative — except for
+  // Takumi in a family without an italic face (see above).
+  if (typo.italic === true) {
+    inlineStyles['--tscaps-font-style'] = takumi && !hasItalic ? 'normal' : 'italic';
+  }
+  const fontPx = typo.fontSize * cqh;
+  const css = px(rawCss) + (takumi
+    ? `\n${galleryTakumiFallbackCss(name, fontPx)}\n${galleryClipTextFallback(name)}`
+    : '');
   return {
-    css: px(rawCss),
+    css,
     inlineStyles,
     alignment: {
       verticalAlign: json.alignment.verticalAlign,

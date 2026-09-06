@@ -27,10 +27,34 @@ try {
     await page.waitForFunction(() => typeof window.matrixCase === 'function', null, { timeout: 180000 });
     const dump = await page.evaluate(async ([n, stamp]: [string, number]) => {
       const res = await window.matrixCase(n, stamp, true);
+      const nodeHtml = await window.matrixNode(n, stamp);
       if (!('segments' in res.browser)) return { browser: res.browser };
       const probe = document.getElementById('matrix-probe');
       const seg = probe?.querySelector('.segment') as HTMLElement | null;
-      const out: Record<string, unknown> = { browser: res.browser };
+      const out: Record<string, unknown> = {
+        browser: res.browser,
+        nodeLength: nodeHtml.length,
+        nodeHead: nodeHtml.slice(0, 2500),
+      };
+      const chain: Record<string, unknown> = {};
+      let el: HTMLElement | null = seg;
+      while (el && el.id !== 'matrix-probe') {
+        const cs = getComputedStyle(el);
+        const r = el.getBoundingClientRect();
+        chain[el.className || el.tagName] = {
+          rect: { x: Math.round(r.x), w: Math.round(r.width) },
+          display: cs.display,
+          width: cs.width,
+          transform: cs.transform,
+        };
+        el = el.parentElement;
+      }
+      out['chain'] = chain;
+      const anims = probe ? [...probe.getAnimations({ subtree: true })].slice(0, 4).map((a) => ({
+        currentTime: a.currentTime,
+        playState: a.playState,
+      })) : [];
+      out['anims'] = anims;
       if (seg) {
         const cs = getComputedStyle(seg);
         out['segment'] = {
@@ -40,16 +64,21 @@ try {
           display: cs.display,
           background: cs.backgroundColor,
         };
-        const words = [...probe!.querySelectorAll('.word')].slice(0, 3).map((el) => {
+        const words = [...probe!.querySelectorAll('.word')].map((el) => {
           const h = el as HTMLElement;
           const c = getComputedStyle(h);
           return { text: h.textContent, rect: h.getBoundingClientRect().toJSON(), fontSize: c.fontSize };
         });
+        const lines = [...probe!.querySelectorAll('.line')].map((el) => {
+          const h = el as HTMLElement;
+          return { rect: h.getBoundingClientRect().toJSON() };
+        });
         out['words'] = words;
+        out['lines'] = lines;
       }
       return out;
     }, [name, t] as [string, number]);
-    console.log(JSON.stringify(dump, null, 1).slice(0, 2000));
+    console.log(JSON.stringify(dump));
   } finally {
     await browser.close();
   }

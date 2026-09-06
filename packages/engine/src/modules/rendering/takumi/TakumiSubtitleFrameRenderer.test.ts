@@ -116,10 +116,55 @@ describe('TakumiSubtitleFrameRenderer', () => {
     ).rejects.toThrow(/video frame/);
   });
 
+  it('maps the horizontal anchor to padding on the anchor side', async () => {
+    const render = vi.fn(renderStub());
+    const renderer = new TakumiSubtitleFrameRenderer(render, { decode: async () => stubBitmap });
+    await renderer.open(
+      doc(),
+      { default: style({ alignment: { verticalAlign: 'bottom', verticalOffset: 0.85, horizontalAlign: 'left', horizontalOffset: 0.06 } }) },
+      1280,
+      720,
+    );
+    await renderer.getFrames([0.1]);
+    const call = render.mock.calls[0];
+    expect(call).toBeDefined();
+    const [, options] = call!;
+    // left anchor at 0.06 of 1280px → 76.8px left padding.
+    expect(options.css.some((s: string) => s.includes('padding-left:76.8px'))).toBe(true);
+    renderer.close();
+  });
+
   it('caps batches because every tile is a full PNG render', async () => {
-    const renderer = new TakumiSubtitleFrameRenderer(renderStub());
+    const render = vi.fn(renderStub());
+    const renderer = new TakumiSubtitleFrameRenderer(render, { decode: async () => stubBitmap });
     await renderer.open(doc(), { default: style() }, 1280, 720);
     expect(await renderer.getMaxTilesPerBatch()).toBeLessThanOrEqual(8);
+    renderer.close();
+  });
+
+  it('computes the dynamic font scale inline instead of trusting max()', async () => {
+    const render = vi.fn(renderStub());
+    const renderer = new TakumiSubtitleFrameRenderer(render, { decode: async () => stubBitmap });
+    const scaleCss = '.segment{--tscaps-font-size-scale:max(1, 1 + (var(--tscaps-dynamic-font-size, 12) - var(--segment-char-count, 999)) * 0.06);}';
+    await renderer.open(doc(), { default: style({ css: scaleCss }) }, 1280, 720);
+    await renderer.getFrames([0.1]);
+    const call = render.mock.calls[0];
+    expect(call).toBeDefined();
+    const [node] = call!;
+    // "hello world" is 11 chars → 1 + (12-11)*0.06 = 1.06.
+    expect(node).toContain('--tscaps-font-size-scale:1.0600;');
+    renderer.close();
+  });
+
+  it('leaves styles without a scale recipe untouched', async () => {
+    const render = vi.fn(renderStub());
+    const renderer = new TakumiSubtitleFrameRenderer(render, { decode: async () => stubBitmap });
+    await renderer.open(doc(), { default: style() }, 1280, 720);
+    await renderer.getFrames([0.1]);
+    const call = render.mock.calls[0];
+    expect(call).toBeDefined();
+    const [node] = call!;
+    expect(node).not.toContain('--tscaps-font-size-scale:');
     renderer.close();
   });
 
