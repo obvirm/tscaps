@@ -13,9 +13,12 @@ import { chromium } from 'playwright';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PACKAGE_ROOT = path.resolve(HERE, '..');
 
-const [clipPath, docPath, outDirArg, only] = process.argv.slice(2);
-if (!clipPath || !docPath) throw new Error('Usage: render-all.ts <clip.mp4> <doc.json> [outDir] [only]');
+const [clipPath, docPath, outDirArg, only, rendererArg] = process.argv.slice(2);
+if (!clipPath || !docPath) throw new Error('Usage: render-all.ts <clip.mp4> <doc.json> [outDir] [only] [takumi|browser]');
 const OUT_DIR = outDirArg ?? path.join(PACKAGE_ROOT, 'output', 'gallery');
+const renderer = rendererArg === 'browser' ? 'browser' : 'takumi';
+const suffix = renderer === 'browser' ? '-browser' : '';
+const FONTS_DIR = path.join(PACKAGE_ROOT, 'input', 'fonts');
 
 const doc = JSON.parse(await readFile(docPath, 'utf8')) as unknown;
 
@@ -29,6 +32,19 @@ const assetServer = createHttpServer((req, res) => {
     res.writeHead(200, { ...headers, 'Content-Type': 'video/mp4', 'Content-Length': size });
     createReadStream(clipPath).pipe(res);
     return;
+  }
+  // Subset files for @font-face embedding (foreignObject raster cannot
+  // see document fonts; the pipeline CSS carries them as URLs).
+  if (req.url !== undefined && req.url.startsWith('/fonts/')) {
+    const file = path.join(FONTS_DIR, path.basename(req.url));
+    try {
+      const fsize = statSync(file).size;
+      res.writeHead(200, { ...headers, 'Content-Type': 'font/woff2', 'Content-Length': fsize });
+      createReadStream(file).pipe(res);
+      return;
+    } catch {
+      // Fall through to 404.
+    }
   }
   res.writeHead(404).end();
 });
@@ -60,7 +76,7 @@ try {
     let done = 0;
     let skipped = 0;
     for (const name of picked) {
-      const outPath = path.join(OUT_DIR, `${name}.mp4`);
+      const outPath = path.join(OUT_DIR, `${name}${suffix}.mp4`);
       if (existsSync(outPath)) {
         console.log(`[${name}] exists, skipping`);
         skipped++;
@@ -89,23 +105,22 @@ async function renderOne(
   outPath: string,
 ): Promise<boolean> {
   const context = await browser.newContext({ acceptDownloads: true });
+  const errors: string[] = [];
   try {
     const page = await context.newPage();
-    const errors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') errors.push(msg.text());
     });
     page.on('pageerror', (err) => errors.push(err.message));
-    page.on('pageerror', (err) => errors.push(err.message));
     await page.goto(pageUrl);
     await page.waitForFunction(() => typeof window.renderGalleryVideo === 'function', null, { timeout: 180000 });
-    console.log(`[${name}] rendering…`);
+    console.log(`[${name}] rendering (${renderer})…`);
     const downloadPromise = page.waitForEvent('download', { timeout: 0 });
     // Guard against unhandled rejection when evaluate throws first and the
     // orphaned waiter rejects on context close.
     downloadPromise.catch(() => undefined);
     try {
-      await page.evaluate(([v, t, d]: [string, string, unknown]) => window.renderGalleryVideo(v, t, d as never), [videoUrl, name, doc]);
+      await page.evaluate(([v, t, d, r]) => window.renderGalleryVideo(v as string, t as string, d as never, r as string), [videoUrl, name, doc, renderer]);
     } catch (err) {
       console.log(`[${name}] SKIP ${err instanceof Error ? err.message.split('\n')[0] : String(err)}`);
       return false;

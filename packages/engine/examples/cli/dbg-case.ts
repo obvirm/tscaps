@@ -28,9 +28,12 @@ try {
     const name = process.argv[2] ?? 'loki';
     const t = Number(process.argv[3] ?? '1.5');
     const probeOnly = process.argv[4] ?? '';
-    const probeName = probeOnly === 'nyxprobe' ? 'nyxWidthProbe' : probeOnly === 'bisect' ? 'nodeBisectProbe' : 'nodeBisectProbe';
+    const probeName = probeOnly === 'nyxprobe' ? 'nyxWidthProbe' : probeOnly === 'bisect' ? 'nodeBisectProbe' : probeOnly === 'font' ? 'fontLoadProbe' : 'nodeBisectProbe';
+    if (probeOnly === 'vfont') {
+      console.log('videofont:', JSON.stringify(await page.evaluate(`(() => window.videoFontProbe('zara'))()`)));
+    }
     if (!probeOnly) {
-      const result = (await page.evaluate(([n, stamp]: [string, number]) => window.matrixCase(n, stamp, true), [name, t])) as unknown as Record<string, unknown>;
+      const result = (await page.evaluate(([n, stamp]) => window.matrixCase(n as string, stamp as number, true), [name, t] as [string, number])) as unknown as Record<string, unknown>;
       const b = result.browser as { segments: unknown; words: unknown; animationCount: number };
       console.log('segments:', JSON.stringify(b.segments));
       console.log('anims:', b.animationCount);
@@ -50,7 +53,7 @@ try {
       })()`);
       console.log('dom:', JSON.stringify(dom));
     }
-    const layers = (await page.evaluate(`(() => window.${probeName}())()`)) as unknown as Record<string, number[]>;
+    const layers = (await page.evaluate(`(() => window.${probeName}('zara'))()`)) as unknown as Record<string, number[]>;
     const { writeFileSync, mkdirSync } = await import('node:fs');
     mkdirSync('compare/matrix', { recursive: true });
     for (const [key, bytes] of Object.entries(layers)) {

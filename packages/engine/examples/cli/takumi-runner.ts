@@ -33,6 +33,8 @@ declare global {
     maxProbe(): Promise<Record<string, number[]>>;
     vt323Probe(): Promise<Record<string, number[]>>;
     nodeBisectProbe(): Promise<Record<string, number[]>>;
+    fontLoadProbe(name: string): Promise<Record<string, string>>;
+    videoFontProbe(name: string): Promise<Record<string, number>>;
     nyxWidthProbe(): Promise<Record<string, number[]>>;
     matrixNode(name: string, t: number): Promise<string>;
     accentProbe(): Promise<number[]>;
@@ -46,7 +48,7 @@ declare global {
     orderProbe(order: string): Promise<Record<string, number[]>>;
     matrixCase(name: string, t: number, keepMounted?: boolean): Promise<MatrixCaseResult>;
     matrixReview(name: string, t: number): Promise<MatrixReviewResult>;
-    renderGalleryVideo(videoUrl: string, template: string, doc: DocJson): Promise<void>;
+    renderGalleryVideo(videoUrl: string, template: string, doc: DocJson, renderer?: string): Promise<void>;
     clipTextProbe(first?: string): Promise<Record<string, number[]>>;
     caseProbe(): Promise<Record<string, number[]>>;
     bisectProbe(): Promise<Record<string, number>>;
@@ -142,12 +144,12 @@ function rebuildDocument(json: DocJson): Document {
   return new Document({ sections });
 }
 
-function buildPipeline(video: Blob, style: RunnerStyle, probe: { width: number; height: number }, takumi: boolean, hasItalic: boolean) {
+function buildPipeline(video: Blob, style: RunnerStyle, probe: { width: number; height: number }, takumi: boolean, hasItalic: boolean, fontFaceCss = '') {
   const builder = new RenderPipelineBuilder().withInputVideo(video);
   if (style !== 'default') {
     const base = buildGalleryStyle(style, probe.width, probe.height, { takumi, hasItalic });
     builder
-      .withSubtitleStyle(base)
+      .withSubtitleStyle(fontFaceCss === '' ? base : { ...base, css: `${base.css}\n${fontFaceCss}` })
       .withSegmentSplitter(gallerySegmentSplitter(style))
       .withDefaultLineSplitterConfig({ maxLines: galleryMaxLines(style), minLines: 1, maxWidthRatio: 0.72 })
       .withEffects(galleryEffects(style));
@@ -165,6 +167,16 @@ async function loadDocumentFont(fontUrl: string | null, style: RunnerStyle): Pro
   await document.fonts.ready;
 }
 
+/**
+ * Same single file as an embeddable @font-face rule: foreignObject SVG in
+ * <img> cannot see document fonts, so rasterized baselines need the URL
+ * inside the pipeline CSS for the CssResourceEmbedder to inline as data:.
+ */
+function singleFontFaceCss(fontUrl: string | null, style: RunnerStyle): string {
+  if (fontUrl === null || style === 'default') return '';
+  return `@font-face{font-family:"${galleryFontFamily(style)}";src:url("${fontUrl}");}`;
+}
+
 // Full stock pipeline on a real video. The ONLY seam under experiment is
 // the subtitle frame renderer: Takumi versus the stock browser renderer.
 // Transcription (Whisper bawaan), splitting, tagging, effects, compositing,
@@ -176,7 +188,7 @@ window.renderE2E = async (videoUrl: string, fontUrl: string | null, hasItalicFon
   const probe = await probeDimensions(inputBlob);
   await loadDocumentFont(fontUrl, style);
   const takumi = renderer === 'takumi';
-  const builder = buildPipeline(inputBlob, style, probe, takumi, hasItalicFont);
+  const builder = buildPipeline(inputBlob, style, probe, takumi, hasItalicFont, singleFontFaceCss(fontUrl, style));
 
   if (takumi) {
     const { fonts, decode } = await adapterFonts(fontUrl, style, hasItalicFont);
@@ -217,7 +229,7 @@ window.renderFromDocument = async (videoUrl: string, fontUrl: string | null, has
   const probe = await probeDimensions(inputBlob);
   await loadDocumentFont(fontUrl, style);
   const takumi = renderer === 'takumi';
-  const builder = buildPipeline(inputBlob, style, probe, takumi, hasItalicFont);
+  const builder = buildPipeline(inputBlob, style, probe, takumi, hasItalicFont, singleFontFaceCss(fontUrl, style));
   if (takumi) {
     const { fonts, decode } = await adapterFonts(fontUrl, style, hasItalicFont);
     builder.withSubtitleFrameRenderer(new TakumiSubtitleFrameRenderer(takumiAdapter(), {
@@ -291,21 +303,35 @@ function galleryDecode(): TakumiBitmapDecoder {
 // Takumi production path: manifest subsets for fonts (never CDN), layered
 // outline exactly like the matrix scores it. videoFrame-requiring kinds
 // throw from open() — the driver skips those.
-window.renderGalleryVideo = async (videoUrl: string, template: string, doc: DocJson) => {
+window.renderGalleryVideo = async (videoUrl: string, template: string, doc: DocJson, renderer = 'takumi') => {
   const name = template as GalleryTemplateName;
   const inputBlob = await (await fetch(videoUrl)).blob();
   const probe = await probeDimensions(inputBlob);
   const font = await matrixFonts(name);
-  const builder = buildPipeline(inputBlob, name, probe, true, font.hasItalic);
-  builder.withSubtitleFrameRenderer(new TakumiSubtitleFrameRenderer(takumiAdapter(), {
-    ...(font.fonts === undefined ? {} : { fonts: font.fonts }),
-    decode: galleryDecode(),
-    layeredOutline: galleryUsesSvgFilter(name),
-  }));
-  // The browser truth needs the same bytes as page fonts (karaoke measure
-  // parity is irrelevant for Takumi, but harmless and future-proof).
+  const takumi = renderer !== 'browser';
+  // Manifest subsets up front: the rasterized baseline (foreignObject SVG
+  // in <img>) cannot see document fonts at all, so the family must ride
+  // inside the pipeline CSS as @font-face rules whose URLs the
+  // CssResourceEmbedder inlines as data:. Without this every baseline
+  // video silently falls back. (Takumi takes the same bytes directly.)
+  const origin = new URL(videoUrl).origin;
+  const manifest = (await (await fetch('/input/fonts/manifest.json')).json()) as Record<string, Array<{ file: string; subsetOf: string; weight?: number; style?: string; ranges: ReadonlyArray<readonly [number, number]> }>>;
+  const entries = manifest[galleryFontFamily(name)] ?? [];
+  const fontFaceCss = entries.map((entry) => {
+    const range = entry.ranges.map(([a, b]) => `U+${a.toString(16).toUpperCase()}-${b.toString(16).toUpperCase()}`).join(',');
+    return `@font-face{font-family:"${entry.subsetOf}";src:url("${origin}/fonts/${entry.file}");font-weight:${entry.weight ?? 400};font-style:${entry.style ?? 'normal'};${range === '' ? '' : `unicode-range:${range};`}}`;
+  }).join('\n');
+  const builder = buildPipeline(inputBlob, name, probe, takumi, font.hasItalic, fontFaceCss);
+  if (takumi) {
+    builder.withSubtitleFrameRenderer(new TakumiSubtitleFrameRenderer(takumiAdapter(), {
+      ...(font.fonts === undefined ? {} : { fonts: font.fonts }),
+      decode: galleryDecode(),
+      layeredOutline: galleryUsesSvgFilter(name),
+    }));
+  }
+  // Page fonts too, for any live-DOM measurement parity.
   try {
-    for (const entry of ((await (await fetch('/input/fonts/manifest.json')).json()) as Record<string, Array<{ file: string; subsetOf: string; weight?: number; style?: string; ranges: ReadonlyArray<readonly [number, number]> }>>)[galleryFontFamily(name)] ?? []) {
+    for (const entry of entries) {
       const range = entry.ranges.map(([a, b]) => `U+${a.toString(16).toUpperCase()}-${b.toString(16).toUpperCase()}`).join(',');
       const face = new FontFace(entry.subsetOf, await (await fetch(`/input/fonts/${entry.file}`)).arrayBuffer(), {
         weight: entry.weight === undefined ? 'normal' : String(entry.weight),
@@ -323,7 +349,7 @@ window.renderGalleryVideo = async (videoUrl: string, template: string, doc: DocJ
   pipeline.setDocument(rebuildDocument(doc));
   const result = await pipeline.runRenderingStep((event) => console.log(describeProgressEvent(event)));
   if (result.blob === null) throw new Error('Pipeline returned no blob');
-  triggerBrowserDownload(result.blob, `output-gallery-${name}.mp4`);
+  triggerBrowserDownload(result.blob, `output-gallery-${name}-${takumi ? 'takumi' : 'browser'}.mp4`);
 };
 
 // One Pico frame through the style path (built-in font; network-free).
@@ -1069,6 +1095,102 @@ window.nodeBisectProbe = async () => {
       out[useFonts ? key : `${key}NoFonts`] = [...bytes];
     }
   }
+  return out;
+};
+
+// Runs the renderGalleryVideo font block verbatim and reports what
+// actually happened (that block swallows errors by design).
+window.fontLoadProbe = async (name: string) => {
+  const out: Record<string, string> = {};
+  try {
+    const manifest = (await (await fetch('/input/fonts/manifest.json')).json()) as Record<string, Array<{ file: string; subsetOf: string; weight?: number; style?: string; ranges: ReadonlyArray<readonly [number, number]> }>>;
+    const entries = manifest[galleryFontFamily(name)] ?? [];
+    out.entries = String(entries.length);
+    for (const entry of entries) {
+      try {
+        const range = entry.ranges.map(([a, b]) => `U+${a.toString(16).toUpperCase()}-${b.toString(16).toUpperCase()}`).join(',');
+        const face = new FontFace(entry.subsetOf, await (await fetch(`/input/fonts/${entry.file}`)).arrayBuffer(), {
+          weight: entry.weight === undefined ? 'normal' : String(entry.weight),
+          style: entry.style ?? 'normal',
+          ...(range === '' ? {} : { unicodeRange: range }),
+        });
+        await face.load();
+        document.fonts.add(face);
+        out[entry.file] = `loaded status=${face.status}`;
+      } catch (err) {
+        out[entry.file] = `THREW ${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+    await document.fonts.ready;
+    out.check = String(document.fonts.check(`44px "${galleryFontFamily(name)}"`));
+  } catch (err) {
+    out.fatal = err instanceof Error ? err.message : String(err);
+  }
+  return out;
+};
+
+// Replicates the VIDEO browser path exactly: plain gallery style +
+// manifest FontFace block (not matrixFonts), then measures laid-out word
+// widths. Anton 'Pack' at 60px must be ~125px iff the face applies.
+window.videoFontProbe = async (name: string) => {
+  const style = buildGalleryStyle(name, 720, 1280, { takumi: false, hasItalic: false });
+  const manifest = (await (await fetch('/input/fonts/manifest.json')).json()) as Record<string, Array<{ file: string; subsetOf: string; weight?: number; style?: string; ranges: ReadonlyArray<readonly [number, number]> }>>;
+  for (const entry of manifest[galleryFontFamily(name)] ?? []) {
+    const range = entry.ranges.map(([a, b]) => `U+${a.toString(16).toUpperCase()}-${b.toString(16).toUpperCase()}`).join(',');
+    const face = new FontFace(entry.subsetOf, await (await fetch(`/input/fonts/${entry.file}`)).arrayBuffer(), {
+      weight: entry.weight === undefined ? 'normal' : String(entry.weight),
+      style: entry.style ?? 'normal',
+      ...(range === '' ? {} : { unicodeRange: range }),
+    });
+    await face.load();
+    document.fonts.add(face);
+  }
+  await document.fonts.ready;
+  const vars = Object.entries(style.inlineStyles).map(([k, v]) => `${k}:${v};`).join('');
+  const probe = ensureMatrixProbe();
+  probe.innerHTML = '';
+  const host = document.createElement('div');
+  host.setAttribute('style', 'position:absolute;top:0;left:0;visibility:hidden;');
+  host.innerHTML = `<div class="segment" style="${vars}"><span class="word">Pack</span> <span class="word">my</span></div>`;
+  const styleEl = document.createElement('style');
+  styleEl.textContent = style.css;
+  probe.appendChild(styleEl);
+  probe.appendChild(host);
+  void probe.offsetHeight;
+  const out: Record<string, number> = {};
+  [...host.querySelectorAll('.word')].forEach((el, i) => {
+    out[`word${i}`] = Math.round((el as HTMLElement).getBoundingClientRect().width);
+  });
+  // Bypass every var/attr: explicit family + size straight on the words.
+  host.innerHTML = `<div><span class="word" style="font-family:Anton;font-size:60px;">Pack</span> <span class="word" style="font-family:Anton;font-size:60px;">my</span></div>`;
+  void probe.offsetHeight;
+  [...host.querySelectorAll('.word')].forEach((el, i) => {
+    out[`direct${i}`] = Math.round((el as HTMLElement).getBoundingClientRect().width);
+  });
+  // Real matrix node (letters, classes, timing vars) + plain styleB css +
+  // the same manifest faces: does full node context break matching?
+  const doc = getMatrixDoc();
+  let captured = '';
+  const cap: TakumiRenderFn = async (node) => {
+    captured = node;
+    return new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  };
+  const capR = new TakumiSubtitleFrameRenderer(cap, { layeredOutline: false });
+  await capR.open(doc, { matrix: style }, 720, 1280);
+  await capR.getFrames([1.5]).catch(() => []);
+  capR.close();
+  const host2 = document.createElement('div');
+  host2.setAttribute('style', 'position:absolute;top:0;left:0;visibility:hidden;');
+  host2.innerHTML = captured;
+  const styleEl2 = document.createElement('style');
+  styleEl2.textContent = style.css;
+  probe.appendChild(styleEl2);
+  probe.appendChild(host2);
+  void probe.offsetHeight;
+  [...host2.querySelectorAll('.word')].slice(0, 4).forEach((el, i) => {
+    out[`mx${i}`] = Math.round((el as HTMLElement).getBoundingClientRect().width);
+  });
+  probe.innerHTML = '';
   return out;
 };
 

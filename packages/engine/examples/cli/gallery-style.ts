@@ -165,7 +165,7 @@ export function gallerySegmentSplitter(name: GalleryTemplateName): SegmentSplitt
         minChars: splitter.minChars ?? SCORE_MIN_CHARS_DEFAULT,
       }));
     } else if (splitter.type === 'limit_by_words') {
-      parts.push(new LimitByWordsSegmentSplitter({ maxWords: splitter.maxWords ?? 1 }));
+      parts.push(new LimitByWordsSegmentSplitter({ maxWords: (splitter as { maxWords?: number }).maxWords ?? 1 }));
     } else {
       throw new Error(`gallery-style: unknown splitter ${splitter.type}`);
     }
