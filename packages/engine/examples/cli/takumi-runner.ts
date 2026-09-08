@@ -45,6 +45,8 @@ declare global {
     flexProbe(): Promise<Record<string, number[]>>;
     orderProbe(order: string): Promise<Record<string, number[]>>;
     matrixCase(name: string, t: number, keepMounted?: boolean): Promise<MatrixCaseResult>;
+    matrixReview(name: string, t: number): Promise<MatrixReviewResult>;
+    renderGalleryVideo(videoUrl: string, template: string, doc: DocJson): Promise<void>;
     clipTextProbe(first?: string): Promise<Record<string, number[]>>;
     caseProbe(): Promise<Record<string, number[]>>;
     bisectProbe(): Promise<Record<string, number>>;
@@ -271,6 +273,58 @@ async function adapterFonts(fontUrl: string | null, style: RunnerStyle, hasItali
   };
   return { ...(fonts === undefined ? {} : { fonts }), decode, hasItalic };
 }
+
+/** PNG-bytes decoder shared by gallery renders (see adapterFonts). */
+function galleryDecode(): TakumiBitmapDecoder {
+  return async (png) => {
+    const blob = new Blob([png as unknown as BlobPart], { type: 'image/png' });
+    try {
+      return await createImageBitmap(blob);
+    } catch (err) {
+      const magic = [...png.slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join(' ');
+      throw new Error(`decode failed: ${png.length} bytes, magic ${magic}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+}
+
+// Render a pinned document with an arbitrary gallery template through the
+// Takumi production path: manifest subsets for fonts (never CDN), layered
+// outline exactly like the matrix scores it. videoFrame-requiring kinds
+// throw from open() — the driver skips those.
+window.renderGalleryVideo = async (videoUrl: string, template: string, doc: DocJson) => {
+  const name = template as GalleryTemplateName;
+  const inputBlob = await (await fetch(videoUrl)).blob();
+  const probe = await probeDimensions(inputBlob);
+  const font = await matrixFonts(name);
+  const builder = buildPipeline(inputBlob, name, probe, true, font.hasItalic);
+  builder.withSubtitleFrameRenderer(new TakumiSubtitleFrameRenderer(takumiAdapter(), {
+    ...(font.fonts === undefined ? {} : { fonts: font.fonts }),
+    decode: galleryDecode(),
+    layeredOutline: galleryUsesSvgFilter(name),
+  }));
+  // The browser truth needs the same bytes as page fonts (karaoke measure
+  // parity is irrelevant for Takumi, but harmless and future-proof).
+  try {
+    for (const entry of ((await (await fetch('/input/fonts/manifest.json')).json()) as Record<string, Array<{ file: string; subsetOf: string; weight?: number; style?: string; ranges: ReadonlyArray<readonly [number, number]> }>>)[galleryFontFamily(name)] ?? []) {
+      const range = entry.ranges.map(([a, b]) => `U+${a.toString(16).toUpperCase()}-${b.toString(16).toUpperCase()}`).join(',');
+      const face = new FontFace(entry.subsetOf, await (await fetch(`/input/fonts/${entry.file}`)).arrayBuffer(), {
+        weight: entry.weight === undefined ? 'normal' : String(entry.weight),
+        style: entry.style ?? 'normal',
+        ...(range === '' ? {} : { unicodeRange: range }),
+      });
+      await face.load();
+      document.fonts.add(face);
+    }
+    await document.fonts.ready;
+  } catch {
+    // Takumi-side bytes still exact; browser parity best-effort only.
+  }
+  const pipeline = builder.build();
+  pipeline.setDocument(rebuildDocument(doc));
+  const result = await pipeline.runRenderingStep((event) => console.log(describeProgressEvent(event)));
+  if (result.blob === null) throw new Error('Pipeline returned no blob');
+  triggerBrowserDownload(result.blob, `output-gallery-${name}.mp4`);
+};
 
 // One Pico frame through the style path (built-in font; network-free).
 window.picoProbe = async () => {
@@ -545,6 +599,21 @@ export interface MatrixCaseResult {
 interface TakumiFontSet {
   fonts: unknown[] | undefined;
   hasItalic: boolean;
+}
+
+/** Everything the review page needs to show one case side by side. */
+export interface MatrixReviewResult {
+  name: string;
+  t: number;
+  png: number[] | null;
+  takumiError: string | null;
+  /** Browser-exact node + css for a visible truth mount. */
+  node: string;
+  css: string[];
+  /** Anchor + neutralize rules the review mount must apply verbatim. */
+  anchorCss: string;
+  neutralizeCss: string;
+  family: string;
 }
 
 /** True when any loaded subset carries an italic/oblique face. */
@@ -1694,16 +1763,17 @@ function ensureMatrixProbe(): HTMLElement {
   return probe;
 }
 
-window.matrixCase = async (name: string, t: number, keepMounted = false): Promise<MatrixCaseResult> => {
-  const doc = getMatrixDoc();
-  // NOTE: styles keyed 'matrix' while sections carry kind 'matrix'.
-  // Two flavors of the same template: browser-exact values for truth,
-  // Takumi-baked values (fallbacks) for the renderer under test. Sharing
-  // one flavor would hand one side wrong inline vars.
-  const font = await matrixFonts(name);
-  const styleB = buildGalleryStyle(name, 720, 1280);
-  const styleT = buildGalleryStyle(name, 720, 1280, { takumi: true, hasItalic: font.hasItalic });
-  const layered = galleryUsesSvgFilter(name);
+type MatrixFont = Awaited<ReturnType<typeof matrixFonts>>;
+type MatrixStyle = ReturnType<typeof buildGalleryStyle>;
+
+/** Takumi side of a matrix case: the production renderer path, PNG bytes. */
+async function matrixRenderTakumi(
+  t: number,
+  doc: Document,
+  font: MatrixFont,
+  styleT: MatrixStyle,
+  layered: boolean,
+): Promise<MatrixCaseResult['takumi']> {
   const renderReal = async (node: string, css: string[], timeMs: number): Promise<Uint8Array> => {
     const out = await render(node, {
       width: 720,
@@ -1714,10 +1784,8 @@ window.matrixCase = async (name: string, t: number, keepMounted = false): Promis
     });
     return out instanceof Uint8Array ? out : new Uint8Array(out);
   };
-  // --- Takumi side (production code path) ---
-  let takumi: MatrixCaseResult['takumi'];
-  let capturedT = { node: '', css: [] as string[] };
   try {
+    let capturedT = { node: '', css: [] as string[] };
     const takumiRender: TakumiRenderFn = async (node, options) => {
       capturedT = { node, css: [...options.css] };
       return renderReal(node, [...options.css], options.timeMs);
@@ -1732,36 +1800,97 @@ window.matrixCase = async (name: string, t: number, keepMounted = false): Promis
     if (!frame) throw new Error('no frame (nothing active)');
     // Re-render once capturing PNG bytes for the driver to analyze.
     const bytes = await renderReal(capturedT.node, capturedT.css, Math.round(t * 1000));
-    takumi = { png: [...bytes] };
+    return { png: [...bytes] };
   } catch (err) {
-    takumi = { error: err instanceof Error ? err.message : String(err) };
+    return { error: err instanceof Error ? err.message : String(err) };
   }
+}
+
+/** Browser side capture: single-copy node + browser-exact css. */
+async function matrixCaptureBrowserNode(
+  t: number,
+  doc: Document,
+  font: MatrixFont,
+  styleB: MatrixStyle,
+  takumiPng: Uint8Array | null,
+): Promise<{ node: string; css: string[] }> {
+  // The bytes are irrelevant here; reuse the Takumi PNG so decode always
+  // succeeds.
+  const reuseBytes = takumiPng && takumiPng.length > 0
+    ? takumiPng
+    : new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  let capturedB = { node: '', css: [] as string[] };
+  const captureRender: TakumiRenderFn = async (node, options) => {
+    capturedB = { node, css: [...options.css] };
+    return reuseBytes;
+  };
+  // The outline/fill split is a Takumi-only construct: the real browser
+  // pipeline renders one caption, so truth is a single copy. Mounting
+  // both layers would stack two captions and score against half of that
+  // stack — a harness artifact, not renderer drift.
+  const captureRenderer = new TakumiSubtitleFrameRenderer(captureRender, { layeredOutline: false });
+  await captureRenderer.open(doc, { matrix: styleB }, 720, 1280);
+  await captureRenderer.getFrames([t]);
+  captureRenderer.close();
+  if (capturedB.node === '') throw new Error('no node captured');
+  return capturedB;
+}
+
+/** Probe overrides shared by the matrix driver and the review page. */
+function matrixNeutralizeCss(name: string): string {
+  const halign = (galleryTemplateJson(name) as { alignment: { horizontalAlign?: string } }).alignment.horizontalAlign ?? 'center';
+  const hSide = halign === 'left' || halign === 'start' ? 'left' : halign === 'right' || halign === 'end' ? 'right' : 'center';
+  const capMargin = hSide === 'left'
+    ? 'margin:0 auto 0 0 !important;'
+    : hSide === 'right' ? 'margin:0 0 0 auto !important;' : 'margin:0 auto !important;';
+  return '.tscaps-takumi-root{position:static !important;width:max-content !important;height:auto !important;background:transparent !important;}' +
+    '.tscaps-takumi-layer{position:static !important;width:auto !important;height:auto !important;display:block !important;padding:0 !important;margin:0 !important;background:transparent !important;}' +
+    '.tscaps-takumi-vtop,.tscaps-takumi-vbottom,.tscaps-takumi-hleft,.tscaps-takumi-hright{display:none !important;}' +
+    '.tscaps-takumi-hrow{display:block !important;width:720px !important;}' +
+    `.tscaps-takumi-caption{width:fit-content !important;${capMargin}}` +
+    // Engine positioning must not leak into truth: the anchor grid owns
+    // placement here, so the caption's centering translate (correct in
+    // the renderer, where a fixed spacer precedes it) would double-shift
+    // the probe copy. Template transforms live deeper and are untouched.
+    '.tscaps-takumi-caption{transform:none !important;}';
+}
+
+/** Freeze subtree animations at timeMs; returns the animation count. */
+function matrixFreezeAnimations(root: Element, timeMs: number): number {
+  let animationCount = 0;
+  for (const anim of root.getAnimations({ subtree: true })) {
+    animationCount++;
+    try {
+      anim.currentTime = timeMs;
+      anim.pause();
+    } catch {
+      // Non-seekable effect; count only.
+    }
+  }
+  return animationCount;
+}
+
+window.matrixCase = async (name: string, t: number, keepMounted = false): Promise<MatrixCaseResult> => {
+  const doc = getMatrixDoc();
+  // NOTE: styles keyed 'matrix' while sections carry kind 'matrix'.
+  // Two flavors of the same template: browser-exact values for truth,
+  // Takumi-baked values (fallbacks) for the renderer under test. Sharing
+  // one flavor would hand one side wrong inline vars.
+  const font = await matrixFonts(name);
+  const styleB = buildGalleryStyle(name, 720, 1280);
+  const styleT = buildGalleryStyle(name, 720, 1280, { takumi: true, hasItalic: font.hasItalic });
+  const layered = galleryUsesSvgFilter(name);
+  // --- Takumi side (production code path) ---
+  const takumi = await matrixRenderTakumi(t, doc, font, styleT, layered);
   // --- Browser side (browser-exact node+css, animations frozen at timeMs) ---
   // Anchored exactly like SegmentWrapperRenderer: a zero-size grid at the
   // anchor point places the caption without transforms. Without this,
   // bottom/center templates would sit in static flow (top) while Takumi
   // honors the anchor — a pure harness artifact, not renderer drift.
   let browser: MatrixCaseResult['browser'];
-  let capturedB = { node: '', css: [] as string[] };
   try {
-    // Recapture the node under browser-exact inline vars. The bytes are
-    // irrelevant here; reuse the Takumi PNG so decode always succeeds.
-    const reuseBytes = takumi && 'png' in takumi && takumi.png.length > 0
-      ? new Uint8Array(takumi.png)
-      : new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
-    const captureRender: TakumiRenderFn = async (node, options) => {
-      capturedB = { node, css: [...options.css] };
-      return reuseBytes;
-    };
-    // The outline/fill split is a Takumi-only construct: the real browser
-    // pipeline renders one caption, so truth is a single copy. Mounting
-    // both layers would stack two captions and score against half of that
-    // stack — a harness artifact, not renderer drift.
-    const captureRenderer = new TakumiSubtitleFrameRenderer(captureRender, { layeredOutline: false });
-    await captureRenderer.open(doc, { matrix: styleB }, 720, 1280);
-    await captureRenderer.getFrames([t]);
-    captureRenderer.close();
-    if (capturedB.node === '') throw new Error('no node captured');
+    const takumiPng = takumi && 'png' in takumi && takumi.png.length > 0 ? new Uint8Array(takumi.png) : null;
+    const capturedB = await matrixCaptureBrowserNode(t, doc, font, styleB, takumiPng);
     const probe = ensureMatrixProbe();
     probe.innerHTML = '';
     const anchor = buildGalleryAnchor(name);
@@ -1769,43 +1898,16 @@ window.matrixCase = async (name: string, t: number, keepMounted = false): Promis
     // Neutralize the Takumi root/layer boxes inside the probe: the anchor
     // owns positioning here, and background on layers would double-paint.
     // The caption subtree keeps every template class, var, and animation.
-    // The row gets a definite 720px so the caption's percentage max-width
-    // resolves exactly like the render engine (inside a zero-size grid it
-    // would be cyclic and inflate); the caption shrink-fits via
-    // fit-content like the flex item it is in production, with margins
-    // placing it per the template's horizontal alignment.
-    const halign = (galleryTemplateJson(name) as { alignment: { horizontalAlign?: string } }).alignment.horizontalAlign ?? 'center';
-    const hSide = halign === 'left' || halign === 'start' ? 'left' : halign === 'right' || halign === 'end' ? 'right' : 'center';
-    const capMargin = hSide === 'left'
-      ? 'margin:0 auto 0 0 !important;'
-      : hSide === 'right' ? 'margin:0 0 0 auto !important;' : 'margin:0 auto !important;';
-    styleEl.textContent = `${capturedB.css.join('\n')}\n` +
-      '.tscaps-takumi-root{position:static !important;width:max-content !important;height:auto !important;background:transparent !important;}' +
-      '.tscaps-takumi-layer{position:static !important;width:auto !important;height:auto !important;display:block !important;padding:0 !important;margin:0 !important;background:transparent !important;}' +
-      '.tscaps-takumi-vtop,.tscaps-takumi-vbottom,.tscaps-takumi-hleft,.tscaps-takumi-hright{display:none !important;}' +
-      `.tscaps-takumi-hrow{display:block !important;width:720px !important;}` +
-      `.tscaps-takumi-caption{width:fit-content !important;${capMargin}}` +
-      // Engine positioning must not leak into truth: the anchor grid owns
-      // placement here, so the caption's centering translate (correct in
-      // the renderer, where a fixed spacer precedes it) would double-shift
-      // the probe copy. Template transforms live deeper and are untouched.
-      '.tscaps-takumi-caption{transform:none !important;}';
+    // (Row width / shrink / transform details live in matrixNeutralizeCss,
+    // shared with the review page so both score the same truth.)
+    styleEl.textContent = `${capturedB.css.join('\n')}\n${matrixNeutralizeCss(name)}`;
     probe.appendChild(styleEl);
     const anchorEl = document.createElement('div');
     anchorEl.setAttribute('style', anchor);
     anchorEl.innerHTML = capturedB.node;
     probe.appendChild(anchorEl);
     const timeMs = Math.round(t * 1000);
-    let animationCount = 0;
-    for (const anim of probe.getAnimations({ subtree: true })) {
-      animationCount++;
-      try {
-        anim.currentTime = timeMs;
-        anim.pause();
-      } catch {
-        // Non-seekable effect; count only.
-      }
-    }
+    const animationCount = matrixFreezeAnimations(probe, timeMs);
     // Force style/layout flush before measuring.
     void probe.offsetHeight;
     const segments = [...probe.querySelectorAll('.segment')].map((el) => {
@@ -1828,6 +1930,40 @@ window.matrixCase = async (name: string, t: number, keepMounted = false): Promis
     if (probe) probe.innerHTML = '';
   }
   return { name, t, takumi, browser, font: { family: font.family, loaded: font.loaded, browserLoaded: font.browserLoaded, hasItalic: font.hasItalic } };
+};
+
+// Review-page case: same Takumi bytes the matrix scores plus the exact
+// browser-exact node/css/anchor/overrides for a visible truth mount, so
+// the page shows precisely what the driver compares (no second code path
+// that could drift apart unnoticed).
+window.matrixReview = async (name: string, t: number): Promise<MatrixReviewResult> => {
+  const doc = getMatrixDoc();
+  const font = await matrixFonts(name);
+  const styleB = buildGalleryStyle(name, 720, 1280);
+  const styleT = buildGalleryStyle(name, 720, 1280, { takumi: true, hasItalic: font.hasItalic });
+  const layered = galleryUsesSvgFilter(name);
+  const takumi = await matrixRenderTakumi(t, doc, font, styleT, layered);
+  let png: number[] | null = null;
+  let takumiError: string | null = null;
+  if ('png' in takumi) png = takumi.png;
+  else takumiError = takumi.error;
+  let node = '';
+  let css: string[] = [];
+  try {
+    const capturedB = await matrixCaptureBrowserNode(
+      t, doc, font, styleB, png && png.length > 0 ? new Uint8Array(png) : null,
+    );
+    node = capturedB.node;
+    css = capturedB.css;
+  } catch (err) {
+    if (takumiError === null) takumiError = err instanceof Error ? err.message : String(err);
+  }
+  return {
+    name, t, png, takumiError, node, css,
+    anchorCss: buildGalleryAnchor(name),
+    neutralizeCss: matrixNeutralizeCss(name),
+    family: font.family,
+  };
 };
 
 function probeDimensions(blob: Blob): Promise<{ width: number; height: number }> {

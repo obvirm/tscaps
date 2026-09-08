@@ -2,9 +2,12 @@ import {
   CompositeSegmentSplitter,
   BoundarySegmentSplitter,
   BoundaryScoreLimitByCharsSegmentSplitter,
+  LimitByWordsSegmentSplitter,
   GapFreeEffect,
   SmartPunctuationEffect,
   RemovePunctuationEffect,
+  CarryQuotesEffect,
+  SmartLowercaseEffect,
   SvgFilterDefinitionsParser,
   SvgFilterBundle,
   SvgFilterScope,
@@ -132,11 +135,18 @@ export function galleryMaxLines(name: GalleryTemplateName): number {
 
 export function galleryEffects(name: GalleryTemplateName): Effect[] {
   const out: Effect[] = [];
-  for (const effect of templateEntry(name).json.effects) {
+  // Effects are optional per template (e.g. zara omits them entirely).
+  for (const effect of templateEntry(name).json.effects ?? []) {
     if (!effect.enabled) continue;
     if (effect.type === 'gap_free') out.push(new GapFreeEffect());
     else if (effect.type === 'smart_punctuation') out.push(new SmartPunctuationEffect());
     else if (effect.type === 'remove_punctuation') out.push(new RemovePunctuationEffect());
+    else if (effect.type === 'carry_quotes') out.push(new CarryQuotesEffect());
+    // Same preserved tags as the studio descriptor.
+    else if (effect.type === 'smart_lowercase') out.push(new SmartLowercaseEffect(['entity']));
+    // AI-picked emoji decorations attach during semantic tagging, not as a
+    // document effect; pinned render docs carry none, so nothing to apply.
+    else if (effect.type === 'emoji') continue;
     else throw new Error(`gallery-style: unknown effect ${effect.type}`);
   }
   return out;
@@ -154,6 +164,8 @@ export function gallerySegmentSplitter(name: GalleryTemplateName): SegmentSplitt
         maxChars: splitter.maxChars ?? 40,
         minChars: splitter.minChars ?? SCORE_MIN_CHARS_DEFAULT,
       }));
+    } else if (splitter.type === 'limit_by_words') {
+      parts.push(new LimitByWordsSegmentSplitter({ maxWords: splitter.maxWords ?? 1 }));
     } else {
       throw new Error(`gallery-style: unknown splitter ${splitter.type}`);
     }
