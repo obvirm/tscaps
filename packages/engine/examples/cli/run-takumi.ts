@@ -27,11 +27,15 @@ const TEMPLATE_FONTS = {
     file: 'JetBrainsMono-variable.ttf',
     download: 'https://github.com/google/fonts/raw/main/ofl/jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf',
     local: null as string | null,
+    // Upright variable only; no italic face ships in this file.
+    hasItalic: false,
   },
   loki: {
     file: 'komika-axis.woff2',
     download: null as string | null,
     local: 'E:\\project\\tscaps\\apps\\studio\\src\\styles\\fonts\\komika-axis.woff2',
+    // Single Regular face.
+    hasItalic: false,
   },
 } as const;
 type GalleryName = keyof typeof TEMPLATE_FONTS;
@@ -60,7 +64,8 @@ async function run(): Promise<void> {
       throw new Error('Usage: run-takumi.ts full "<video.mp4>" takumi|browser default|pico|loki <out.mp4>');
     }
     await withServers(videoPath, style === 'default' ? null : (style as GalleryName), async ({ browser, pageUrl, videoUrl, fontUrl }) => {
-      await renderE2EOnce(pageUrl, browser, videoUrl, fontUrl, renderer, style, outName);
+      const gallery = style === 'default' ? null : (style as GalleryName);
+      await renderE2EOnce(pageUrl, browser, videoUrl, fontUrl, gallery === null ? false : TEMPLATE_FONTS[gallery].hasItalic, renderer, style, outName);
     });
     return;
   }
@@ -85,7 +90,7 @@ async function run(): Promise<void> {
     const { readFile } = await import('node:fs/promises');
     const doc = JSON.parse(await readFile(docPath, 'utf8')) as unknown;
     await withServers(videoPath, style as GalleryName, async ({ browser, pageUrl, videoUrl, fontUrl }) => {
-      await renderDocOnce(pageUrl, browser, videoUrl, fontUrl, renderer, style, doc, outName);
+      await renderDocOnce(pageUrl, browser, videoUrl, fontUrl, TEMPLATE_FONTS[style as GalleryName].hasItalic, renderer, style, doc, outName);
     });
     return;
   }
@@ -166,6 +171,7 @@ async function renderDocOnce(
   browser: Browser,
   videoUrl: string,
   fontUrl: string | null,
+  hasItalicFont: boolean,
   renderer: RendererName,
   style: StyleName,
   doc: unknown,
@@ -176,9 +182,9 @@ async function renderDocOnce(
   const downloadPromise = page.waitForEvent('download', { timeout: 0 });
   try {
     await page.evaluate(
-      ([video, font, rend, sty, documentJson]) =>
-        window.renderFromDocument(video, font, rend, sty, documentJson as never),
-      [videoUrl, fontUrl, renderer, style, doc] as const,
+      ([video, font, italic, rend, sty, documentJson]) =>
+        window.renderFromDocument(video, font, italic, rend, sty, documentJson as never),
+      [videoUrl, fontUrl, hasItalicFont, renderer, style, doc] as const,
     );
   } catch (err) {
     console.error(`[renderFromDocument threw] ${err instanceof Error ? err.message : String(err)}`);
@@ -255,6 +261,7 @@ async function renderE2EOnce(
   browser: Browser,
   videoUrl: string,
   fontUrl: string | null,
+  hasItalicFont: boolean,
   renderer: RendererName,
   style: StyleName,
   outName: string,
@@ -265,8 +272,8 @@ async function renderE2EOnce(
   const downloadPromise = page.waitForEvent('download', { timeout: 0 });
   try {
     await page.evaluate(
-      ([video, font, rend, sty]) => window.renderE2E(video, font, rend, sty),
-      [videoUrl, fontUrl, renderer, style] as const,
+      ([video, font, italic, rend, sty]) => window.renderE2E(video, font, italic, rend, sty),
+      [videoUrl, fontUrl, hasItalicFont, renderer, style] as const,
     );
   } catch (err) {
     console.error(`[renderE2E threw] ${err instanceof Error ? err.message : String(err)}`);

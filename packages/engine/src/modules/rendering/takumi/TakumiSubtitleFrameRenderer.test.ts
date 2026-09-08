@@ -70,8 +70,10 @@ describe('TakumiSubtitleFrameRenderer', () => {
     expect(options.height).toBe(720);
     expect(options.timeMs).toBe(100);
     expect(options.css.some((s: string) => s.includes('.segment'))).toBe(true);
-    // bottom anchor at 0.9 of 720px → 72px bottom padding.
-    expect(options.css.some((s: string) => s.includes('padding-bottom:72.0px'))).toBe(true);
+    // bottom anchor at 0.9 of 720px → 72px bottom spacer, growing top.
+    const css = options.css.join('\n');
+    expect(css).toContain('.tscaps-takumi-vbottom{height:72px;flex-basis:72px;flex-grow:0;flex-shrink:0;}');
+    expect(css).toContain('.tscaps-takumi-vtop{height:0;flex-basis:0;flex-grow:1;flex-shrink:1;}');
     const drawImage = vi.fn();
     frame!.draw({ drawImage } as unknown as CanvasRenderingContext2D, 0, 0, 1280, 720);
     expect(drawImage).toHaveBeenCalledTimes(1);
@@ -129,8 +131,50 @@ describe('TakumiSubtitleFrameRenderer', () => {
     const call = render.mock.calls[0];
     expect(call).toBeDefined();
     const [, options] = call!;
-    // left anchor at 0.06 of 1280px → 76.8px left padding.
-    expect(options.css.some((s: string) => s.includes('padding-left:76.8px'))).toBe(true);
+    // left anchor at 0.06 of 1280px → 76.8px left spacer, growing right.
+    const css = options.css.join('\n');
+    expect(css).toContain('.tscaps-takumi-hleft{width:76.8px;flex-basis:76.8px;flex-grow:0;flex-shrink:0;}');
+    expect(css).toContain('.tscaps-takumi-hright{width:0;flex-basis:0;flex-grow:1;flex-shrink:1;}');
+    renderer.close();
+  });
+
+  it('centers off-half anchors with a fixed spacer plus a -50% caption translate', async () => {
+    const render = vi.fn(renderStub());
+    const renderer = new TakumiSubtitleFrameRenderer(render, { decode: async () => stubBitmap });
+    await renderer.open(
+      doc(),
+      { default: style({ alignment: { verticalAlign: 'center', verticalOffset: 0.75, horizontalAlign: 'center', horizontalOffset: 0.5 } }) },
+      1280,
+      720,
+    );
+    await renderer.getFrames([0.1]);
+    const call = render.mock.calls[0];
+    expect(call).toBeDefined();
+    const [, options] = call!;
+    const css = options.css.join('\n');
+    // Proportional 0.75:0.25 spacers would land the caption center at
+    // anchor + Hc*0.25; the fixed spacer plus translate lands it exactly.
+    expect(css).toContain('.tscaps-takumi-vtop{height:540px;flex-basis:540px;flex-grow:0;flex-shrink:0;}');
+    expect(css).toContain('.tscaps-takumi-caption{max-width:92%;background:transparent;transform:translateY(-50%);}');
+    renderer.close();
+  });
+
+  it('keeps exact-half centers on the transform-free proportional recipe', async () => {
+    const render = vi.fn(renderStub());
+    const renderer = new TakumiSubtitleFrameRenderer(render, { decode: async () => stubBitmap });
+    await renderer.open(
+      doc(),
+      { default: style({ alignment: { verticalAlign: 'center', verticalOffset: 0.5, horizontalAlign: 'center', horizontalOffset: 0.5 } }) },
+      1280,
+      720,
+    );
+    await renderer.getFrames([0.1]);
+    const call = render.mock.calls[0];
+    expect(call).toBeDefined();
+    const [, options] = call!;
+    const css = options.css.join('\n');
+    expect(css).toContain('.tscaps-takumi-vtop{height:0;flex-basis:0;flex-grow:0.5;flex-shrink:1;}');
+    expect(css).toContain('.tscaps-takumi-caption{max-width:92%;background:transparent;}');
     renderer.close();
   });
 

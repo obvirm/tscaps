@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { chromium } from 'playwright';
@@ -39,11 +39,22 @@ try {
       writeFileSync(`compare/bgvar-${key}.png`, Buffer.from(data));
     }
     console.log('bgvar done');
+    const ivoacc = await page.evaluate(() => window.ivoAccentProbe());
+    for (const [key, data] of Object.entries(ivoacc)) {
+      writeFileSync(`compare/ivoacc-${key}.png`, Buffer.from(data));
+    }
+    console.log('ivoacc done');
     const lastchild = await page.evaluate(() => window.lastChildProbe());
     for (const [key, data] of Object.entries(lastchild)) {
       writeFileSync(`compare/lastchild-${key}.png`, Buffer.from(data));
     }
     console.log('lastchild done');
+    const antonBytes = [...readFileSync('E:/project/tscaps/apps/studio/node_modules/@fontsource/anton/files/anton-latin-400-normal.woff2')];
+    const ivoexact = await page.evaluate((bytes) => window.ivoExactProbe(bytes), antonBytes);
+    for (const [key, data] of Object.entries(ivoexact)) {
+      writeFileSync(`compare/ivoexact-${key}.png`, Buffer.from(data));
+    }
+    console.log('ivoexact done');
     const accent = await page.evaluate(() => window.accentProbe());
     writeFileSync('compare/accent.png', Buffer.from(accent));
     console.log('accent done');

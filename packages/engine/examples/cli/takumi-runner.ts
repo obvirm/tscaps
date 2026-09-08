@@ -26,6 +26,14 @@ declare global {
     picoProbe(): Promise<{ bytes: number; magic: string; data: number[] }>;
     picoSweep(): Promise<{ failures: string[]; data: number[] }>;
     matrixNames(): string[];
+    ivoExactProbe(fontBytes: number[]): Promise<Record<string, number[]>>;
+    ivoAccentProbe(): Promise<Record<string, number[]>>;
+    lokiLayerProbe(): Promise<Record<string, number[]>>;
+    centerProbe(): Promise<Record<string, number[]>>;
+    maxProbe(): Promise<Record<string, number[]>>;
+    vt323Probe(): Promise<Record<string, number[]>>;
+    nodeBisectProbe(): Promise<Record<string, number[]>>;
+    nyxWidthProbe(): Promise<Record<string, number[]>>;
     matrixNode(name: string, t: number): Promise<string>;
     accentProbe(): Promise<number[]>;
     lastChildProbe(): Promise<Record<string, number[]>>;
@@ -550,6 +558,450 @@ let matrixDoc: Document | null = null;
 const matrixFontCache = new Map<string, unknown[]>();
 
 window.matrixNames = () => galleryTemplateNames();
+
+// Exact matrix ivo node + css, Anton bytes. Strips isolate the killer:
+// state classes, timing vars, custom font.
+window.ivoExactProbe = async (fontBytes: number[]) => {
+  const style = buildGalleryStyle('ivo', 720, 1280);
+  const doc = getMatrixDoc();
+  let captured = '';
+  const capture: TakumiRenderFn = async (node) => {
+    captured = node;
+    return new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  };
+  const capRenderer = new TakumiSubtitleFrameRenderer(capture);
+  await capRenderer.open(doc, { matrix: style }, 720, 1280);
+  await capRenderer.getFrames([1.5]).catch(() => []);
+  capRenderer.close();
+  if (!captured) throw new Error('no node captured');
+  const positioning = '.tscaps-takumi-root{position:relative;width:100%;height:100%;background:transparent;} .tscaps-takumi-layer{position:absolute;left:0;top:0;width:100%;height:100%;display:flex;box-sizing:border-box;justify-content:center;align-items:flex-end;background:transparent;} .tscaps-takumi-caption{max-width:92%;background:transparent;}';
+  const enginePositioning = '.tscaps-takumi-root{position:relative;width:100%;height:100%;background:transparent;} .tscaps-takumi-layer{position:absolute;left:0;top:0;width:100%;height:100%;display:flex;box-sizing:border-box;justify-content:center;align-items:flex-start;padding-top:921.6px;background:transparent;} .tscaps-takumi-caption{max-width:92%;background:transparent;}';
+  const marginPositioning = '.tscaps-takumi-root{position:relative;width:100%;height:100%;background:transparent;} .tscaps-takumi-layer{position:absolute;left:0;top:0;width:100%;height:100%;display:flex;box-sizing:border-box;justify-content:center;align-items:flex-start;background:transparent;} .tscaps-takumi-caption{max-width:92%;margin-top:921.6px;background:transparent;}';
+  const absPositioning = '.tscaps-takumi-root{position:relative;width:100%;height:100%;background:transparent;} .tscaps-takumi-layer{position:absolute;left:0;top:0;width:100%;height:100%;background:transparent;} .tscaps-takumi-caption{position:absolute;top:921.6px;left:0;width:100%;max-width:92%;background:transparent;}';
+  const spacerEngine = '.tscaps-takumi-root{position:relative;width:100%;height:100%;background:transparent;} .tscaps-takumi-layer{position:absolute;left:0;top:0;width:100%;height:100%;display:flex;flex-direction:column;background:transparent;} .tscaps-takumi-vtop{height:921.6px;flex-basis:921.6px;flex-grow:0;flex-shrink:0;} .tscaps-takumi-hrow{display:flex;flex-direction:row;width:100%;flex-grow:0;flex-shrink:0;} .tscaps-takumi-hleft{width:0;flex-basis:0;flex-grow:0.5;flex-shrink:1;} .tscaps-takumi-hright{width:0;flex-basis:0;flex-grow:0.5;flex-shrink:1;} .tscaps-takumi-vbottom{height:0;flex-basis:0;flex-grow:1;flex-shrink:1;} .tscaps-takumi-caption{max-width:92%;background:transparent;}';
+  const bakedIvo = buildGalleryStyle('ivo', 720, 1280, { takumi: true, hasItalic: false });
+  const spacerPositioning = '.tscaps-takumi-root{position:relative;width:100%;height:100%;background:transparent;} .tscaps-takumi-layer{position:absolute;left:0;top:0;width:100%;height:100%;display:flex;flex-direction:column;background:transparent;} .tscaps-takumi-vtop{font-size:921.6px;line-height:1;} .tscaps-takumi-caption{max-width:92%;background:transparent;}';  const fonts = [{ name: 'Anton', data: new Uint8Array(fontBytes) }];
+  const simpleNode = `<div class="tscaps-takumi-root"><div class="tscaps-takumi-layer"><div class="tscaps-takumi-caption"><div class="segment"><div class="line"><span class="word">PACK MY</span></div><div class="line"><span class="word">BOX WITH</span></div></div></div></div></div>`;
+  const stripProp = (css: string, prop: string): string =>
+    css.replace(new RegExp(`${prop}\\s*:[^;]+;`, 'g'), '');
+  const stripClasses = (html: string): string =>
+    html.replace(/\s+(segment|line|word)-(being-narrated|not-narrated-yet|already-narrated)/g, '');
+  const stripVars = (html: string): string =>
+    html.replace(/\s?style="[^"]*"/g, '');
+  const { googleFonts } = await import('takumi-js/helpers');
+  const subsets = await googleFonts([{ name: 'Anton' }]);
+  const variants: Record<string, { node: string; css: string[]; fonts?: unknown }> = {
+    exact: { node: captured, css: [positioning, style.css] },
+    noClasses: { node: stripClasses(captured), css: [positioning, style.css] },
+    noVars: { node: stripVars(captured), css: [positioning, style.css] },
+    noFont: { node: captured, css: [positioning, style.css] },
+    subsets: { node: captured, css: [positioning, style.css], fonts: subsets as never[] },
+    enginePos: { node: captured, css: [enginePositioning, style.css] },
+    noPadTop: { node: captured, css: [stripProp(enginePositioning, 'padding-top'), style.css] },
+    noBoxSizing: { node: captured, css: [stripProp(enginePositioning, 'box-sizing'), style.css] },
+    noAlignItems: { node: captured, css: [stripProp(enginePositioning, 'align-items'), style.css] },
+    pad50: { node: captured, css: [enginePositioning.replace('padding-top:921.6px', 'padding-top:50px'), style.css] },
+    pad400: { node: captured, css: [enginePositioning.replace('padding-top:921.6px', 'padding-top:400px'), style.css] },
+    pad600: { node: captured, css: [enginePositioning.replace('padding-top:921.6px', 'padding-top:600px'), style.css] },
+    pad700: { node: captured, css: [enginePositioning.replace('padding-top:921.6px', 'padding-top:700px'), style.css] },
+    pad800: { node: captured, css: [enginePositioning.replace('padding-top:921.6px', 'padding-top:800px'), style.css] },
+    contentSpacer: {
+      node: captured.replace('<div class="tscaps-takumi-vtop"></div>', '<div class="tscaps-takumi-vtop">&nbsp;</div>'),
+      css: [spacerPositioning, style.css],
+    },
+    noSegAnim: {
+      node: captured,
+      css: [spacerPositioning, style.css.replace(/\.segment\{[^}]*animation:[^;]+;/g, '.segment{').replace(/@keyframes tscaps-scale-in[\s\S]*?^\}/gm, '')],
+    },
+    lowSimple: { node: `<div style="height:900px;"></div>${captured}`, css: [positioning, style.css] },
+    backwardsFill: { node: captured, css: [positioning, style.css.replace(/\bboth\b/g, 'backwards')] },
+    baked: { node: captured, css: [positioning, bakedIvo.css] },
+    spacerEngine: { node: captured, css: [spacerEngine, bakedIvo.css] },    spacerNoVtop: { node: captured, css: [spacerEngine, bakedIvo.css, '.tscaps-takumi-vtop{display:none;}'] },
+    spacerNoHwrap: { node: captured, css: [spacerEngine, bakedIvo.css, '.tscaps-takumi-hrow{display:block;} .tscaps-takumi-hleft,.tscaps-takumi-hright{display:none;}'] },
+    spacerColRow: { node: captured, css: [spacerEngine.replace('flex-direction:column', 'flex-direction:column-reverse'), bakedIvo.css] },
+    marginCap: { node: captured, css: [marginPositioning, bakedIvo.css] },
+    absCap: { node: captured, css: [absPositioning, bakedIvo.css] },
+  };
+  const out: Record<string, number[]> = {};
+  for (const [key, v] of Object.entries(variants)) {
+    const png = await render(v.node, {
+      width: 720,
+      height: 1280,
+      css: v.css,
+      timeMs: 1500,
+      ...(key === 'noFont' ? {} : { fonts: (v.fonts ?? fonts) as never[] }),
+    });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out[key] = [...bytes];
+  }
+  return out;
+};
+
+// Ivo accent hunt: full built style, matrix-like node. Static (no timing)
+// vs timed (vars + timeMs) - does activating the wobble animation drop
+// the line-2 accent background?
+window.ivoAccentProbe = async () => {
+  const style = buildGalleryStyle('ivo', 720, 1280);
+  const mkNode = (vars: string) => `<div class="tscaps-takumi-root"><div class="tscaps-takumi-layer"><div class="tscaps-takumi-caption"><div class="segment"${vars}><div class="line"><span class="word">PACK MY</span></div><div class="line"><span class="word">BOX WITH</span></div></div></div></div></div>`;
+  const noVars = mkNode('');
+  const withVars = mkNode(' style="--on-segment-starts:-1.5s;--tscaps-accent-bg:#adff2f;--tscaps-accent-color:#000000;"');
+  const variants = {
+    static: { node: noVars, css: style.css, ms: undefined },
+    timed: { node: withVars, css: style.css, ms: 1500 },
+  };
+  const out: Record<string, number[]> = {};
+  for (const [key, v] of Object.entries(variants)) {
+    const png = await render(v.node, {
+      width: 720,
+      height: 1280,
+      css: v.css,
+      ...(v.ms === undefined ? {} : { timeMs: v.ms }),
+    });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out[key] = [...bytes];
+  }
+  return out;
+};
+
+// Loki layer split: which layered copy paints what? Captures the real
+// matrix node (both layers) then renders outline-only / fill-only / both.
+window.lokiLayerProbe = async () => {
+  const font = await matrixFonts('loki');
+  const styleT = buildGalleryStyle('loki', 720, 1280, { takumi: true, hasItalic: font.hasItalic });
+  const doc = getMatrixDoc();
+  let captured = '';
+  let capturedCss: string[] = [];
+  const capture: TakumiRenderFn = async (node, options) => {
+    captured = node;
+    capturedCss = [...options.css];
+    return new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  };
+  const capRenderer = new TakumiSubtitleFrameRenderer(capture, {
+    ...(font.fonts === undefined ? {} : { fonts: font.fonts }),
+    layeredOutline: true,
+  });
+  await capRenderer.open(doc, { matrix: styleT }, 720, 1280);
+  await capRenderer.getFrames([1.5]).catch(() => []);
+  capRenderer.close();
+  if (!captured) throw new Error('no node captured');
+  const fillMarker = '<div class="tscaps-takumi-layer tscaps-takumi-fill">';
+  const fillAt = captured.indexOf(fillMarker);
+  if (fillAt < 0) throw new Error('no fill layer in node');
+  const rootOpen = '<div class="tscaps-takumi-root">';
+  // both = outline layer + fill layer; outlineOnly drops the fill layer
+  // (and the root's closing tag stays valid); fillOnly keeps root open +
+  // fill layer + close.
+  const outlineOnly = `${captured.slice(0, fillAt)}</div>`;
+  const fillOnly = `${rootOpen}${captured.slice(fillAt)}`;
+  const variants: Record<string, string> = { both: captured, outlineOnly, fillOnly };
+  const out: Record<string, number[]> = {};
+  for (const [key, node] of Object.entries(variants)) {
+    const png = await render(node, {
+      width: 720,
+      height: 1280,
+      css: [...capturedCss],
+      timeMs: 1500,
+      ...(font.fonts === undefined ? {} : { fonts: font.fonts as never[] }),
+    });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out[key] = [...bytes];
+  }
+  out.nodeLen = [captured.length % 256, outlineOnly.length % 256, fillOnly.length % 256];
+  return out;
+};
+
+// Center-anchor placement: proportional grow/grow spacers vs a fixed top
+// spacer plus translateY(-50%) on the caption. Anchor semantics put the
+// caption CENTER on the anchor point; grow/grow misses by Hc*(0.5-o).
+window.centerProbe = async () => {
+  const node = `<div class="tscaps-takumi-root"><div class="tscaps-takumi-layer"><div class="tscaps-takumi-vtop"></div><div class="tscaps-takumi-hrow"><div class="tscaps-takumi-hleft"></div><div class="tscaps-takumi-caption"><div class="segment"><div class="line"><span class="word">PACK MY BOX WITH</span></div><div class="line"><span class="word">FIVE DOZEN LIQUOR JUGS</span></div><div class="line"><span class="word">AND A SLICE OF PIE</span></div></div></div><div class="tscaps-takumi-hright"></div></div><div class="tscaps-takumi-vbottom"></div></div></div>`;
+  const seg = `.segment{font-size:48px;color:#fff;background:#222;} .word{display:inline-block;}`;
+  const root = '.tscaps-takumi-root{position:relative;width:100%;height:100%;background:transparent;} .tscaps-takumi-layer{position:absolute;left:0;top:0;width:100%;height:100%;display:flex;flex-direction:column;background:transparent;}';
+  const variants: Record<string, string> = {
+    // Current production recipe for center/0.75: caption center should be
+    // 960 but grow/grow lands it at 960 - Hc*0.25.
+    grow: `${root} .tscaps-takumi-vtop{height:0;flex-basis:0;flex-grow:0.75;flex-shrink:1;} .tscaps-takumi-hrow{display:flex;flex-direction:row;width:100%;flex-grow:0;flex-shrink:0;} .tscaps-takumi-vbottom{height:0;flex-basis:0;flex-grow:0.25;flex-shrink:1;} .tscaps-takumi-caption{max-width:92%;}`,
+    // Candidate: fixed top spacer at the anchor + pull up by half the
+    // caption's own height. Caption center must be exactly 960.
+    translate: `${root} .tscaps-takumi-vtop{height:960px;flex-basis:960px;flex-grow:0;flex-shrink:0;} .tscaps-takumi-hrow{display:flex;flex-direction:row;width:100%;flex-grow:0;flex-shrink:0;} .tscaps-takumi-vbottom{height:0;flex-basis:0;flex-grow:1;flex-shrink:1;} .tscaps-takumi-caption{max-width:92%;transform:translateY(-50%);}`,
+  };
+  const out: Record<string, number[]> = {};
+  for (const [key, css] of Object.entries(variants)) {
+    const png = await render(node, { width: 720, height: 1280, css: [css, seg] });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out[key] = [...bytes];
+  }
+  return out;
+};
+
+// max()/min() support in Takumi: literal and var() forms of the nyx
+// min-width recipe. Narrow content must come out 320 wide iff min-width
+// applies.
+window.maxProbe = async () => {
+  const node = `<div class="tscaps-takumi-root"><div class="box"><span class="word">PACK</span></div></div>`;
+  const root = '.tscaps-takumi-root{position:relative;width:720px;height:200px;background:transparent;} .box{display:inline-block;background:#222;} .word{font-size:48px;color:#fff;}';
+  const variants: Record<string, string> = {
+    plain: '.box{min-width:320px;}',
+    maxLit: '.box{min-width:max(320px, 0px);}',
+    maxVar: '.box{min-width:max(320px, var(--fw, 0px));}',
+    maxVarSet: '.box{min-width:max(320px, var(--fw, 0px));--fw:100px;}',
+    minLit: '.box{width:min(500px, 100px);}',
+  };
+  const out: Record<string, number[]> = {};
+  for (const [key, css] of Object.entries(variants)) {
+    const png = await render(node, { width: 720, height: 200, css: [root, css] });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out[key] = [...bytes];
+  }
+  return out;
+};
+
+// Nyx natural width: same matrix node, min-width forced off vs folded.
+// If natural content is ~450 the fold is the whole story; if ~270 the
+// font/metrics differ and min-width only papers over it.
+window.nyxWidthProbe = async () => {
+  const font = await matrixFonts('nyx');
+  const styleT = buildGalleryStyle('nyx', 720, 1280, { takumi: true, hasItalic: font.hasItalic });
+  const doc = getMatrixDoc();
+  let captured = '';
+  let capturedCss: string[] = [];
+  const capture: TakumiRenderFn = async (node, options) => {
+    captured = node;
+    capturedCss = [...options.css];
+    return new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  };
+  const capRenderer = new TakumiSubtitleFrameRenderer(capture, {
+    ...(font.fonts === undefined ? {} : { fonts: font.fonts }),
+  });
+  await capRenderer.open(doc, { matrix: styleT }, 720, 1280);
+  await capRenderer.getFrames([1.5]).catch(() => []);
+  capRenderer.close();
+  if (!captured) throw new Error('no node captured');
+  // noFonts runs FIRST in a fresh page: the backend caches loaded fonts,
+  // so any earlier fonts:[] call would contaminate the comparison.
+  const variants: Record<string, string[]> = {
+    noFonts: [...capturedCss],
+    folded: [...capturedCss],
+    noMinWidth: [...capturedCss, '.segment{min-width:0 !important;}'],
+    segBlockMax: [...capturedCss, '.segment{display:block !important;width:max-content !important;}'],
+    segInlineMax: [...capturedCss, '.segment{width:max-content !important;}'],
+  };
+  // (a) matrix node + bare positioning/font css: does the template css
+  // break font application? (b) full css without timeMs: does animation
+  // evaluation? Both carry the matrix fonts.
+  const bare = [
+    capturedCss[0] ?? '',
+    '.segment{font-family:"VT323",sans-serif;font-size:44px;} .word{display:inline-block;}',
+  ];
+  const out: Record<string, number[]> = {};
+  for (const [key, css] of Object.entries(variants)) {
+    const png = await render(captured, {
+      width: 720,
+      height: 1280,
+      css,
+      timeMs: 1500,
+      // noFonts proves whether VT323 applies at all: identical bytes means
+      // the fallback does all the work and widths can never match.
+      ...(key === 'noFonts' || font.fonts === undefined ? {} : { fonts: font.fonts as never[] }),
+    });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out[key] = [...bytes];
+  }
+  for (const [key, extra] of Object.entries({
+    bareTimed: { css: bare, ms: 1500 },
+    fullUntimed: { css: [...capturedCss], ms: undefined },
+    noGlow: { css: [...capturedCss, '.word{text-shadow:none !important;} .letter{text-shadow:none !important;}'], ms: 1500 },
+    noBefore: { css: [...capturedCss, '.segment::before{display:none !important;}'], ms: 1500 },
+    blkMax: { css: [...capturedCss, '.segment{min-width:0 !important;display:block !important;width:max-content !important;max-width:100% !important;}'], ms: 1500 },
+    blkFill: { css: [...capturedCss, '.segment{min-width:0 !important;display:block !important;}'], ms: 1500 },
+    fitNoMin: { css: [...capturedCss, '.segment{min-width:0 !important;width:fit-content !important;}'], ms: 1500 },
+    fitMin: { css: [...capturedCss, '.segment{width:fit-content !important;}'], ms: 1500 },
+    min200: { css: [...capturedCss, '.segment{min-width:200px !important;}'], ms: 1500 },
+    min500: { css: [...capturedCss, '.segment{min-width:500px !important;}'], ms: 1500 },
+  })) {
+    // Paired with/without fonts: identical bytes means the face does not
+    // apply in this combination (box geometry alone cannot tell once
+    // min-width binds, since both fonts wrap into it).
+    for (const useFonts of [true, false]) {
+      const png = await render(captured, {
+        width: 720,
+        height: 1280,
+        css: extra.css,
+        ...(extra.ms === undefined ? {} : { timeMs: extra.ms }),
+        ...(useFonts && font.fonts !== undefined ? { fonts: font.fonts as never[] } : {}),
+      });
+      const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+      out[useFonts ? key : `${key}NoFonts`] = [...bytes];
+    }
+  }
+  // Matrix node with state classes / timing vars stripped: does node
+  // complexity (not css) block font application?
+  const stripClasses = (html: string): string =>
+    html.replace(/\s+(segment|line|word|letter)-(being-narrated|not-narrated-yet|already-narrated)/g, '');
+  const stripVars = (html: string): string =>
+    html.replace(/\s?style="[^"]*"/g, '');
+  for (const [key, extra] of Object.entries({
+    stripAll: { node: stripVars(stripClasses(captured)), css: bare, ms: 1500 },
+    stripVars: { node: stripVars(captured), css: bare, ms: 1500 },
+    stripCls: { node: stripClasses(captured), css: bare, ms: 1500 },
+  })) {
+    for (const useFonts of [true, false]) {
+      const png = await render(extra.node, {
+        width: 720,
+        height: 1280,
+        css: extra.css,
+        ...(extra.ms === undefined ? {} : { timeMs: extra.ms }),
+        ...(useFonts && font.fonts !== undefined ? { fonts: font.fonts as never[] } : {}),
+      });
+      const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+      out[useFonts ? key : `${key}NoFonts`] = [...bytes];
+    }
+  }
+  return out;
+};
+
+// Isolated VT323 application: one unbroken string, no template css.
+// withFonts must come out wider iff the face applies.
+// Font-application smoke test per family: withFonts/noFonts (plus
+// var()-indirected and inline-var family forms) must differ iff the face
+// applies. (History: VT323 subsets shipped a hollow GSUB shell that made
+// Takumi reject the whole file; input files carry the GSUB-less rebuild.
+// See cli/strip-hollow-gsub.py.)
+window.vt323Probe = async () => {
+  const out: Record<string, number[]> = {};
+  for (const fam of ['nyx', 'ivo']) {
+    const font = await matrixFonts(fam);
+    const family = fam === 'nyx' ? 'VT323' : 'Anton';
+    const node = `<div class="tscaps-takumi-root"><span class="t">Pack my box with five dozen liquor jugs!</span></div>`;
+    const direct = `.tscaps-takumi-root{width:720px;height:200px;background:transparent;} .t{font-family:"${family}",sans-serif;font-size:44px;color:#fff;white-space:nowrap;}`;
+    const varCss = `.tscaps-takumi-root{width:720px;height:200px;background:transparent;} .t{font-family:var(--fam);font-size:44px;color:#fff;white-space:nowrap;--fam:"${family}",sans-serif;}`;
+    const inode = `<div class="tscaps-takumi-root"><span class="t" style="--fam:&quot;${family}&quot;, sans-serif;">Pack my box with five dozen liquor jugs!</span></div>`;
+    const cases: Record<string, { css: string; node: string; fonts: unknown[] | undefined }> = {
+      noFonts: { css: direct, node, fonts: undefined },
+      withFonts: { css: direct, node, fonts: font.fonts },
+      varfam: { css: varCss, node, fonts: font.fonts },
+      inlinevar: { css: varCss.replace(`--fam:"${family}",sans-serif;`, ''), node: inode, fonts: font.fonts },
+    };
+    for (const [ck, c] of Object.entries(cases)) {
+      const png = await render(c.node, {
+        width: 720,
+        height: 200,
+        css: [c.css],
+        ...(c.fonts !== undefined ? { fonts: c.fonts as never[] } : {}),
+      });
+      const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+      out[`${family}-${ck}`] = [...bytes];
+    }
+  }
+  return out;
+};
+
+// Which node feature breaks VT323 application? Same text, growing
+// structure, bare VT323 css, matrix fonts, no timing.
+window.nodeBisectProbe = async () => {
+  const font = await matrixFonts('nyx');
+  const css = '.tscaps-takumi-root{width:720px;height:200px;background:transparent;} .segment{font-family:"VT323",sans-serif;font-size:44px;color:#fff;white-space:nowrap;} .word{display:inline-block;} .letter{display:inline-block;}';
+  const text = 'Pack my box with five dozen liquor jugs!';
+  const letters = (w: string) => w.split('').map((c) => `<span class="letter">${c === ' ' ? '&nbsp;' : c}</span>`).join('');
+  const words = text.split(' ').map((w) => `<span class="word">${w}</span>`).join(' ');
+  const lwords = text.split(' ').map((w) => `<span class="word">${letters(w)}</span>`).join(' ');
+  const nodes: Record<string, string> = {
+    plain: `<div class="tscaps-takumi-root"><div class="segment"><span>${text}</span></div></div>`,
+    words: `<div class="tscaps-takumi-root"><div class="segment">${words}</div></div>`,
+    letters: `<div class="tscaps-takumi-root"><div class="segment">${lwords}</div></div>`,
+    dir: `<div class="tscaps-takumi-root"><div class="segment"><div class="line" style="direction:ltr;">${lwords}</div></div></div>`,
+  };
+  const out: Record<string, number[]> = {};
+  for (const [key, node] of Object.entries(nodes)) {
+    const png = await render(node, {
+      width: 720,
+      height: 200,
+      css: [css],
+      ...(font.fonts === undefined ? {} : { fonts: font.fonts as never[] }),
+    });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out[key] = [...bytes];
+  }
+  // Same dir node WITH timeMs: does animation-clock evaluation alone
+  // break font application?
+  {
+    const png = await render(nodes.dir!, {
+      width: 720,
+      height: 200,
+      css: [css],
+      timeMs: 1500,
+      ...(font.fonts === undefined ? {} : { fonts: font.fonts as never[] }),
+    });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out.dirTimed = [...bytes];
+  }
+  // One factor at a time away from working dirTimed (nowrap keeps width
+  // a direct font readout: ~709 VT323 vs 679 fallback).
+  const lwords8 = nodes.dir!.match(/<div class="line"[^>]*>([\s\S]*)<\/div>/)?.[1] ?? '';
+  const half = lwords8.length >> 1;
+  const cut = lwords8.lastIndexOf('</span>', half) + '</span>'.length;
+  const twoLines = `<div class="tscaps-takumi-root"><div class="segment"><div class="line" style="direction:ltr;">${lwords8.slice(0, cut)}</div><div class="line" style="direction:ltr;">${lwords8.slice(cut)}</div></div></div>`;
+  for (const [key, cfg] of Object.entries({
+    twoLine: { node: twoLines, h: 200, extra: '' },
+    tallCanvas: { node: nodes.dir!, h: 1280, extra: '' },
+    anonLetters: { node: nodes.dir!, h: 200, extra: '.letter{display:inline !important;}' },
+    grid1line: { node: nodes.dir!, h: 1280, extra: '', ms: 1500 },
+    grid2line: { node: twoLines, h: 200, extra: '', ms: 1500 },
+    // Same long text FORCED to wrap (narrow box, normal white-space):
+    // does wrapping itself drop the font? Paired with a no-fonts twin.
+    wrapBox: { node: nodes.dir!, h: 200, extra: '.tscaps-takumi-root{width:300px !important;} .segment{white-space:normal !important;}' },
+  })) {
+    for (const useFonts of [true, false]) {
+      const png = await render(cfg.node, {
+        width: 720,
+        height: cfg.h,
+        css: [css, cfg.extra].filter((s) => s !== ''),
+        ...('ms' in cfg && (cfg as { ms?: number }).ms !== undefined ? { timeMs: (cfg as { ms?: number }).ms } : {}),
+        ...(useFonts && font.fonts !== undefined ? { fonts: font.fonts as never[] } : {}),
+      });
+      const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+      out[useFonts ? key : `${key}NoFonts`] = [...bytes];
+    }
+  }
+  // 2x2 cross: stripped matrix node x working css, and working dir node
+  // x matrix bare css (positioning included). All timed like production.
+  const doc2 = getMatrixDoc();
+  let cap2 = '';
+  let capCss2: string[] = [];
+  const cap2fn: TakumiRenderFn = async (node, options) => {
+    cap2 = node;
+    capCss2 = [...options.css];
+    return new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  };
+  const cap2r = new TakumiSubtitleFrameRenderer(cap2fn, {
+    ...(font.fonts === undefined ? {} : { fonts: font.fonts }),
+  });
+  await cap2r.open(doc2, { matrix: buildGalleryStyle('nyx', 720, 1280, { takumi: true, hasItalic: false }) }, 720, 1280);
+  await cap2r.getFrames([1.5]).catch(() => []);
+  cap2r.close();
+  const sc = (html: string): string =>
+    html.replace(/\s+(segment|line|word|letter)-(being-narrated|not-narrated-yet|already-narrated)/g, '').replace(/\s?style="[^"]*"/g, '');
+  const stripped = sc(cap2);
+  const workCss = [css];
+  const bareCss = [capCss2[0] ?? '', '.segment{font-family:"VT323",sans-serif;font-size:44px;} .word{display:inline-block;}'];
+  for (const [key, cfg] of Object.entries({
+    crossStripWork: { node: stripped, css: workCss },
+    crossDirBare: { node: nodes.dir!, css: bareCss },
+  })) {
+    for (const useFonts of [true, false]) {
+      const png = await render(cfg.node, {
+        width: 720,
+        height: 1280,
+        css: cfg.css,
+        timeMs: 1500,
+        ...(useFonts && font.fonts !== undefined ? { fonts: font.fonts as never[] } : {}),
+      });
+      const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+      out[useFonts ? key : `${key}NoFonts`] = [...bytes];
+    }
+  }
+  return out;
+};
 
 // Returns the exact node string the matrix feeds Takumi (for diffing).
 window.matrixNode = async (name: string, t: number): Promise<string> => {
@@ -1301,7 +1753,11 @@ window.matrixCase = async (name: string, t: number, keepMounted = false): Promis
       capturedB = { node, css: [...options.css] };
       return reuseBytes;
     };
-    const captureRenderer = new TakumiSubtitleFrameRenderer(captureRender, { layeredOutline: layered });
+    // The outline/fill split is a Takumi-only construct: the real browser
+    // pipeline renders one caption, so truth is a single copy. Mounting
+    // both layers would stack two captions and score against half of that
+    // stack — a harness artifact, not renderer drift.
+    const captureRenderer = new TakumiSubtitleFrameRenderer(captureRender, { layeredOutline: false });
     await captureRenderer.open(doc, { matrix: styleB }, 720, 1280);
     await captureRenderer.getFrames([t]);
     captureRenderer.close();
@@ -1313,9 +1769,27 @@ window.matrixCase = async (name: string, t: number, keepMounted = false): Promis
     // Neutralize the Takumi root/layer boxes inside the probe: the anchor
     // owns positioning here, and background on layers would double-paint.
     // The caption subtree keeps every template class, var, and animation.
+    // The row gets a definite 720px so the caption's percentage max-width
+    // resolves exactly like the render engine (inside a zero-size grid it
+    // would be cyclic and inflate); the caption shrink-fits via
+    // fit-content like the flex item it is in production, with margins
+    // placing it per the template's horizontal alignment.
+    const halign = (galleryTemplateJson(name) as { alignment: { horizontalAlign?: string } }).alignment.horizontalAlign ?? 'center';
+    const hSide = halign === 'left' || halign === 'start' ? 'left' : halign === 'right' || halign === 'end' ? 'right' : 'center';
+    const capMargin = hSide === 'left'
+      ? 'margin:0 auto 0 0 !important;'
+      : hSide === 'right' ? 'margin:0 0 0 auto !important;' : 'margin:0 auto !important;';
     styleEl.textContent = `${capturedB.css.join('\n')}\n` +
       '.tscaps-takumi-root{position:static !important;width:max-content !important;height:auto !important;background:transparent !important;}' +
-      '.tscaps-takumi-layer{position:static !important;width:auto !important;height:auto !important;display:block !important;padding:0 !important;background:transparent !important;}';
+      '.tscaps-takumi-layer{position:static !important;width:auto !important;height:auto !important;display:block !important;padding:0 !important;margin:0 !important;background:transparent !important;}' +
+      '.tscaps-takumi-vtop,.tscaps-takumi-vbottom,.tscaps-takumi-hleft,.tscaps-takumi-hright{display:none !important;}' +
+      `.tscaps-takumi-hrow{display:block !important;width:720px !important;}` +
+      `.tscaps-takumi-caption{width:fit-content !important;${capMargin}}` +
+      // Engine positioning must not leak into truth: the anchor grid owns
+      // placement here, so the caption's centering translate (correct in
+      // the renderer, where a fixed spacer precedes it) would double-shift
+      // the probe copy. Template transforms live deeper and are untouched.
+      '.tscaps-takumi-caption{transform:none !important;}';
     probe.appendChild(styleEl);
     const anchorEl = document.createElement('div');
     anchorEl.setAttribute('style', anchor);

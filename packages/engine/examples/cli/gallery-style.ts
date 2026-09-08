@@ -320,11 +320,70 @@ export function buildGalleryStyle(
     inlineStyles['--tscaps-font-style'] = takumi && !hasItalic ? 'normal' : 'italic';
   }
   const fontPx = typo.fontSize * cqh;
-  const css = px(rawCss) + (takumi
-    ? `\n${galleryTakumiFallbackCss(name, fontPx)}\n${galleryClipTextFallback(name)}`
-    : '');
+  // Takumi cannot evaluate max()/min() at all (proven by probe: every
+  // max/min form renders at content size, e.g. nyx min-width collapsing
+  // 320px to 77px), so fold the statically known ones at bake time. Only
+  // control-driven vars with px-literal fallbacks substitute their baked
+  // value; engine timing vars (--on-*, --segment-*, ...) and
+  // template-internal vars have unitless fallbacks or aren't controls, so
+  // live recipes like --tscaps-font-size-scale survive untouched for the
+  // renderer's JS handling.
+  const pxLit = /^-?[\d.]+px$/;
+  const foldMaxMin = (cssText: string): string => {
+    let prev = '';
+    let out = cssText;
+    for (let i = 0; i < 5 && out !== prev; i++) {
+      prev = out;
+      out = out.replace(/\b(m(?:ax|in))\(((?:[^()]|\([^()]*\))*)\)/g, (m, fn: string, args: string) => {
+        // Top-level comma split (var() fallbacks contain commas).
+        const parts: string[] = [];
+        let depth = 0;
+        let cur = '';
+        for (const ch of args) {
+          if (ch === '(') depth++;
+          else if (ch === ')') depth--;
+          if (ch === ',' && depth === 0) { parts.push(cur.trim()); cur = ''; } else cur += ch;
+        }
+        parts.push(cur.trim());
+        const resolved = parts.map((a) => a.replace(
+          /var\((--[\w-]+),\s*(-?[\d.]+px)\)/g,
+          (vm: string, vname: string) => {
+            const id = vname.replace(/^--tscaps-/, '');
+            const bakedVal = inlineStyles[vname];
+            return controls.has(id) && bakedVal !== undefined && pxLit.test(bakedVal) ? bakedVal : vm;
+          },
+        ));
+        if (!resolved.every((p) => pxLit.test(p))) return m;
+        const nums = resolved.map((p) => Number(p.slice(0, -2)));
+        const v = fn === 'max' ? Math.max(...nums) : Math.min(...nums);
+        return `${Number(v.toFixed(2))}px`;
+      });
+    }
+    return out;
+  };
+  // Ivo is the only gallery template that shrink-fits its lines with
+  // `display:table`. Takumi resolves an auto-width table to min-content
+  // (one word per line, proven by probe: 182px lines vs the browser's
+  // 564px), which both wrecks the geometry and pushes the caption past
+  // the viewport edge so the accent line gets clipped. A block with
+  // max-content width plus the template's own `margin:0 auto` centers
+  // identically in both engines.
+  const tableFix = takumi && name === 'ivo'
+    ? '\n.line{display:block;width:max-content;max-width:100%;}'
+    : '';
+  const baked = takumi
+    ? foldMaxMin(`${px(rawCss)}\n${galleryTakumiFallbackCss(name, fontPx)}\n${galleryClipTextFallback(name)}${tableFix}`).replace(
+      /(\banimation\s*:[^;}]*?)\bboth\b/g,
+      // Ended `both`-fill animations break descendant box painting in
+      // Takumi (proven by probe: accent backgrounds vanish while text
+      // survives). `backwards` keeps pre-start behavior identical, and
+      // gallery entrances rest at base styles so post-end output is
+      // identical too. Infinite animations never end and are unaffected.
+      '$1backwards',
+    )
+    : px(rawCss);
   return {
-    css,
+    css: baked,
     inlineStyles,
     alignment: {
       verticalAlign: json.alignment.verticalAlign,

@@ -196,16 +196,25 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
   }
 
   private buildCss(): string[] {
-    // Row-direction flex roots: justify-content runs horizontally,
-    // align-items runs vertically. Anchor offsets become padding in PX on
-    // the anchor side — CSS percentage padding resolves against the width,
-    // never the height, so percentages would misplace the box.
-    // bottom o → box bottom edge at o*H → padding-bottom (1-o)*H.
-    // top o → box top edge at o*H → padding-top o*H.
-    // center o → box center at o*H → padding-top (2o-1)*H / padding-bottom
-    // (1-2o)*H whichever side the anchor leans to. Same mirrored on the
-    // horizontal axis with W. Reading sides (start/end) read as screen
-    // sides for ltr content, matching the engine resolver for ltr.
+    // Positioning uses spacer flexboxes, never offsets on the caption box:
+    // - padding on the layer clips painted descendants past the padding
+    //   box edge in Takumi (proven by probe: padding-top ≥ ~600px eats
+    //   backgrounds proportionally);
+    // - margins on the caption are ignored by Takumi's flex layout;
+    // - CSS percentage padding/margins resolve against the width, never
+    //   the height, so percentages would misplace vertical anchors anyway.
+    // Instead the layer is a column flexbox (top spacer, content row,
+    // bottom spacer) and the content row is a row flexbox (left spacer,
+    // caption, right spacer). Edge anchors get FIXED-px spacers
+    // (top o → top spacer o*H; bottom o → bottom spacer (1-o)*H; same
+    // mirrored on W); center anchors at exactly half get PROPORTIONAL
+    // spacers (o : 1-o), which land the center exactly on the anchor.
+    // Off-half centers use a fixed spacer plus a -50% caption translate
+    // instead (see below): proportional splits miss by Hc*(0.5-o).
+    // All sizes are precomputed px — no percentages, no calc; the only
+    // transform is the off-half center's own-box -50% shift (see below).
+    // Reading sides (start/end) read as screen sides for ltr
+    // content, matching the engine resolver for ltr.
     //
     // Layers (see layeredOutline) each carry the full positioning so the
     // outline and fill copies coincide exactly.
@@ -216,31 +225,66 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
     const horizontalOffset = first?.alignment.horizontalOffset ?? 0.5;
     const H = this.height;
     const W = this.width;
-    const vPad = vertical === 'bottom'
-      ? `padding-bottom:${((1 - verticalOffset) * H).toFixed(1)}px;`
+    const px = (n: number): string => `${Math.max(0, Math.round(n * 10) / 10)}px`;
+    // NOTE: main size via flex-basis AND height/width: Takumi resolves a
+    // bare height/width on an empty flex item to content size (zero),
+    // ignoring the property; flex-basis is honored. Both carry the same
+    // value so whichever wins agrees.
+    const fixed = (n: number): string => `height:${px(n)};flex-basis:${px(n)};flex-grow:0;flex-shrink:0;`;
+    const grow = (g: number): string => `height:0;flex-basis:0;flex-grow:${g};flex-shrink:1;`;
+    const fixedW = (n: number): string => `width:${px(n)};flex-basis:${px(n)};flex-grow:0;flex-shrink:0;`;
+    const growW = (g: number): string => `width:0;flex-basis:0;flex-grow:${g};flex-shrink:1;`;
+    const vTop = vertical === 'bottom'
+      ? grow(1)
       : vertical === 'top'
-        ? `padding-top:${(verticalOffset * H).toFixed(1)}px;`
-        : verticalOffset >= 0.5
-          ? `padding-top:${((2 * verticalOffset - 1) * H).toFixed(1)}px;`
-          : `padding-bottom:${((1 - 2 * verticalOffset) * H).toFixed(1)}px;`;
+        ? fixed(verticalOffset * H)
+        : verticalOffset === 0.5
+          ? grow(verticalOffset)
+          : fixed(verticalOffset * H);
+    const vBottom = vertical === 'bottom'
+      ? fixed((1 - verticalOffset) * H)
+      : vertical === 'top'
+        ? grow(1)
+        : verticalOffset === 0.5
+          ? grow(1 - verticalOffset)
+          : grow(1);
     const hSide = horizontal === 'left' || horizontal === 'start' ? 'left'
       : horizontal === 'right' || horizontal === 'end' ? 'right' : 'center';
-    const hPad = hSide === 'left'
-      ? `padding-left:${(horizontalOffset * W).toFixed(1)}px;`
+    const hLeft = hSide === 'left'
+      ? fixedW(horizontalOffset * W)
       : hSide === 'right'
-        ? `padding-right:${((1 - horizontalOffset) * W).toFixed(1)}px;`
-        : horizontalOffset >= 0.5
-          ? `padding-left:${((2 * horizontalOffset - 1) * W).toFixed(1)}px;`
-          : `padding-right:${((1 - 2 * horizontalOffset) * W).toFixed(1)}px;`;
+        ? growW(1)
+        : horizontalOffset === 0.5
+          ? growW(horizontalOffset)
+          : fixedW(horizontalOffset * W);
+    const hRight = hSide === 'left'
+      ? growW(1)
+      : hSide === 'right'
+        ? fixedW((1 - horizontalOffset) * W)
+        : horizontalOffset === 0.5
+          ? growW(1 - horizontalOffset)
+          : growW(1);
+    // Center anchors with an offset other than 0.5 cannot use proportional
+    // spacers: splitting free space o : 1-o lands the caption center at
+    // anchor + Hc*(0.5-o), off by tens of px for real captions (loki at
+    // center/0.75 sat 64px high; iris at center/0.81 drifted 74px). A fixed
+    // spacer puts the caption's top/left edge on the anchor and a -50%
+    // translate of its own box pulls the center onto it for any content
+    // size — Takumi honors percentage translates (proven by probe: caption
+    // center landed 959.5 for a 960 anchor). Edge anchors and exact-half
+    // centers keep the transform-free recipe.
+    const vShift = vertical === 'center' && verticalOffset !== 0.5 ? 'translateY(-50%)' : '';
+    const hShift = hSide === 'center' && horizontalOffset !== 0.5 ? 'translateX(-50%)' : '';
+    const shift = `${vShift}${vShift !== '' && hShift !== '' ? ' ' : ''}${hShift}`;
     const positioning = [
       '.tscaps-takumi-root{position:relative;width:100%;height:100%;background:transparent;}',
-      '.tscaps-takumi-layer{position:absolute;left:0;top:0;width:100%;height:100%;display:flex;box-sizing:border-box;',
-      `justify-content:${hSide === 'left' ? 'flex-start' : hSide === 'right' ? 'flex-end' : 'center'};`,
-      `align-items:${vertical === 'top' ? 'flex-start' : vertical === 'center' ? 'center' : 'flex-end'};`,
-      vPad,
-      hPad,
-      'background:transparent;}',
-      '.tscaps-takumi-caption{max-width:92%;background:transparent;}',
+      '.tscaps-takumi-layer{position:absolute;left:0;top:0;width:100%;height:100%;display:flex;flex-direction:column;background:transparent;}',
+      `.tscaps-takumi-vtop{${vTop}}`,
+      '.tscaps-takumi-hrow{display:flex;flex-direction:row;width:100%;flex-grow:0;flex-shrink:0;}',
+      `.tscaps-takumi-hleft{${hLeft}}`,
+      `.tscaps-takumi-hright{${hRight}}`,
+      `.tscaps-takumi-vbottom{${vBottom}}`,
+      `.tscaps-takumi-caption{max-width:92%;background:transparent;${shift === '' ? '' : `transform:${shift};`}}`,
     ].join('');
     return [positioning, ...Object.values(this.styles).map((s) => s.css)];
   }
@@ -250,13 +294,16 @@ export class TakumiSubtitleFrameRenderer implements SubtitleFrameRenderer {
     const sections = doc.getActiveSections(t);
     if (sections.length === 0) return null;
     const inner = sections.map((section) => this.buildSection(section, t)).join('');
+    const layer = (extra: string): string =>
+      `<div class="tscaps-takumi-layer${extra}"><div class="tscaps-takumi-vtop"></div>` +
+      `<div class="tscaps-takumi-hrow"><div class="tscaps-takumi-hleft"></div>` +
+      `<div class="tscaps-takumi-caption">${inner}</div>` +
+      `<div class="tscaps-takumi-hright"></div></div>` +
+      `<div class="tscaps-takumi-vbottom"></div></div>`;
     if (!this.layeredOutline) {
-      return `<div class="tscaps-takumi-root"><div class="tscaps-takumi-layer"><div class="tscaps-takumi-caption">${inner}</div></div></div>`;
+      return `<div class="tscaps-takumi-root">${layer('')}</div>`;
     }
-    return `<div class="tscaps-takumi-root">` +
-      `<div class="tscaps-takumi-layer tscaps-takumi-outline"><div class="tscaps-takumi-caption">${inner}</div></div>` +
-      `<div class="tscaps-takumi-layer tscaps-takumi-fill"><div class="tscaps-takumi-caption">${inner}</div></div>` +
-      `</div>`;
+    return `<div class="tscaps-takumi-root">${layer(' tscaps-takumi-outline')}${layer(' tscaps-takumi-fill')}</div>`;
   }
 
   private buildSection(section: Section, t: number): string {

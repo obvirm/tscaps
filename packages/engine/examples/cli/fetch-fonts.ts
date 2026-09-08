@@ -3,6 +3,9 @@
 // then loads fonts from these local bytes on both sides (Takumi FontDetails
 // and document FontFace), eliminating per-run Google Fonts DNS flakiness
 // that made matrix widths nondeterministic.
+// NOTE: after downloading, run `python cli/strip-hollow-gsub.py` — Google's
+// subsetter leaves hollow zero-coverage GSUB shells that make Takumi reject
+// the whole file (proven with VT323: fallback until the GSUB was dropped).
 // Usage: pnpm exec tsx cli/fetch-fonts.ts
 import { mkdirSync, writeFileSync, copyFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
