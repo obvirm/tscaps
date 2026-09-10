@@ -13,7 +13,7 @@ import {
   type TakumiBitmapDecoder,
 } from '@tscaps/engine';
 import { render } from 'takumi-js';
-import { buildGalleryStyle, gallerySegmentSplitter, galleryEffects, galleryMaxLines, galleryFontFamily, galleryFontPx, galleryTakumiFallbackCss, galleryUsesSvgFilter, galleryClipTextFallback, galleryTemplateNames, galleryTemplateJson, type GalleryTemplateName } from './gallery-style';
+import { buildGalleryStyle, gallerySegmentSplitter, galleryEffects, galleryMaxLines, galleryFontFamily, galleryFontPx, galleryTakumiFallbackCss, galleryUsesSvgFilter, galleryNeedsStrokeLayers, galleryClipTextFallback, galleryTemplateNames, galleryTemplateJson, type GalleryTemplateName } from './gallery-style';
 
 export type RunnerStyle = 'default' | GalleryTemplateName;
 
@@ -330,7 +330,7 @@ window.renderGalleryVideo = async (videoUrl: string, template: string, doc: DocJ
     builder.withSubtitleFrameRenderer(new TakumiSubtitleFrameRenderer(takumiAdapter(), {
       ...(font.fonts === undefined ? {} : { fonts: font.fonts }),
       decode: galleryDecode(),
-      layeredOutline: galleryUsesSvgFilter(name),
+      layeredOutline: galleryUsesSvgFilter(name) || galleryNeedsStrokeLayers(name),
     }));
   }
   // Page fonts too, for any live-DOM measurement parity.
@@ -1324,6 +1324,12 @@ window.pepperPillProbe = async () => {
     // Pill-as-background: padding expands the bg, negative margins pull
     // layout back, radius follows. No pseudo, no absolute, no z-index.
     bgPill: '.t .w2{padding:4px 10px;margin:-4px -10px;background:#ff0000;border-radius:8px;}',
+    // Native text-stroke: em vs px width, with and without paint-order.
+    strokeEm: '.t{-webkit-text-stroke:0.12em black;}',
+    strokePx: '.t{-webkit-text-stroke:6px black;}',
+    strokeEmPO: '.t{-webkit-text-stroke:0.12em black;paint-order:stroke fill;}',
+    strokePxPO: '.t{-webkit-text-stroke:6px black;paint-order:stroke fill;}',
+    strokeNone: '.t{}',
   })) {
     const png = await render(mnode, { width: 720, height: 200, css: [mroot, css] });
     const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
@@ -2139,7 +2145,7 @@ window.matrixCase = async (name: string, t: number, keepMounted = false): Promis
   const font = await matrixFonts(name);
   const styleB = buildGalleryStyle(name, 720, 1280);
   const styleT = buildGalleryStyle(name, 720, 1280, { takumi: true, hasItalic: font.hasItalic });
-  const layered = galleryUsesSvgFilter(name);
+  const layered = galleryUsesSvgFilter(name) || galleryNeedsStrokeLayers(name);
   // --- Takumi side (production code path) ---
   const takumi = await matrixRenderTakumi(t, doc, font, styleT, layered);
   // --- Browser side (browser-exact node+css, animations frozen at timeMs) ---
@@ -2201,7 +2207,7 @@ window.matrixReview = async (name: string, t: number): Promise<MatrixReviewResul
   const font = await matrixFonts(name);
   const styleB = buildGalleryStyle(name, 720, 1280);
   const styleT = buildGalleryStyle(name, 720, 1280, { takumi: true, hasItalic: font.hasItalic });
-  const layered = galleryUsesSvgFilter(name);
+  const layered = galleryUsesSvgFilter(name) || galleryNeedsStrokeLayers(name);
   const takumi = await matrixRenderTakumi(t, doc, font, styleT, layered);
   let png: number[] | null = null;
   let takumiError: string | null = null;

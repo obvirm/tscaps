@@ -178,6 +178,38 @@ export function galleryUsesSvgFilter(name: GalleryTemplateName): boolean {
   return /filter\s*:[^;]*url\(#/.test(templateEntry(name).css);
 }
 
+/** Default outline thickness (em) behind -webkit-text-stroke rules. */
+export function galleryOutlineThickness(name: GalleryTemplateName): number {
+  const { json } = templateEntry(name);
+  for (const control of json.styleControls) {
+    if (control.id === 'outline-thickness') return Number(control.default ?? 0);
+  }
+  return 0;
+}
+
+/**
+ * Templates whose paint-order:stroke-fill text needs the layered model in
+ * Takumi: the engine ignores paint-order and draws the stroke OVER the
+ * fill, eating ~80% of thin glyphs (proven by probe: 3321 white px without
+ * stroke vs 641 with). The outline copy paints the authored stroke over
+ * transparent ink, the fill copy paints intact text without stroke —
+ * exactly the browser's stroke-under-fill. Gated on a nonzero default
+ * thickness so zero-outline templates keep the single fast path.
+ */
+export function galleryNeedsStrokeLayers(name: GalleryTemplateName): boolean {
+  if (!/paint-order\s*:\s*stroke/.test(templateEntry(name).css)) return false;
+  return galleryOutlineThickness(name) !== 0;
+}
+
+/** Takumi-only layered stroke CSS, appended AFTER the template stylesheet. */
+export function galleryStrokeLayerCss(name: GalleryTemplateName): string {
+  if (!galleryNeedsStrokeLayers(name)) return '';
+  return [
+    '.tscaps-takumi-outline span{color:transparent !important;text-shadow:none !important;}',
+    '.tscaps-takumi-fill span{-webkit-text-stroke:0 !important;}',
+  ].join('');
+}
+
 /**
  * Whether the stylesheet paints text through `background-clip: text`
  * (transparent ink showing a gradient). Takumi drops such text entirely
@@ -416,7 +448,7 @@ export function buildGalleryStyle(
     ? '\n.word-being-narrated{padding:var(--tscaps-highlight-bg-padding-y, 0.08em) var(--tscaps-highlight-bg-padding-x, 0.2em);margin:calc(var(--tscaps-highlight-bg-padding-y, 0.08em) * -1) calc(var(--tscaps-highlight-bg-padding-x, 0.2em) * -1);background:var(--tscaps-highlight-bg-color, #cb5a2a);border-radius:var(--tscaps-highlight-bg-radius, 0.16em);}\n.word-being-narrated::before{display:none;}'
     : '';
   const baked = takumi
-    ? foldMaxMin(`${px(rawCss)}\n${galleryTakumiFallbackCss(name, fontPx)}\n${galleryClipTextFallback(name)}${tableFix}${pillFix}`).replace(
+    ? foldMaxMin(`${px(rawCss)}\n${galleryTakumiFallbackCss(name, fontPx)}\n${galleryClipTextFallback(name)}${galleryStrokeLayerCss(name)}${tableFix}${pillFix}`).replace(
       /(\banimation\s*:[^;}]*?)\bboth\b/g,
       // Ended `both`-fill animations break descendant box painting in
       // Takumi (proven by probe: accent backgrounds vanish while text
