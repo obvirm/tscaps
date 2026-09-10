@@ -53,6 +53,7 @@ interface TemplateJson {
   };
   styleControls: ReadonlyArray<{
     id: string; type?: string; default: unknown; valueOn?: string; valueOff?: string;
+    unit?: string; options?: ReadonlyArray<{ value: unknown; cssValue?: string }>;
   }>;
   segmentSplitters: ReadonlyArray<{
     type: string; mode?: string; maxChars?: number; minChars?: number;
@@ -244,6 +245,31 @@ function firstGradientStop(rule: string): string | null {
  * straddles the edge, so the outline copy uses width 2r — its inner half
  * hides under the fill copy, leaving r outside. Derived, not tuned.
  */
+/** Studio-exact control serialization (see ControlValueCssRenderer): numbers
+ * carry their declared unit, selects resolve cssValue, text is quoted,
+ * fonts resolve to a quoted stack. The fallback-math loop below intentionally
+ * keeps raw numbers instead. */
+function renderControlValue(control: {
+  type?: string; default: unknown; valueOn?: string; valueOff?: string;
+  unit?: string; options?: ReadonlyArray<{ value: unknown; cssValue?: string }>;
+}): string {
+  const def = control.default;
+  if (control.type === 'toggle') return def ? (control.valueOn ?? '1') : (control.valueOff ?? '0');
+  if (control.type === 'select') {
+    return control.options?.find((o) => o.value === def)?.cssValue ?? String(def);
+  }
+  if (control.type === 'text') return `"${String(def ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+  if (control.type === 'font') {
+    const fam = String(def ?? '');
+    const short = fam.endsWith(' Variable') ? fam.slice(0, -' Variable'.length) : fam;
+    // Same quoting the typography stack uses; stand-ins omitted (families
+    // we do not ship would fall through to system anyway).
+    return short === 'JetBrains Mono' ? '"JetBrains Mono", monospace' : `"${short}", sans-serif`;
+  }
+  if (typeof def === 'number' && control.unit) return `${def}${control.unit}`;
+  return String(def ?? '');
+}
+
 export function galleryTakumiFallbackCss(name: GalleryTemplateName, fontPx: number): string {
   const { json } = templateEntry(name);
   if (!galleryUsesSvgFilter(name)) return '';
@@ -303,16 +329,12 @@ export function buildGalleryStyle(
       .replace(/([\d.]+)cqw/g, (_, n: string) => `${(Number(n) * cqw).toFixed(2)}px`);
   const controls = new Map<string, string>();
   for (const control of json.styleControls) {
-    if (control.type === 'toggle') {
-      const on = String(control.default) === 'true';
-      controls.set(control.id, on ? (control.valueOn ?? '') : (control.valueOff ?? ''));
-    } else {
-      controls.set(control.id, String(control.default));
-    }
+    const value = renderControlValue(control);
+    if (value !== '') controls.set(control.id, px(value));
   }
   const inlineStyles: Record<string, string> = {};
   for (const [id, value] of controls) {
-    if (value !== '') inlineStyles[`--tscaps-${id}`] = px(value);
+    inlineStyles[`--tscaps-${id}`] = value;
   }
   const typo = json.typography;
   inlineStyles['--tscaps-font-family'] = galleryFontFamilyCss(name);

@@ -31,6 +31,9 @@ declare global {
     lokiLayerProbe(): Promise<Record<string, number[]>>;
     centerProbe(): Promise<Record<string, number[]>>;
     maxProbe(): Promise<Record<string, number[]>>;
+    foProbe(): Promise<Record<string, number[]>>;
+    scopedProbe(): Promise<Record<string, string>>;
+    splitProbe(): Promise<Record<string, number[]>>;
     vt323Probe(): Promise<Record<string, number[]>>;
     nodeBisectProbe(): Promise<Record<string, number[]>>;
     fontLoadProbe(name: string): Promise<Record<string, string>>;
@@ -1191,6 +1194,92 @@ window.videoFontProbe = async (name: string) => {
     out[`mx${i}`] = Math.round((el as HTMLElement).getBoundingClientRect().width);
   });
   probe.innerHTML = '';
+  return out;
+};
+
+// Zara RGB-split fidelity: matrix zara node, default split vs cranked.
+// Counts magenta/cyan fringe pixels in the Takumi PNG.
+window.splitProbe = async () => {
+  const font = await matrixFonts('zara');
+  const styleT = buildGalleryStyle('zara', 720, 1280, { takumi: true, hasItalic: font.hasItalic });
+  const doc = getMatrixDoc();
+  let captured = '';
+  let capturedCss: string[] = [];
+  const capture: TakumiRenderFn = async (node, options) => {
+    captured = node;
+    capturedCss = [...options.css];
+    return new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  };
+  const capRenderer = new TakumiSubtitleFrameRenderer(capture, {
+    ...(font.fonts === undefined ? {} : { fonts: font.fonts }),
+  });
+  await capRenderer.open(doc, { matrix: styleT }, 720, 1280);
+  await capRenderer.getFrames([1.5]).catch(() => []);
+  capRenderer.close();
+  if (!captured) throw new Error('no node captured');
+  const variants: Record<string, { css: string[]; node: string }> = {
+    splitDefault: { css: [...capturedCss], node: captured },
+    splitBig: {
+      css: [...capturedCss, '.segment{--tscaps-split-x:0.25em !important;}'],
+      node: captured.replace(/--tscaps-split-x:[^;]+;/g, '--tscaps-split-x:0.25em;'),
+    },
+  };
+  const out: Record<string, number[]> = {};
+  for (const [key, v] of Object.entries(variants)) {
+    const png = await render(v.node, {
+      width: 720,
+      height: 1280,
+      css: v.css,
+      timeMs: 1500,
+      ...(font.fonts === undefined ? {} : { fonts: font.fonts as never[] }),
+    });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out[key] = [...bytes];
+  }
+  return out;
+};
+
+// Same zara matrix node+css painted three ways: plain live DOM is the
+// reference; foreignObject-in-<img> isolates the raster context from the
+// pipeline's css processing (scope/minify/var-scan).
+window.foProbe = async () => {
+  const font = await matrixFonts('zara');
+  const styleB = buildGalleryStyle('zara', 720, 1280);
+  const doc = getMatrixDoc();
+  let captured = '';
+  const cap: TakumiRenderFn = async (node) => {
+    captured = node;
+    return new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+  };
+  const capR = new TakumiSubtitleFrameRenderer(cap, { layeredOutline: false });
+  await capR.open(doc, { matrix: styleB }, 720, 1280);
+  await capR.getFrames([1.5]).catch(() => []);
+  capR.close();
+  if (!captured) throw new Error('no node captured');
+  const cssText = [...styleB.css].join('\n');
+  const nodeHtml = captured;
+  // Embed Anton: SVG-as-image cannot see document fonts, same constraint
+  // as the pipeline (which inlines via CssResourceEmbedder).
+  const antonBytes = new Uint8Array(await (await fetch('/input/fonts/anton-anton-latin.woff2')).arrayBuffer());
+  let binary = '';
+  for (const byte of antonBytes) binary += String.fromCharCode(byte);
+  const fontFace = `@font-face{font-family:"Anton";src:url(data:font/woff2;base64,${btoa(binary)});font-weight:400;font-style:normal;}`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1280"><style><![CDATA[${fontFace}\n${cssText}]]></style><foreignObject x="0" y="0" width="720" height="1280"><div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;width:720px;height:1280px;overflow:hidden;">${nodeHtml}</div></foreignObject></svg>`;
+  const out: Record<string, number[]> = {};
+  const img = new Image();
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error('svg decode failed'));
+    img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  });
+  await img.decode().catch(() => {});
+  const canvas = document.createElement('canvas');
+  canvas.width = 720;
+  canvas.height = 1280;
+  const ctx = canvas.getContext('2d')!;
+  ctx.drawImage(img, 0, 0);
+  const blob: Blob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'));
+  out.foreignObject = [...new Uint8Array(await blob.arrayBuffer())];
   return out;
 };
 

@@ -28,16 +28,22 @@ try {
     const name = process.argv[2] ?? 'loki';
     const t = Number(process.argv[3] ?? '1.5');
     const probeOnly = process.argv[4] ?? '';
-    const probeName = probeOnly === 'nyxprobe' ? 'nyxWidthProbe' : probeOnly === 'bisect' ? 'nodeBisectProbe' : probeOnly === 'font' ? 'fontLoadProbe' : 'nodeBisectProbe';
+    const probeName = probeOnly === 'nyxprobe' ? 'nyxWidthProbe' : probeOnly === 'bisect' ? 'nodeBisectProbe' : probeOnly === 'font' ? 'fontLoadProbe' : probeOnly === 'split' ? 'splitProbe' : probeOnly === 'fo' ? 'foProbe' : 'nodeBisectProbe';
     if (probeOnly === 'vfont') {
       console.log('videofont:', JSON.stringify(await page.evaluate(`(() => window.videoFontProbe('zara'))()`)));
     }
-    if (!probeOnly) {
+    if (!probeOnly || process.argv.includes('shot')) {
       const result = (await page.evaluate(([n, stamp]) => window.matrixCase(n as string, stamp as number, true), [name, t] as [string, number])) as unknown as Record<string, unknown>;
       const b = result.browser as { segments: unknown; words: unknown; animationCount: number };
       console.log('segments:', JSON.stringify(b.segments));
       console.log('anims:', b.animationCount);
       console.log('takumi:', 'png' in (result.takumi as object) ? 'png ok' : JSON.stringify(result.takumi));
+      if (process.argv.includes('shot')) {
+        await page.evaluate(`(() => { document.getElementById('matrix-probe').style.visibility = 'visible'; })()`);
+        const el = page.locator('#matrix-probe');
+        await el.screenshot({ path: `compare/matrix/probe-${name}-t${t}.png` });
+        console.log('probe screenshot saved');
+      }
       const dom = await page.evaluate(`(() => {
         const out = [];
         for (const sel of ['.tscaps-takumi-caption', '.tscaps-takumi-hrow', '.segment']) {
