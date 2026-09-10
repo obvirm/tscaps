@@ -440,12 +440,15 @@ export function buildGalleryStyle(
   // Pepper's narrated-word pill is an absolutely-positioned ::before with
   // empty content — two things Takumi drops (proven by probe: empty
   // content generates no box at all, and absolute pseudos never paint).
-  // The same visual as a word background: padding expands it, negative
-  // margins pull layout back exactly, radius follows, and backgrounds
-  // always paint under text (no z-index needed). The 0.16s grow pop is
-  // lost; steady states are identical.
+  // Same visual as a box-shadow spread: it expands around the word without
+  // touching layout at all, which matters because Takumi ADDS the absolute
+  // value of negative margins to boxes (proven: -10px margins widen by
+  // +40px), so the padding-plus-negative-margin equivalent is unusable.
+  // Radius follows the shadow; template vars reused so controls work.
+  // The 0.16s grow pop and the few px of vertical padding mismatch are
+  // lost; steady states match.
   const pillFix = takumi && name === 'pepper'
-    ? '\n.word-being-narrated{padding:var(--tscaps-highlight-bg-padding-y, 0.08em) var(--tscaps-highlight-bg-padding-x, 0.2em);margin:calc(var(--tscaps-highlight-bg-padding-y, 0.08em) * -1) calc(var(--tscaps-highlight-bg-padding-x, 0.2em) * -1);background:var(--tscaps-highlight-bg-color, #cb5a2a);border-radius:var(--tscaps-highlight-bg-radius, 0.16em);}\n.word-being-narrated::before{display:none;}'
+    ? '\n.word-being-narrated{box-shadow:0 0 0 var(--tscaps-highlight-bg-padding-x, 0.2em) var(--tscaps-highlight-bg-color, #cb5a2a);border-radius:var(--tscaps-highlight-bg-radius, 0.16em);}\n.word-being-narrated::before{display:none;}'
     : '';
   const baked = takumi
     ? foldMaxMin(`${px(rawCss)}\n${galleryTakumiFallbackCss(name, fontPx)}\n${galleryClipTextFallback(name)}${galleryStrokeLayerCss(name)}${tableFix}${pillFix}`).replace(

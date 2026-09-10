@@ -28,7 +28,7 @@ try {
     const name = process.argv[2] ?? 'loki';
     const t = Number(process.argv[3] ?? '1.5');
     const probeOnly = process.argv[4] ?? '';
-    const probeName = probeOnly === 'nyxprobe' ? 'nyxWidthProbe' : probeOnly === 'bisect' ? 'nodeBisectProbe' : probeOnly === 'font' ? 'fontLoadProbe' : probeOnly === 'split' ? 'splitProbe' : probeOnly === 'fo' ? 'foProbe' : 'nodeBisectProbe';
+    const probeName = probeOnly === 'nyxprobe' ? 'nyxWidthProbe' : probeOnly === 'bisect' ? 'nodeBisectProbe' : probeOnly === 'font' ? 'fontLoadProbe' : probeOnly === 'split' ? 'splitProbe' : probeOnly === 'fo' ? 'foProbe' : probeOnly === 'pill' ? 'pepperPillProbe' : probeOnly === 'node' ? 'matrixNode' : probeOnly === 'pillbox' ? 'pillBoxProbe' : 'nodeBisectProbe';
     if (probeOnly === 'vfont') {
       console.log('videofont:', JSON.stringify(await page.evaluate(`(() => window.videoFontProbe('zara'))()`)));
     }
@@ -64,8 +64,9 @@ try {
     mkdirSync('compare/matrix', { recursive: true });
     for (const [key, bytes] of Object.entries(layers)) {
       if (key === 'nodeLen') { console.log('nodeLen:', bytes); continue; }
+      if (typeof bytes === 'number') { console.log(`${key}: ${bytes}`); continue; }
       writeFileSync(`compare/matrix/dbg-loki-${key}.png`, Buffer.from(bytes));
-      console.log(key, bytes.length);
+      console.log(key, (bytes as number[]).length);
     }
   } finally {
     await browser.close();

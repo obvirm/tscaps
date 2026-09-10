@@ -37,6 +37,7 @@ declare global {
     splitProbe(): Promise<Record<string, number[]>>;
     vt323Probe(): Promise<Record<string, number[]>>;
     nodeBisectProbe(): Promise<Record<string, number[]>>;
+    pillBoxProbe(): Promise<Record<string, number>>;
     fontLoadProbe(name: string): Promise<Record<string, string>>;
     videoFontProbe(name: string): Promise<Record<string, number>>;
     nyxWidthProbe(): Promise<Record<string, number[]>>;
@@ -1330,15 +1331,230 @@ window.pepperPillProbe = async () => {
     strokeEmPO: '.t{-webkit-text-stroke:0.12em black;paint-order:stroke fill;}',
     strokePxPO: '.t{-webkit-text-stroke:6px black;paint-order:stroke fill;}',
     strokeNone: '.t{}',
+    // Anton PLACE at pepper size: fontTools says ~120px ink. Fallback?
+    antonPlace: '.t{font-family:"Anton",sans-serif;font-size:51px;letter-spacing:0.02em;}',
+    // Negative margins + border-radius support.
+    negMargin: '.t .w2{margin-left:-20px;background:#ff0000;}',
+    radiusBox: '.t .w2{background:#ff0000;border-radius:20px;}',
+    squareBox: '.t .w2{background:#ff0000;}',
   })) {
     const png = await render(mnode, { width: 720, height: 200, css: [mroot, css] });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out[key] = [...bytes];
+  }
+  // Pill anatomy with VERIFIED font + literal vs var padding. Anton WITH
+  // at 51px ≈ 99px ink; padding 0.2em = 10px each side.
+  // (Background-extent questions moved to pillBoxProbe below.)
+  const pnode = `<div class="tscaps-takumi-root"><span class="t">ab <span class="w2">WITH</span> cd</span></div>`;
+  const pbase = '.tscaps-takumi-root{width:720px;height:200px;} .t{font-size:51px;color:#fff;font-family:"Anton",sans-serif;} .w2{display:inline-block;';
+  for (const [key, rule] of Object.entries({
+    pillLit: 'padding:4px 10px;margin:-4px -10px;background:#ff0000;',
+    pillVar: 'padding:0.08em 0.2em;margin:calc(0.08em * -1) calc(0.2em * -1);background:#ff0000;',
+    pillVarInline: 'padding:var(--py,0.08em) var(--px,0.2em);margin:calc(var(--py,0.08em) * -1) calc(var(--px,0.2em) * -1);background:#ff0000;',
+  })) {
+    const png = await render(pnode, {
+      width: 720,
+      height: 200,
+      css: [`${pbase}${rule}}`],
+      ...(font.fonts === undefined ? {} : { fonts: font.fonts as never[] }),
+    });
     const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
     out[key] = [...bytes];
   }
   return out;
 };
 
-// Returns the exact node string the matrix feeds Takumi (for diffing).
+// Clean Takumi-vs-DOM box comparison on one synthetic node: the word box
+// (offsetWidth) in live DOM vs the painted background box in Takumi PNG,
+// with and without fonts. All numbers fresh, no shared mutable state.
+window.pillBoxProbe = async () => {
+  const font = await matrixFonts('pepper');
+  const cssText = '.tscaps-takumi-root{width:720px;height:200px;} .t{font-size:51px;color:#fff;font-family:"Anton",sans-serif;} .w2{display:inline-block;padding:4px 10px;margin:-4px -10px;background:#ff0000;}';
+  const nodeText = `<div class="tscaps-takumi-root"><span class="t">ab <span class="w2">WITH</span> cd</span></div>`;
+  const out: Record<string, number> = {};
+  // Live DOM: border-box of .w2 (includes padding, excludes margins).
+  const host = document.createElement('div');
+  host.setAttribute('style', 'position:fixed;left:0;top:0;visibility:hidden;');
+  host.innerHTML = nodeText;
+  const styleEl = document.createElement('style');
+  styleEl.textContent = cssText;
+  document.body.appendChild(styleEl);
+  document.body.appendChild(host);
+  void host.offsetHeight;
+  const w2 = host.querySelector('.w2') as HTMLElement;
+  out.domBox = Math.round(w2.getBoundingClientRect().width);
+  styleEl.remove();
+  host.remove();
+  // Pill without any negative margin: box-shadow spread (layout-neutral)
+  // vs outline (layout-neutral) vs padding-only (layout shifts).
+  const variants2: Record<string, { css: string; node: string }> = {
+    shadowPill: {
+      css: '.tscaps-takumi-root{width:720px;height:200px;} .t{font-size:51px;color:#fff;font-family:"Anton",sans-serif;} .w2{display:inline-block;box-shadow:0 0 0 10px #ff0000;border-radius:8px;}',
+      node: nodeText,
+    },
+    outlinePill: {
+      css: '.tscaps-takumi-root{width:720px;height:200px;} .t{font-size:51px;color:#fff;font-family:"Anton",sans-serif;} .w2{display:inline-block;outline:10px solid #ff0000;border-radius:8px;}',
+      node: nodeText,
+    },
+    // Pure geometry, zero font dependence: 100x50 red box + 10px spread.
+    spreadGeom: {
+      css: '.tscaps-takumi-root{width:720px;height:200px;} .box{position:absolute;left:100px;top:50px;width:100px;height:50px;background:#ff0000;box-shadow:0 0 0 10px #00ff00;}',
+      node: `<div class="tscaps-takumi-root"><div class="box"></div></div>`,
+    },
+  };
+  // Takumi PNG: background box width across css variants.
+  const variants: Record<string, { css: string; node: string }> = {
+    base: { css: cssText, node: nodeText },
+    noMargin: { css: cssText.replace('margin:-4px -10px;', 'margin:0;'), node: nodeText },
+    noPad: { css: cssText.replace('padding:4px 10px;', 'padding:0;'), node: nodeText },
+    noSpace: {
+      css: cssText,
+      node: nodeText.replace('ab <span', 'ab<span').replace('</span> cd', '</span>cd'),
+    },
+  };
+  // Takumi PNG: background box width across css/node variants.
+  const boxOf = async (node: string, css: string, useFonts: boolean): Promise<number> => {
+    const png = await render(node, {
+      width: 720,
+      height: 200,
+      css: [css],
+      ...(useFonts && font.fonts !== undefined ? { fonts: font.fonts as never[] } : {}),
+    });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    const im = await createImageBitmap(new Blob([bytes as unknown as BlobPart], { type: 'image/png' }));
+    const canvas = document.createElement('canvas');
+    canvas.width = 720;
+    canvas.height = 200;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+    ctx.drawImage(im, 0, 0);
+    const data = ctx.getImageData(0, 0, 720, 200).data;
+    let x0 = 720;
+    let x1 = 0;
+    let y0 = 200;
+    let y1 = 0;
+    for (let x = 0; x < 720; x++) {
+      for (let y = 0; y < 200; y++) {
+        const i = (y * 720 + x) * 4;
+        if (data[i]! > 150 && data[i + 1]! < 110 && data[i + 2]! < 110 && data[i + 3]! > 100) {
+          if (x < x0) x0 = x;
+          if (x > x1) x1 = x;
+          if (y < y0) y0 = y;
+          if (y > y1) y1 = y;
+        }
+      }
+    }
+    return (x1 - x0 + 1) * 1000 + (y1 - y0 + 1);
+  };
+  for (const [key, v] of Object.entries(variants)) {
+    out[`${key}Box`] = await boxOf(v.node, v.css, true);
+  }
+  for (const [key, v] of Object.entries(variants2)) {
+    out[`${key}Box`] = await boxOf(v.node, v.css, true);
+  }
+  // word-spacing on the parent as a margin replacement for gaps.
+  {
+    const node = `<div class="tscaps-takumi-root"><div class="ln"><span class="w">aa</span> <span class="w">bb</span></div></div>`;
+    const base = '.tscaps-takumi-root{width:720px;height:200px;} .ln{display:block;';
+    const w = '.w{display:inline-block;background:#ff0000;}';
+    for (const [key, extra] of Object.entries({
+      wsMargin: '}',
+      wsWord: 'word-spacing:20px;}',
+    })) {
+      const png = await render(node, {
+        width: 720,
+        height: 200,
+        css: [`${base}${extra} ${w}`],
+        ...(font.fonts === undefined ? {} : { fonts: font.fonts as never[] }),
+      });
+      const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+      const im = await createImageBitmap(new Blob([bytes as unknown as BlobPart], { type: 'image/png' }));
+      const canvas = document.createElement('canvas');
+      canvas.width = 720;
+      canvas.height = 200;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
+      ctx.drawImage(im, 0, 0);
+      const data = ctx.getImageData(0, 0, 720, 200).data;
+      let x0 = 720;
+      let x1 = 0;
+      for (let x = 0; x < 720; x++) {
+        for (let y = 0; y < 200; y++) {
+          const i = (y * 720 + x) * 4;
+          if (data[i]! > 150 && data[i + 1]! < 110 && data[i + 2]! < 110 && data[i + 3]! > 100) {
+            if (x < x0) x0 = x;
+            if (x > x1) x1 = x;
+          }
+        }
+      }
+      out[`${key}Gap`] = x1 - x0 + 1;
+    }
+  }
+  // Spread + real margins (the pepper word condition).
+  {
+    const css = '.tscaps-takumi-root{width:720px;height:200px;} .t{font-size:51px;color:#fff;font-family:"Anton",sans-serif;} .w2{display:inline-block;margin:0 8px;box-shadow:0 0 0 10px #ff0000;border-radius:8px;}';
+    const node = `<div class="tscaps-takumi-root"><span class="t">ab <span class="w2">WITH</span> cd</span></div>`;
+    out.spreadMarginsBox = await boxOf(node, css, true);
+  }
+  // box-shadow spread via var() (literal vs fallback vs inline value).
+  const svarNode = `<div class="tscaps-takumi-root"><span class="t">ab <span class="w2">WITH</span> cd</span></div>`;
+  const svarBase = '.tscaps-takumi-root{width:720px;height:200px;} .t{font-size:51px;color:#fff;font-family:"Anton",sans-serif;} .w2{display:inline-block;border-radius:8px;';
+  for (const [key, rule] of Object.entries({
+    svarLit: 'box-shadow:0 0 0 10px #ff0000;}',
+    svarVar: 'box-shadow:0 0 0 var(--sp,10px) #ff0000;}',
+    svarVarInline: 'box-shadow:0 0 0 var(--sp,10px) #ff0000;--sp:10px;}',
+    svarNoRadius: 'box-shadow:0 0 0 10px #ff0000;border-radius:0;}',
+  })) {
+    out[`${key}Box`] = await boxOf(svarNode, `${svarBase}${rule}`, true);
+  }
+  // Margin/space inclusion in background boxes, font verified by pair.
+  // Anton WITH at 51px ≈ 94px ink; box-shadow spread makes the extent
+  // visible without padding confounding it.
+  const marginTrials: Record<string, { css: string; node: string }> = {
+    mBase: {
+      css: '.tscaps-takumi-root{width:720px;height:200px;} .t{font-size:51px;color:#fff;font-family:"Anton",sans-serif;} .w2{display:inline-block;background:#ff0000;}',
+      node: `<div class="tscaps-takumi-root"><span class="t">ab <span class="w2">WITH</span> cd</span></div>`,
+    },
+    mMargins: {
+      css: '.tscaps-takumi-root{width:720px;height:200px;} .t{font-size:51px;color:#fff;font-family:"Anton",sans-serif;} .w2{display:inline-block;margin:0 8px;background:#ff0000;}',
+      node: `<div class="tscaps-takumi-root"><span class="t">ab <span class="w2">WITH</span> cd</span></div>`,
+    },
+  };
+  for (const [key, tv] of Object.entries(marginTrials)) {
+    for (const useFonts of [true, false]) {
+      out[`${key}${useFonts ? '' : 'NoFonts'}`] = await boxOf(tv.node, tv.css, useFonts);
+    }
+  }
+  // Also stash one PNG to eyeball wrapping.
+  {
+    const png = await render(
+      `<div class="tscaps-takumi-root"><span class="t">ab <span class="w2">WITH</span> cd</span></div>`,
+      {
+        width: 720,
+        height: 200,
+        css: ['.tscaps-takumi-root{width:720px;height:200px;} .t{font-size:51px;color:#fff;font-family:"Anton",sans-serif;} .w2{display:inline-block;margin:0 8px;background:#ff0000;}'],
+        ...(font.fonts === undefined ? {} : { fonts: font.fonts as never[] }),
+      },
+    );
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    (out as unknown as Record<string, number[]>)['mMarginsPng'] = [...bytes];
+  }
+  // Same Anton render three times in a row, fresh page: does the FIRST
+  // render fall back (cold font race) while later ones apply Anton?
+  {
+    const node = `<div class="tscaps-takumi-root"><span class="t">Pack my box with five dozen liquor jugs!</span></div>`;
+    const css = `.tscaps-takumi-root{width:720px;height:200px;} .t{font-family:"Anton",sans-serif;font-size:44px;color:#fff;white-space:nowrap;}`;
+    for (let i = 0; i < 3; i++) {
+      const png = await render(node, {
+        width: 720,
+        height: 200,
+        css: [css],
+        ...(font.fonts === undefined ? {} : { fonts: font.fonts as never[] }),
+      });
+      const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+      out[`raceLen${i}`] = bytes.length;
+    }
+  }
+  return out;
+};
 window.matrixNode = async (name: string, t: number): Promise<string> => {
   const doc = getMatrixDoc();
   const style = buildGalleryStyle(name, 720, 1280);
