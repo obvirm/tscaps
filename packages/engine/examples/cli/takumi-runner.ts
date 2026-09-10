@@ -32,6 +32,7 @@ declare global {
     centerProbe(): Promise<Record<string, number[]>>;
     maxProbe(): Promise<Record<string, number[]>>;
     foProbe(): Promise<Record<string, number[]>>;
+    pepperPillProbe(): Promise<Record<string, number[]>>;
     scopedProbe(): Promise<Record<string, string>>;
     splitProbe(): Promise<Record<string, number[]>>;
     vt323Probe(): Promise<Record<string, number[]>>;
@@ -1280,6 +1281,54 @@ window.foProbe = async () => {
   ctx.drawImage(img, 0, 0);
   const blob: Blob = await new Promise((resolve) => canvas.toBlob((b) => resolve(b!), 'image/png'));
   out.foreignObject = [...new Uint8Array(await blob.arrayBuffer())];
+  return out;
+};
+
+// Pepper narrated-word pill: which part of the ::before rule breaks it?
+// Synthetic node, full pepper Takumi css, word mid-narration.
+window.pepperPillProbe = async () => {
+  const font = await matrixFonts('pepper');
+  const styleT = buildGalleryStyle('pepper', 720, 1280, { takumi: true, hasItalic: font.hasItalic });
+  const node = `<div class="tscaps-takumi-root"><div class="tscaps-takumi-layer"><div class="tscaps-takumi-caption"><div class="segment" style="--on-segment-starts:-1.5s;"><div class="line" style="direction:ltr;"><span class="word">PACK</span> <span class="word word-being-narrated" style="--on-word-being-narrated-starts:-0.5s;--word-being-narrated-duration:0.5s;">MY</span> <span class="word">BOX</span></div></div></div></div></div>`;
+  const variants: Record<string, string> = {
+    full: '',
+    noAnim: '.word-being-narrated::before{animation:none !important;}',
+    noZindex: '.word-being-narrated::before{animation:none !important;z-index:auto !important;}',
+    noIsolation: '.segment{isolation:auto !important;} .word-being-narrated::before{animation:none !important;}',
+    staticBox: '.word-being-narrated::before{animation:none !important;position:static !important;display:inline-block !important;width:40px !important;height:40px !important;}',
+  };
+  const out: Record<string, number[]> = {};
+  for (const [key, extra] of Object.entries(variants)) {
+    const png = await render(node, {
+      width: 720,
+      height: 1280,
+      css: [styleT.css, extra],
+      timeMs: 1500,
+      ...(font.fonts === undefined ? {} : { fonts: font.fonts as never[] }),
+    });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out[key] = [...bytes];
+  }
+  // Minimal ::before matrix: empty vs non-empty content, plain vs class.
+  const mnode = `<div class="tscaps-takumi-root"><span class="t">Hi <span class="w2">Yo</span> Oy</span></div>`;
+  const mroot = '.tscaps-takumi-root{width:720px;height:200px;} .t{font-size:48px;color:#fff;} .w2{display:inline-block;}';
+  for (const [key, css] of Object.entries({
+    beEmpty: '.t::before{content:"";display:block;width:40px;height:40px;background:#ff0000;}',
+    beX: '.t::before{content:"X";display:block;width:40px;height:40px;background:#ff0000;}',
+    beXInline: '.t::before{content:"X";background:#ff0000;}',
+    beSpace: '.t::before{content:" ";display:block;width:40px;height:40px;background:#ff0000;}',
+    beSpaceAbs: '.t{position:relative;} .t::before{content:" ";position:absolute;inset:-4px;background:#ff0000;z-index:-1;}',
+    beSpaceAbsNoZ: '.t{position:relative;} .t::before{content:" ";position:absolute;inset:-4px;background:#ff0000;}',
+    beAbsExplicit: '.t{position:relative;} .t::before{content:" ";position:absolute;top:-4px;left:-4px;width:60px;height:60px;background:#ff0000;}',
+    beRelBox: '.t::before{content:" ";position:relative;display:inline-block;width:40px;height:40px;background:#ff0000;}',
+    // Pill-as-background: padding expands the bg, negative margins pull
+    // layout back, radius follows. No pseudo, no absolute, no z-index.
+    bgPill: '.t .w2{padding:4px 10px;margin:-4px -10px;background:#ff0000;border-radius:8px;}',
+  })) {
+    const png = await render(mnode, { width: 720, height: 200, css: [mroot, css] });
+    const bytes = png instanceof Uint8Array ? png : new Uint8Array(png);
+    out[key] = [...bytes];
+  }
   return out;
 };
 

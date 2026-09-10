@@ -405,8 +405,18 @@ export function buildGalleryStyle(
   const tableFix = takumi && name === 'ivo'
     ? '\n.line{display:block;width:max-content;max-width:100%;}'
     : '';
+  // Pepper's narrated-word pill is an absolutely-positioned ::before with
+  // empty content — two things Takumi drops (proven by probe: empty
+  // content generates no box at all, and absolute pseudos never paint).
+  // The same visual as a word background: padding expands it, negative
+  // margins pull layout back exactly, radius follows, and backgrounds
+  // always paint under text (no z-index needed). The 0.16s grow pop is
+  // lost; steady states are identical.
+  const pillFix = takumi && name === 'pepper'
+    ? '\n.word-being-narrated{padding:var(--tscaps-highlight-bg-padding-y, 0.08em) var(--tscaps-highlight-bg-padding-x, 0.2em);margin:calc(var(--tscaps-highlight-bg-padding-y, 0.08em) * -1) calc(var(--tscaps-highlight-bg-padding-x, 0.2em) * -1);background:var(--tscaps-highlight-bg-color, #cb5a2a);border-radius:var(--tscaps-highlight-bg-radius, 0.16em);}\n.word-being-narrated::before{display:none;}'
+    : '';
   const baked = takumi
-    ? foldMaxMin(`${px(rawCss)}\n${galleryTakumiFallbackCss(name, fontPx)}\n${galleryClipTextFallback(name)}${tableFix}`).replace(
+    ? foldMaxMin(`${px(rawCss)}\n${galleryTakumiFallbackCss(name, fontPx)}\n${galleryClipTextFallback(name)}${tableFix}${pillFix}`).replace(
       /(\banimation\s*:[^;}]*?)\bboth\b/g,
       // Ended `both`-fill animations break descendant box painting in
       // Takumi (proven by probe: accent backgrounds vanish while text
